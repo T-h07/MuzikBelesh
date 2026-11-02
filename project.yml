@@ -67,6 +67,8 @@ targets:
         TARGETED_DEVICE_FAMILY: '1'
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: OFFLINEShareExtension/Info.plist
     dependencies: []
 schemes:
   OFFLINE:
