@@ -2,7 +2,7 @@ import SwiftUI
 struct DiagnosticsView: View {
     @StateObject var viewModel: DiagnosticsViewModel
     var body: some View { ScrollView { VStack(alignment: .leading, spacing: 18) {
-        Text("OFFLINE").font(.system(size: 38, weight: .bold)).foregroundStyle(.white)
+        Text("Muzik Belesh").font(.system(size: 38, weight: .bold)).foregroundStyle(.white)
         Text("Phase 0 — Foundation & Feasibility").foregroundStyle(Color.lime)
         Divider().overlay(.gray)
         status("Launch", "Successful"); status("Version", "\(viewModel.container.configuration.version) (\(viewModel.container.configuration.build))")

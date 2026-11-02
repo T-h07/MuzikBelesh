@@ -10,7 +10,7 @@ final class ShareViewController: SLComposeServiceViewController {
             let url: URL? = item as? URL ?? (item as? String).flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
             DispatchQueue.main.async {
                 let supported = url.flatMap(SharedURLHandler.youtubeURL) != nil
-                let alert = UIAlertController(title: supported ? "OFFLINE" : "Unsupported URL", message: supported ? "YouTube URL received. Copy-link fallback is available." : "No supported YouTube URL received.", preferredStyle: .alert)
+                let alert = UIAlertController(title: supported ? "Muzik Belesh" : "Unsupported URL", message: supported ? "YouTube URL received. Copy-link fallback is available." : "No supported YouTube URL received.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in self?.finish() })
                 self?.present(alert, animated: true)
             }

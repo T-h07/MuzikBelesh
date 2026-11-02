@@ -1,10 +1,12 @@
 name: Build unsigned IPA
 on:
   workflow_dispatch:
-  push: {branches: [feature/phase-00-foundation]}
-permissions:
-  contents: read
-  actions: write
+  push:
+    branches: ['feature/**']
+concurrency:
+  group: unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+permissions: {contents: read}
 jobs:
   package:
     runs-on: macos-15
@@ -23,7 +25,7 @@ jobs:
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: OFFLINE-Phase0-unsigned-IPA
+          name: OFFLINE-unsigned-IPA
           path: build/ipa/OFFLINE-unsigned.ipa
           if-no-files-found: error
 

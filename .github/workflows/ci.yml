@@ -1,8 +1,11 @@
 name: CI
 on:
   pull_request: {branches: [develop]}
-  push: {branches: [develop, feature/phase-00-foundation]}
+  push: {branches: [develop]}
   workflow_dispatch:
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions: {contents: read}
 jobs:
   build-and-test:

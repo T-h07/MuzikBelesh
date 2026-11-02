@@ -63,7 +63,7 @@ targets:
     info:
       path: OFFLINEShareExtension/Info.plist
       properties:
-        CFBundleDisplayName: OFFLINE
+        CFBundleDisplayName: Muzik Belesh
         CFBundlePackageType: 'XPC!'
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
