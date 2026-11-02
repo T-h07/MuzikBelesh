@@ -21,6 +21,8 @@ The CI build passed 22 tests and the unsigned IPA build passed. The IPA contains
 
 The responsive UI correction uses a safe-area inset for the mini-player instead of a tab-bar offset, separates its navigation and transport hit regions, and sizes Now Playing artwork from the available geometry. Home shortcuts use adaptive columns, and imported library rows retain 44-point actions with truncation for long filenames.
 
+The app now declares `UILaunchScreen` in both the XcodeGen source configuration and the checked-in source plist. The IPA packaging script verifies the compiled launch-screen key, `Assets.car`, and the embedded Share extension. Build number `2` is used for the device re-test; the bundle identifier remains unchanged so an in-place update can retain user data.
+
 ## Required re-test on iPhone 13 Pro Max
 
 Install artifact `OFFLINE-unsigned-IPA` from the [unsigned IPA workflow](https://github.com/T-h07/MuzikBelesh/actions/runs/41539143347), preserving the existing app data. Record each result as PASS, FAIL, or NOT RUN:
