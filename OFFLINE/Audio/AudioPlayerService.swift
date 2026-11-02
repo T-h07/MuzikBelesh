@@ -81,7 +81,7 @@ final class AudioPlayerService: ObservableObject {
     private func removeItemObservers() { statusObserver?.invalidate(); statusObserver = nil; if let endObserver { NotificationCenter.default.removeObserver(endObserver); self.endObserver = nil } }
     private func updateContext(with id: String) { if !context.trackIDs.contains(id) { context.trackIDs.append(id) }; context = context.settingCurrent(id); state.canSkipNext = context.nextID != nil; state.canSkipPrevious = context.previousID != nil }
     private func publish(track: StoredTrack) { let artwork = track.artworkRelativePath.flatMap { try? storage?.paths.artworkURL(relativePath: $0) }.flatMap { try? Data(contentsOf: $0) }; nowPlaying.update(state: state, track: track, artist: storage?.artistName(for: track.artistID), album: storage?.albumTitle(for: track.albumID), artworkData: artwork); state.currentOutputRoute = session.outputRouteName }
-    private func publishCurrent() { guard let id = state.currentTrackID, let track = try? storage?.tracks.find(id: id), let track else { return }; publish(track: track) }
+    private func publishCurrent() { guard let storage, let id = state.currentTrackID, let track = try? storage.tracks.find(id: id) else { return }; publish(track: track) }
     private func persist() { persistence.save(state: state) }
     private func fail(_ message: String) { player.pause(); state.status = .failed(message: message); state.lastError = message; publishCurrent(); persist() }
     private func handleRouteChange(route: String, reason: AVAudioSession.RouteChangeReason) { state.currentOutputRoute = route; if reason == .oldDeviceUnavailable && state.isPlaying { pause() }; publishCurrent() }

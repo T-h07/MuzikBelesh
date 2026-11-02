@@ -8,7 +8,7 @@ final class RemoteCommandCoordinator {
         center.playCommand.isEnabled = true; center.pauseCommand.isEnabled = true; center.togglePlayPauseCommand.isEnabled = true
         center.nextTrackCommand.isEnabled = true; center.previousTrackCommand.isEnabled = true; center.changePlaybackPositionCommand.isEnabled = true
         center.playCommand.addTarget { [weak service] _ in guard let service else { return .commandFailed }; Task { await service.playFromRemote() }; return .success }
-        center.pauseCommand.addTarget { [weak service] _ in service?.pause(); return .success }
+        center.pauseCommand.addTarget { [weak service] _ in guard service != nil else { return .commandFailed }; Task { @MainActor [weak service] in service?.pause() }; return .success }
         center.togglePlayPauseCommand.addTarget { [weak service] _ in guard let service else { return .commandFailed }; Task { await service.togglePlayback() }; return .success }
         center.nextTrackCommand.addTarget { [weak service] _ in guard let service else { return .commandFailed }; Task { await service.next() }; return .success }
         center.previousTrackCommand.addTarget { [weak service] _ in guard let service else { return .commandFailed }; Task { await service.previous() }; return .success }
