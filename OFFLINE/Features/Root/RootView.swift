@@ -12,7 +12,7 @@ struct RootView: View {
                 NavigationStack { DownloadsView() }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
             }
             .tint(AppColors.accentPrimary)
-            if container.playback.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.bottom, 49) }
+            if container.audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.bottom, 49) }
         }
         .preferredColorScheme(.dark)
         .sheet(item: $coordinator.sheet) { sheet in
@@ -36,7 +36,7 @@ struct TrackRow: View {
             Menu { TrackContextMenu(track: track) } label: { Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 32, height: 40) }.accessibilityLabel("More actions for \(track.title)")
         }
         .contentShape(Rectangle())
-        .onTapGesture { container.music.playRecorded(track.id); container.playback.select(track.id) }
+        .onTapGesture { }
         .contextMenu { TrackContextMenu(track: track) }
         .accessibilityIdentifier("track-row-\(track.id)")
     }
@@ -47,7 +47,7 @@ struct TrackContextMenu: View {
     @EnvironmentObject private var container: AppContainer
     let track: MockTrack
     var body: some View {
-        Button { container.playback.select(track.id) } label: { Label("Play Now", systemImage: "play.fill") }
+        Button {} label: { Label("Import local audio to play", systemImage: "waveform") }
         Button { container.playback.addToQueue(track.id) } label: { Label("Add to Queue", systemImage: "text.badge.plus") }
         Button { container.music.toggleLiked(track.id) } label: { Label(container.music.likedTrackIDs.contains(track.id) ? "Unlike" : "Like", systemImage: "heart") }
         Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
@@ -73,7 +73,8 @@ struct SearchBar: View {
 struct MiniPlayer: View {
     @EnvironmentObject private var container: AppContainer
     @ObservedObject var coordinator: AppCoordinator
-    var body: some View { if let id = container.playback.currentTrackID, let track = container.music.track(id) { HStack(spacing: AppSpacing.md) { ArtworkView(name: track.artwork, size: 42); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.artist).font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) }; Spacer(); Button { container.playback.togglePlayPause() } label: { Image(systemName: container.playback.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary) }.accessibilityLabel(container.playback.isPlaying ? "Pause" : "Play"); Button { container.playback.next() } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary) }.accessibilityLabel("Next track") }.padding(.horizontal, AppSpacing.md).padding(.vertical, 8).background(.ultraThinMaterial).contentShape(Rectangle()).onTapGesture { coordinator.showingNowPlaying = true }.accessibilityIdentifier("mini-player") } }
+    private var track: StoredTrack? { guard let storage = container.storage, let id = container.audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+    var body: some View { if let track { HStack(spacing: AppSpacing.md) { ArtworkView(name: "music-note", size: 42); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) }; Spacer(); Button { Task { await container.audioPlayer.togglePlayback() } } label: { Image(systemName: container.audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary) }.accessibilityLabel(container.audioPlayer.state.isPlaying ? "Pause" : "Play"); Button { Task { await container.audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary) }.accessibilityLabel("Next track") }.padding(.horizontal, AppSpacing.md).padding(.vertical, 8).background(.ultraThinMaterial).contentShape(Rectangle()).onTapGesture { coordinator.showingNowPlaying = true }.accessibilityIdentifier("mini-player") } }
 }
 
 struct ProgressRow: View {

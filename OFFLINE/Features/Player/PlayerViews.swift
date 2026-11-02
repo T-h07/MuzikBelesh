@@ -6,11 +6,11 @@ struct NowPlayingView: View {
     @ObservedObject var coordinator: AppCoordinator
     @State private var showingQueue = false
 
+    private var track: StoredTrack? { guard let storage = container.storage, let id = container.audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: AppSpacing.xl) {
-                content
-            }
+            VStack(spacing: AppSpacing.xl) { content }
             .padding(.horizontal, AppSpacing.xl)
             .padding(.bottom, AppSpacing.xxl)
             .navigationTitle("Now Playing")
@@ -22,28 +22,28 @@ struct NowPlayingView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if let id = container.playback.currentTrackID, let track = container.music.track(id) {
-            ArtworkView(name: track.artwork, size: 320).padding(.top, AppSpacing.xxl)
+        if let track {
+            ArtworkView(name: "music-note", size: 320).padding(.top, AppSpacing.xxl)
             VStack(spacing: AppSpacing.sm) {
                 Text(track.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary)
-                Text(track.artist).foregroundStyle(AppColors.textSecondary)
+                Text(track.originalFilename ?? "Local Music").foregroundStyle(AppColors.textSecondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Slider(value: Binding(get: { container.playback.position }, set: { container.playback.seek($0, duration: track.duration) }), in: 0...track.duration).tint(AppColors.accentPrimary)
-            HStack { Text("0:00"); Spacer(); Text(format(track.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
+            Slider(value: Binding(get: { container.audioPlayer.state.elapsedTime }, set: { value in Task { await container.audioPlayer.seek(to: value) } }), in: 0...max(container.audioPlayer.state.duration, 0.01)).tint(AppColors.accentPrimary).disabled(!container.audioPlayer.state.canSeek)
+            HStack { Text(format(container.audioPlayer.state.elapsedTime)); Spacer(); Text(format(container.audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
             HStack(spacing: 38) {
-                Button { container.playback.previous() } label: { Image(systemName: "backward.fill").font(.title2) }
-                Button { container.playback.togglePlayPause() } label: { Image(systemName: container.playback.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)) }
-                Button { container.playback.next() } label: { Image(systemName: "forward.fill").font(.title2) }
+                Button { Task { await container.audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2) }
+                Button { Task { await container.audioPlayer.togglePlayback() } } label: { Image(systemName: container.audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)) }
+                Button { Task { await container.audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2) }
             }.foregroundStyle(AppColors.textPrimary)
             HStack {
-                Button { container.playback.shuffleEnabled.toggle() } label: { Image(systemName: "shuffle").foregroundStyle(container.playback.shuffleEnabled ? AppColors.accentPrimary : AppColors.textSecondary) }
-                Spacer()
-                Button { coordinator.sheet = .sleepTimer } label: { Image(systemName: "timer").foregroundStyle(AppColors.textSecondary) }
+                Text(container.audioPlayer.state.currentOutputRoute).font(.caption).foregroundStyle(AppColors.textTertiary).lineLimit(1)
                 Spacer()
                 Button { showingQueue = true } label: { Image(systemName: "list.bullet").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Up Next")
             }
+            if case .failed(let message) = container.audioPlayer.state.status { Text(message).font(.caption).foregroundStyle(AppColors.error).multilineTextAlignment(.center) }
+            Text("Shuffle, repeat, and sleep timer arrive in Phase 4.").font(.caption2).foregroundStyle(AppColors.textTertiary).multilineTextAlignment(.center)
         } else {
-            EmptyState(icon: "music.note", title: "Nothing playing", message: "Choose a mock track first.")
+            EmptyState(icon: "music.note", title: "Nothing playing", message: "Import a local audio file from Library first.")
         }
     }
     private func format(_ seconds: TimeInterval) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }

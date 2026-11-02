@@ -36,6 +36,7 @@ targets:
         CFBundleVersion: '1'
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        UIBackgroundModes: [audio]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh
