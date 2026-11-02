@@ -33,9 +33,11 @@ targets:
       properties:
         CFBundleDisplayName: Muzik Belesh
         CFBundleShortVersionString: '0.1.0'
-        CFBundleVersion: '1'
+        CFBundleVersion: '3'
+        UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        UIBackgroundModes: [audio]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh

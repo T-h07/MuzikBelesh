@@ -11,3 +11,5 @@ SideStore installation was successfully completed on the developer's iPhone on N
 
 The installed bundle identifier included a SideStore-generated suffix; this is expected signing behavior and does not change the canonical project identifier `com.th07.muzikbelesh`. Free Apple Accounts normally require a seven-day refresh cycle and have limits on simultaneously installed sideloaded apps/App IDs. Exact limits vary by iOS/SideStore behavior. A Share extension has its own App ID and may require separate signing/entitlements. Phase 0 verified appearance and URL receipt, while automatic handoff remains deferred to Phase 8.
 
+The Phase 3 final unsigned IPA is accepted for in-place SideStore testing by developer-reported iPhone 13 Pro Max validation. Preserve the existing bundle identity and app container so imported music and SQLite data remain available. iOS may cache app icons after updates; verify the icon after installation.
+

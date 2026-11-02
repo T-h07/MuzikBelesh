@@ -13,5 +13,5 @@
 | 8 | iOS Share extension | `feature/phase-08-sharing` |
 | 9 | Integration, testing and v1.0 release | `feature/phase-09-release` |
 
-Phase 0 — **Completed — device-verified with documented Phase 8 limitation**. Phase 1 — **Completed — design system, four-tab navigation, mock stores, simulator/UI-test smoke coverage, and unsigned IPA verification**. Phase 2 — **Completed — GRDB persistence, Files-visible local music storage, import/export, duplicate detection, recovery foundations, and current-head CI/IPA verification**. Phase 3 and later remain unimplemented.
+Phase 0 — **Complete**. Phase 1 — **Complete**. Phase 2 — **Complete**. Phase 3 — **Complete — native AVPlayer playback, local MP3/M4A importing, seeking, background audio, Lock Screen and headphone controls, responsive iPhone layout, app icon, and basic Previous/Next with automatic advancement accepted by developer-reported iPhone 13 Pro Max validation**. Phase 4 — **Not started**: persistent editable Up Next, advanced Shuffle, Repeat Off/All/One, listening history, advanced session restoration, and Sleep Timer remain unimplemented.
 

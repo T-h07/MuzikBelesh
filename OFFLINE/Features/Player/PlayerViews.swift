@@ -3,16 +3,19 @@ import SwiftUI
 struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
     @State private var showingQueue = false
 
+    private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: AppSpacing.xl) {
-                content
+            GeometryReader { proxy in
+                ScrollView { VStack(spacing: proxy.size.height < 650 ? AppSpacing.md : AppSpacing.lg) { content(availableSize: proxy.size) }.frame(minHeight: proxy.size.height, alignment: .center).padding(.vertical, AppSpacing.md) }
             }
-            .padding(.horizontal, AppSpacing.xl)
-            .padding(.bottom, AppSpacing.xxl)
+            .padding(.horizontal, AppSpacing.lg)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: AppSpacing.sm) }
             .navigationTitle("Now Playing")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
@@ -21,32 +24,53 @@ struct NowPlayingView: View {
         }
     }
 
-    @ViewBuilder private var content: some View {
-        if let id = container.playback.currentTrackID, let track = container.music.track(id) {
-            ArtworkView(name: track.artwork, size: 320).padding(.top, AppSpacing.xxl)
+    @ViewBuilder private func content(availableSize: CGSize) -> some View {
+        if let track {
+            let artworkSize = min(availableSize.width, max(availableSize.width * 0.72, min(availableSize.width - 24, availableSize.height * 0.38)))
+            StoredArtworkView(track: track, size: artworkSize).frame(maxWidth: .infinity)
             VStack(spacing: AppSpacing.sm) {
-                Text(track.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary)
-                Text(track.artist).foregroundStyle(AppColors.textSecondary)
+                Text(track.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary).lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                Text(artistAndAlbum(for: track)).font(.body).foregroundStyle(AppColors.textSecondary).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Slider(value: Binding(get: { container.playback.position }, set: { container.playback.seek($0, duration: track.duration) }), in: 0...track.duration).tint(AppColors.accentPrimary)
-            HStack { Text("0:00"); Spacer(); Text(format(track.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
-            HStack(spacing: 38) {
-                Button { container.playback.previous() } label: { Image(systemName: "backward.fill").font(.title2) }
-                Button { container.playback.togglePlayPause() } label: { Image(systemName: container.playback.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)) }
-                Button { container.playback.next() } label: { Image(systemName: "forward.fill").font(.title2) }
+            PlaybackSlider(audioPlayer: audioPlayer)
+            HStack { Text(format(audioPlayer.state.elapsedTime)); Spacer(); Text(format(audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
+            HStack(spacing: availableSize.width < 360 ? 24 : 40) {
+                Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }.accessibilityLabel("Previous track")
+                Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)).frame(width: 64, height: 64) }.accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
+                Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }.accessibilityLabel("Next track")
             }.foregroundStyle(AppColors.textPrimary)
             HStack {
-                Button { container.playback.shuffleEnabled.toggle() } label: { Image(systemName: "shuffle").foregroundStyle(container.playback.shuffleEnabled ? AppColors.accentPrimary : AppColors.textSecondary) }
-                Spacer()
-                Button { coordinator.sheet = .sleepTimer } label: { Image(systemName: "timer").foregroundStyle(AppColors.textSecondary) }
+                Text(audioPlayer.state.currentOutputRoute).font(.caption).foregroundStyle(AppColors.textTertiary).lineLimit(1)
                 Spacer()
                 Button { showingQueue = true } label: { Image(systemName: "list.bullet").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Up Next")
             }
+            if case .failed(let message) = audioPlayer.state.status { Text(message).font(.caption).foregroundStyle(AppColors.error).multilineTextAlignment(.center) }
+            Text("Shuffle, repeat, and sleep timer arrive in Phase 4.").font(.caption2).foregroundStyle(AppColors.textTertiary).multilineTextAlignment(.center)
         } else {
-            EmptyState(icon: "music.note", title: "Nothing playing", message: "Choose a mock track first.")
+            EmptyState(icon: "music.note", title: "Nothing playing", message: "Import a local audio file from Library first.")
         }
     }
+    private func artistAndAlbum(for track: StoredTrack) -> String {
+        let artist = container.storage?.artistName(for: track.artistID)
+        let album = container.storage?.albumTitle(for: track.albumID)
+        return [artist, album].compactMap { $0 }.joined(separator: " • ").ifEmpty("Local Music")
+    }
     private func format(_ seconds: TimeInterval) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
+}
+
+private extension String {
+    func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
+}
+
+private struct PlaybackSlider: View {
+    @ObservedObject var audioPlayer: AudioPlayerService
+    @State private var draftPosition: TimeInterval?
+    var body: some View {
+        let duration = max(audioPlayer.state.duration, 0.01)
+        Slider(value: Binding(get: { draftPosition ?? audioPlayer.state.elapsedTime }, set: { draftPosition = min(max($0, 0), duration) }), in: 0...duration, onEditingChanged: { editing in
+            if !editing, let draftPosition { Task { await audioPlayer.seek(to: draftPosition) }; self.draftPosition = nil }
+        }).tint(AppColors.accentPrimary).disabled(!audioPlayer.state.canSeek)
+    }
 }
 
 struct QueueView: View {
