@@ -30,6 +30,8 @@ final class StorageCoordinator: ObservableObject {
     }
 
     func reload() { library = (try? tracks.all()) ?? [] }
+    func artistName(for id: String?) -> String? { guard let id else { return nil }; return try? database.dbQueue.read { try String.fetchOne($0, sql: "SELECT name FROM artists WHERE id = ?", arguments: [id]) } }
+    func albumTitle(for id: String?) -> String? { guard let id else { return nil }; return try? database.dbQueue.read { try String.fetchOne($0, sql: "SELECT title FROM albums WHERE id = ?", arguments: [id]) } }
 
     @discardableResult
     func importAudio(from source: URL) async throws -> ImportResult {
