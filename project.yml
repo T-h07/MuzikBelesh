@@ -53,6 +53,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.tests
         GENERATE_INFOPLIST_FILE: YES
+  OFFLINEUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '17.0'
+    sources: [Tests/UITests]
+    dependencies: [{target: OFFLINE}]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: OFFLINE
   OFFLINEShareExtension:
     type: app-extension
     platform: iOS
@@ -89,6 +100,6 @@ schemes:
         OFFLINETests: [test]
         OFFLINEShareExtension: all
     test:
-      targets: [OFFLINETests]
+      targets: [OFFLINETests, OFFLINEUITests]
       gatherCoverageData: false
 
