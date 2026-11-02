@@ -11,6 +11,7 @@ struct LibraryView: View {
 struct PlaylistDetailView: View {
     @EnvironmentObject private var container: AppContainer
     let playlistID: String
-    var body: some View { let playlist = container.music.playlists.first { $0.id == playlistID }; ScrollView { VStack(alignment: .leading, spacing: AppSpacing.lg) { if let playlist { ArtworkView(name: playlist.id, size: 220).frame(maxWidth: .infinity); Text(playlist.name).font(.title.bold()).foregroundStyle(AppColors.textPrimary); Text(playlist.description).foregroundStyle(AppColors.textSecondary); ForEach(playlist.trackIDs.compactMap { container.music.track($0) }) { TrackRow(track: $0) } } }.padding(AppSpacing.xl).padding(.bottom, 100) }.navigationTitle("Playlist").navigationBarTitleDisplayMode(.inline).screenBackground() }
+    @State private var showingEditor = false
+    var body: some View { let playlist = container.music.playlists.first { $0.id == playlistID }; ScrollView { VStack(alignment: .leading, spacing: AppSpacing.lg) { if let playlist { ArtworkView(name: playlist.id, size: 220).frame(maxWidth: .infinity); Text(playlist.name).font(.title.bold()).foregroundStyle(AppColors.textPrimary); Text(playlist.description).foregroundStyle(AppColors.textSecondary); ForEach(playlist.trackIDs.compactMap { container.music.track($0) }) { TrackRow(track: $0) } } }.padding(AppSpacing.xl).padding(.bottom, 100) }.navigationTitle("Playlist").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .primaryAction) { Button { showingEditor = true } label: { Image(systemName: "pencil") }.accessibilityLabel("Edit Playlist") } }.screenBackground().sheet(isPresented: $showingEditor) { PlaylistEditorView(playlistID: playlistID) } }
 }
 

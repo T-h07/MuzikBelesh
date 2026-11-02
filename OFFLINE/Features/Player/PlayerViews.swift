@@ -4,6 +4,7 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     @ObservedObject var coordinator: AppCoordinator
+    @State private var showingQueue = false
 
     var body: some View {
         NavigationStack {
@@ -16,6 +17,7 @@ struct NowPlayingView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
             .screenBackground()
+            .sheet(isPresented: $showingQueue) { NavigationStack { QueueView() } }
         }
     }
 
@@ -38,7 +40,7 @@ struct NowPlayingView: View {
                 Spacer()
                 Button { coordinator.sheet = .sleepTimer } label: { Image(systemName: "timer").foregroundStyle(AppColors.textSecondary) }
                 Spacer()
-                Button { dismiss() } label: { Image(systemName: "list.bullet").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Up Next")
+                Button { showingQueue = true } label: { Image(systemName: "list.bullet").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Up Next")
             }
         } else {
             EmptyState(icon: "music.note", title: "Nothing playing", message: "Choose a mock track first.")
