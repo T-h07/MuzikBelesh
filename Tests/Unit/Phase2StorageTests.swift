@@ -44,6 +44,15 @@ final class Phase2StorageTests: XCTestCase {
         XCTAssertEqual(hash.count, 64); XCTAssertEqual(hash, try service.sha256(url: source))
     }
 
+    func testExportPreservesManagedFileBytesAcrossCoordinatorReopen() throws {
+        let root = try temporaryDirectory(); let paths = try AppStoragePaths(root: root); let coordinator = try StorageCoordinator(paths: paths); let bytes = Data((0..<4096).map { UInt8($0 % 251) }); let managed = try paths.musicURL(relativePath: "stable.m4a"); try bytes.write(to: managed)
+        let now = Date(); let track = StoredTrack(id: "export-track", title: "Export Me", artistID: nil, albumID: nil, durationMs: nil, fileRelativePath: "stable.m4a", fileExtension: "m4a", fileSizeBytes: Int64(bytes.count), contentSHA256: try coordinator.audio.sha256(url: managed), artworkRelativePath: nil, availability: .available, dateAdded: now, dateModified: now, originalFilename: "source.m4a", metadataSource: "local_import")
+        try coordinator.tracks.save(track)
+        let reopened = try StorageCoordinator(paths: paths); let destination = paths.exports.appendingPathComponent("roundtrip.m4a"); try reopened.exportAudio(track: track, to: destination)
+        XCTAssertEqual(try Data(contentsOf: destination), bytes)
+        XCTAssertEqual(reopened.library.first?.id, "export-track")
+    }
+
     func testPlaylistMembershipPreservesOrderAndSettingsPersist() throws {
         let paths = try AppStoragePaths(root: try temporaryDirectory()); let manager = try DatabaseManager.live(paths: paths); let playlistRepo = GRDBPlaylistRepository(db: manager.dbQueue); let settings = GRDBSettingsRepository(db: manager.dbQueue); let now = Date()
         try playlistRepo.save(StoredPlaylist(id: "p1", name: "Road", description: nil, artworkRelativePath: nil, dateAdded: now, dateModified: now))
