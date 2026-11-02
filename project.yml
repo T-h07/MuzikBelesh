@@ -9,6 +9,9 @@ packages:
   YouTubeKit:
     url: https://github.com/alexeichhorn/YouTubeKit.git
     version: 0.4.10
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    version: 7.11.1
 settings:
   base:
     SWIFT_VERSION: 5.9
@@ -31,6 +34,8 @@ targets:
         CFBundleDisplayName: Muzik Belesh
         CFBundleShortVersionString: '0.1.0'
         CFBundleVersion: '1'
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh
@@ -42,13 +47,17 @@ targets:
         Release: {SWIFT_OPTIMIZATION_LEVEL: -O}
     dependencies:
       - package: YouTubeKit
+        product: GRDB
       - target: OFFLINEShareExtension
   OFFLINETests:
     type: bundle.unit-test
     platform: iOS
     deploymentTarget: '17.0'
     sources: [Tests/Unit, Tests/Fixtures]
-    dependencies: [{target: OFFLINE}]
+    dependencies:
+      - target: OFFLINE
+      - package: GRDB
+        product: GRDB
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.tests

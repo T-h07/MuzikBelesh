@@ -4,7 +4,7 @@ Muzik Belesh is a private, native iPhone music application designed to work with
 
 The foundation uses SwiftUI, Swift Package Manager, and XcodeGen. Windows is supported for editing, Git, and triggering remote builds; iOS compilation and simulator tests run on GitHub Actions macOS runners. The planned bundle identifier is `com.th07.muzikbelesh`.
 
-Phase 0 is complete and device-verified. Phase 1 adds the black/lime design system, four-tab SwiftUI presentation layer, reusable components, deterministic mock data, shared mock playback/download state, and simulator-tested UI navigation. Playback, persistence, real downloads, production YouTube discovery, and Share-to-app handoff remain deferred to later phases. This is not yet the complete music player.
+Phase 0 is complete and device-verified. Phase 1 adds the black/lime design system and four-tab SwiftUI presentation layer. Phase 2 adds GRDB-backed local persistence, Files-visible Music and Artwork directories, supported-audio import/export, metadata extraction, streaming hashes, duplicate detection, and recovery-aware storage. Production playback, network downloads, and Share-to-app handoff remain deferred; this is not yet the complete music player.
 
 ## Build
 
@@ -14,7 +14,7 @@ See [Docs/DEVELOPMENT.md](Docs/DEVELOPMENT.md), [Docs/BUILD_PIPELINE.md](Docs/BU
 
 ## Status
 
-Phase 0 physical evidence is recorded in [Docs/FEASIBILITY.md](Docs/FEASIBILITY.md). Phase 1 interface validation is simulator/UI-test based; no new physical-device claim is made.
+Phase 0 physical evidence is recorded in [Docs/FEASIBILITY.md](Docs/FEASIBILITY.md). Phase 2 storage validation is covered by isolated migration/repository tests and CI; physical Files import, relaunch, export, and SideStore checks remain device acceptance work.
 
 ## Documentation
 
