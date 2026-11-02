@@ -22,8 +22,8 @@ final class GRDBTrackRepository: TrackRepository {
     func find(id: String) throws -> StoredTrack? { try db.read { try StoredTrack.fetchOne($0, key: id) } }
     func find(contentSHA256: String) throws -> StoredTrack? { try db.read { try StoredTrack.filter(Column("contentSHA256") == contentSHA256).fetchOne($0) } }
     func save(_ track: StoredTrack) throws { try db.write { try track.save($0) } }
-    func updateAvailability(id: String, _ availability: StoredTrackAvailability) throws { try db.write { try db.execute(sql: "UPDATE tracks SET availability = ?, dateModified = ? WHERE id = ?", arguments: [availability.rawValue, Date(), id]) } }
-    func delete(id: String) throws { try db.write { try StoredTrack.deleteOne($0, key: id) } }
+    func updateAvailability(id: String, _ availability: StoredTrackAvailability) throws { try db.write { database in try database.execute(sql: "UPDATE tracks SET availability = ?, dateModified = ? WHERE id = ?", arguments: [availability.rawValue, Date(), id]) } }
+    func delete(id: String) throws { _ = try db.write { try StoredTrack.deleteOne($0, key: id) } }
 }
 
 final class GRDBPlaylistRepository: PlaylistRepository {
@@ -57,5 +57,5 @@ final class GRDBDownloadJobRepository: DownloadJobRepository {
     init(db: DatabaseQueue) { self.db = db }
     func all() throws -> [StoredDownloadJob] { try db.read { try StoredDownloadJob.order(Column("dateAdded").desc).fetchAll($0) } }
     func save(_ job: StoredDownloadJob) throws { try db.write { try job.save($0) } }
-    func markInterrupted() throws { try db.write { try db.execute(sql: "UPDATE download_jobs SET state = 'interrupted', dateModified = ? WHERE state IN ('queued', 'interrupted')", arguments: [Date()]) } }
+    func markInterrupted() throws { try db.write { database in try database.execute(sql: "UPDATE download_jobs SET state = 'interrupted', dateModified = ? WHERE state IN ('queued', 'interrupted')", arguments: [Date()]) } }
 }

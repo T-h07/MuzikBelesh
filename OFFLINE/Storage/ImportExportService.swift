@@ -58,7 +58,7 @@ final class StorageCoordinator: ObservableObject {
         let now = Date()
         let track = StoredTrack(id: id, title: metadata.title, artistID: artistID, albumID: albumID, durationMs: metadata.durationMs, fileRelativePath: relativeAudio, fileExtension: ext, fileSizeBytes: (try FileManager.default.attributesOfItem(atPath: stagingURL.path)[.size] as? NSNumber)?.int64Value ?? 0, contentSHA256: hash, artworkRelativePath: artworkRelative, availability: .available, dateAdded: now, dateModified: now, originalFilename: source.lastPathComponent, metadataSource: "local_import")
         try audio.copyStreaming(from: stagingURL, to: destination)
-        try database.dbQueue.write { db in
+        try await database.dbQueue.write { db in
             try operation.save(db)
             try track.save(db)
             if let artist = metadata.artist { try db.execute(sql: "INSERT OR IGNORE INTO artists (id, name, normalizedName, dateAdded, dateModified) VALUES (?, ?, ?, ?, ?)", arguments: [artistID!, artist, normalized(artist), now, now]) }
