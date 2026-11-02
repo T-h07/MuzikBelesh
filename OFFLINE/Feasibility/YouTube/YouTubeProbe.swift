@@ -10,7 +10,7 @@ struct YouTubeURLValidator {
     static func videoID(from input: String) -> String? {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.range(of: #"^[A-Za-z0-9_-]{11}$"#, options: .regularExpression) != nil { return value }
-        guard let components = URLComponents(string: value), let host = components.host?.lowercased() else { return nil }
+        guard let components = URLComponents(string: value), components.scheme?.lowercased() == "https", let host = components.host?.lowercased() else { return nil }
         if host == "youtu.be" { return components.path.split(separator: "/").first.map(String.init).flatMap(validID) }
         guard host == "youtube.com" || host.hasSuffix(".youtube.com") else { return nil }
         if let id = components.queryItems?.first(where: { $0.name == "v" })?.value { return validID(id) }
