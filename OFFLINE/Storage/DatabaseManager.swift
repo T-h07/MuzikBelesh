@@ -65,6 +65,17 @@ final class DatabaseManager {
             }
             try db.create(index: "track_sources_lookup", on: "track_sources", columns: ["sourceType", "sourceIdentifier"])
         }
+        migrator.registerMigration("v006_phase4_playback_state") { db in
+            try db.alter(table: "playback_state") { t in
+                t.add(column: "contextTrackIDsJSON", .text)
+                t.add(column: "shuffleOrderJSON", .text)
+                t.add(column: "shufflePosition", .integer)
+                t.add(column: "sleepTimerDeadlineMs", .integer)
+            }
+            try db.alter(table: "playback_queue_entries") { t in
+                t.add(column: "origin", .text).notNull().defaults(to: "addToQueue")
+            }
+        }
         try migrator.migrate(dbQueue)
     }
 

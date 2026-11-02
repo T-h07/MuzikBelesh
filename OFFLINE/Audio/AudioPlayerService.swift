@@ -11,6 +11,9 @@ final class AudioPlayerService: ObservableObject {
     private let remoteCommands = RemoteCommandCoordinator()
     private let routeMonitor = AudioRouteMonitor()
     private let persistence: PlaybackPersistenceCoordinator
+    let queue: PlaybackQueueManager
+    private let history: PlaybackHistoryService
+    let sleepTimer: SleepTimerService
     private let resolver: LocalAudioAssetResolver
     private weak var storage: StorageCoordinator?
     private var item: AVPlayerItem?
@@ -28,6 +31,15 @@ final class AudioPlayerService: ObservableObject {
         self.storage = storage
         resolver = LocalAudioAssetResolver(storage: storage)
         persistence = PlaybackPersistenceCoordinator(storage: storage)
+        queue = PlaybackQueueManager(storage: storage)
+        history = PlaybackHistoryService(storage: storage)
+        let savedDeadline: Date?
+        if let storage, let saved = (try? storage.playback.state()) ?? nil, let milliseconds = saved.sleepTimerDeadlineMs {
+            savedDeadline = Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1000)
+        } else { savedDeadline = nil }
+        sleepTimer = SleepTimerService(deadline: savedDeadline)
+        sleepTimer.onExpire = { [weak self] in self?.expireSleepTimer() }
+        sleepTimer.reconcile { [weak self] in self?.expireSleepTimer() }
         routeMonitor.onRouteChanged = { [weak self] route, reason in
             Task { @MainActor in self?.handleRouteChange(route: route, reason: reason) }
         }
@@ -35,7 +47,7 @@ final class AudioPlayerService: ObservableObject {
             Task { @MainActor in self?.handleInterruption(notification) }
         }
         refreshContext()
-        if let saved = persistence.restore(), let id = saved.currentTrackID { state.currentTrackID = id; state.elapsedTime = TimeInterval(saved.positionMs) / 1000; context = context.settingCurrent(id); state.canSkipNext = context.nextID != nil; state.canSkipPrevious = context.previousID != nil; let position = state.elapsedTime; Task { @MainActor [weak self] in await self?.restorePausedItem(trackID: id, position: position) } }
+        if let saved = persistence.restore(), let id = saved.currentTrackID { state.currentTrackID = id; state.elapsedTime = TimeInterval(saved.positionMs) / 1000; context = context.settingCurrent(id); updateSkipAvailability(); let position = state.elapsedTime; Task { @MainActor [weak self] in await self?.restorePausedItem(trackID: id, position: position) } }
         remoteCommands.register(service: self)
     }
 
@@ -54,9 +66,11 @@ final class AudioPlayerService: ObservableObject {
             let resolved = try resolver.resolve(trackID: trackID)
             try session.configure()
             updateContext(with: trackID)
+            queue.setCurrent(trackID)
             replaceItem(with: AVPlayerItem(url: resolved.url), trackID: trackID, track: resolved.track)
             player.play()
             state.status = .playing
+            history.started(trackID: trackID)
             state.lastError = nil
             publish(track: resolved.track)
             persist()
@@ -74,24 +88,24 @@ final class AudioPlayerService: ObservableObject {
     func playFromRemote() async { try? await play() }
     func pause() { player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
     func togglePlayback() async { if state.isPlaying { pause() } else { try? await play() } }
-    func stop() { player.pause(); player.replaceCurrentItem(with: nil); item = nil; state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
+    func stop() { player.pause(); player.replaceCurrentItem(with: nil); item = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
 
     func next() async {
         refreshContext()
-        while let id = context.nextID {
+        while let id = queue.nextID() {
             do { try await play(trackID: id); return }
             catch let error as AudioPlaybackError where error == .missingFile || error == .trackNotFound {
                 try? storage?.tracks.updateAvailability(id: id, .missing)
                 refreshContext()
             } catch { handleTransitionFailure(error); return }
         }
-        state.status = .ended; player.pause(); publishCurrent(); persist()
+        state.status = .ended; player.pause(); history.finish(duration: state.elapsedTime); publishCurrent(); persist()
     }
 
     func previous() async {
         refreshContext()
         if state.elapsedTime > 3 { await seek(to: 0); return }
-        while let id = context.previousID {
+        while let id = queue.previousID() {
             do { try await play(trackID: id); return }
             catch let error as AudioPlaybackError where error == .missingFile || error == .trackNotFound {
                 try? storage?.tracks.updateAvailability(id: id, .missing)
@@ -108,6 +122,7 @@ final class AudioPlayerService: ObservableObject {
         for track in tracks where track.availability == .available && !ids.contains(track.id) { ids.append(track.id) }
         context = PlaybackContext(trackIDs: ids, currentIndex: nil)
         if let currentID { context = context.settingCurrent(currentID) }
+        queue.setContext(ids, current: currentID)
         updateSkipAvailability()
     }
     func seek(to seconds: TimeInterval) async { guard state.canSeek else { return }; let bounded = min(max(seconds, 0), state.duration); state.isSeeking = true; await player.seek(to: CMTime(seconds: bounded, preferredTimescale: 600)); state.elapsedTime = bounded; state.isSeeking = false; publishCurrent(); persist() }
@@ -133,7 +148,8 @@ final class AudioPlayerService: ObservableObject {
     private func updateSkipAvailability() { state.canSkipNext = context.nextID != nil; state.canSkipPrevious = context.previousID != nil; remoteCommands.updateCapabilities(state: state) }
     private func publish(track: StoredTrack) { let artwork = track.artworkRelativePath.flatMap { try? storage?.paths.artworkURL(relativePath: $0) }.flatMap { try? Data(contentsOf: $0) }; nowPlaying.update(state: state, track: track, artist: storage?.artistName(for: track.artistID), album: storage?.albumTitle(for: track.albumID), artworkData: artwork); state.currentOutputRoute = session.outputRouteName }
     private func publishCurrent() { guard let storage, let id = state.currentTrackID, let track = try? storage.tracks.find(id: id) else { return }; publish(track: track) }
-    private func persist() { persistence.save(state: state) }
+    private func persist() { queue.persistState(currentTrackID: state.currentTrackID, positionMs: Int64(max(0, state.elapsedTime) * 1000), sleepDeadline: sleepTimer.deadline) }
+    private func expireSleepTimer() { player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; state.lastError = nil; publishCurrent(); persist() }
     private func fail(_ message: String) { player.pause(); state.status = .failed(message: message); state.lastError = message; publishCurrent(); persist() }
     private func handleTransitionFailure(_ error: Error) { state.lastError = error.localizedDescription; NSLog("Muzik Belesh playback transition failed: %@", error.localizedDescription); publishCurrent(); persist() }
     private func handleRouteChange(route: String, reason: AVAudioSession.RouteChangeReason) { state.currentOutputRoute = route; if reason == .oldDeviceUnavailable && state.isPlaying { pause() }; publishCurrent() }
