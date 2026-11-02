@@ -60,7 +60,18 @@ targets:
     sources:
       - path: OFFLINEShareExtension
         excludes: [Info.plist]
-    info: {path: OFFLINEShareExtension/Info.plist}
+    info:
+      path: OFFLINEShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: OFFLINE
+        CFBundlePackageType: 'XPC!'
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.share
