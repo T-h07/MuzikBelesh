@@ -1,7 +1,7 @@
 import Foundation
 
 enum QueueEntryOrigin: String, Codable { case playNext, addToQueue, playbackContext }
-enum RepeatMode: String, Codable, CaseIterable { case off, all, one
+extension RepeatMode {
     var symbol: String { self == .one ? "repeat.1" : "repeat" }
 }
 

@@ -87,12 +87,13 @@ struct QueueView: View {
                 Text("Nothing queued. Add songs with Add to Queue or Play Next.").foregroundStyle(AppColors.textSecondary).listRowBackground(AppColors.backgroundPrimary)
             }
             ForEach(audioPlayer.queue.entries) { entry in
-                if let storage = container.storage, let track = try? storage.tracks.find(id: entry.trackID) { StoredQueueRow(track: track, origin: entry.origin) }.listRowBackground(AppColors.backgroundPrimary)
+                if let track = track(for: entry.trackID) { StoredQueueRow(track: track, origin: entry.origin).listRowBackground(AppColors.backgroundPrimary) }
             }
             .onDelete { audioPlayer.queue.remove(at: $0) }
             .onMove { audioPlayer.queue.move(from: $0, to: $1) }
         }.toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Clear") { audioPlayer.queue.clear() }.disabled(audioPlayer.queue.entries.isEmpty) } }.scrollContentBackground(.hidden).background(AppColors.backgroundPrimary).navigationTitle("Up Next")
     }
+    private func track(for id: String) -> StoredTrack? { guard let storage = container.storage else { return nil }; return try? storage.tracks.find(id: id) }
 }
 
 private struct StoredQueueRow: View {
