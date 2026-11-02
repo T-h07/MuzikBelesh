@@ -13,5 +13,5 @@
 | 8 | iOS Share extension | `feature/phase-08-sharing` |
 | 9 | Integration, testing and v1.0 release | `feature/phase-09-release` |
 
-Phase 0 — **Completed — device-verified with documented Phase 8 limitation**. Phase 1 — Design System and Application Navigation — is the next development stage. Phases 1–9 remain unimplemented unless explicitly marked otherwise in their own future work.
+Phase 0 — **Completed — device-verified with documented Phase 8 limitation**. Phase 1 — **Completed — design system, four-tab navigation, mock stores, simulator/UI-test smoke coverage, and unsigned IPA verification**. Phase 2 — Playback & Queue is next; Phases 3–9 remain unimplemented.
 
