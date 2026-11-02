@@ -19,6 +19,8 @@ Commit `1aff803` corrects the import foreign-key insertion order and cleans stag
 
 The CI build passed 22 tests and the unsigned IPA build passed. The IPA contains compiled `Assets.car` and `OFFLINEShareExtension.appex`. iOS may cache application icons after an update; verify the icon after installing the new build, and restart SpringBoard or reinstall only if the device continues showing a cached icon.
 
+The responsive UI correction uses a safe-area inset for the mini-player instead of a tab-bar offset, separates its navigation and transport hit regions, and sizes Now Playing artwork from the available geometry. Home shortcuts use adaptive columns, and imported library rows retain 44-point actions with truncation for long filenames.
+
 ## Required re-test on iPhone 13 Pro Max
 
 Install artifact `OFFLINE-unsigned-IPA` from the [unsigned IPA workflow](https://github.com/T-h07/MuzikBelesh/actions/runs/41539143347), preserving the existing app data. Record each result as PASS, FAIL, or NOT RUN:

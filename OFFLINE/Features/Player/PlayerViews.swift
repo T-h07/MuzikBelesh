@@ -12,10 +12,10 @@ struct NowPlayingView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
-                ScrollView { VStack(spacing: AppSpacing.lg) { content }.frame(minHeight: proxy.size.height, alignment: .center).padding(.vertical, AppSpacing.md) }
+                ScrollView { VStack(spacing: proxy.size.height < 650 ? AppSpacing.md : AppSpacing.lg) { content(availableSize: proxy.size) }.frame(minHeight: proxy.size.height, alignment: .center).padding(.vertical, AppSpacing.md) }
             }
-            .padding(.horizontal, AppSpacing.xl)
-            .padding(.bottom, AppSpacing.xxl)
+            .padding(.horizontal, AppSpacing.lg)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: AppSpacing.sm) }
             .navigationTitle("Now Playing")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
@@ -24,19 +24,20 @@ struct NowPlayingView: View {
         }
     }
 
-    @ViewBuilder private var content: some View {
+    @ViewBuilder private func content(availableSize: CGSize) -> some View {
         if let track {
-            StoredArtworkView(track: track, size: min(280, max(180, UIScreen.main.bounds.width - 64))).frame(maxWidth: .infinity)
+            let artworkSize = min(availableSize.width, max(availableSize.width * 0.72, min(availableSize.width - 24, availableSize.height * 0.38)))
+            StoredArtworkView(track: track, size: artworkSize).frame(maxWidth: .infinity)
             VStack(spacing: AppSpacing.sm) {
-                Text(track.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary)
-                Text(track.originalFilename ?? "Local Music").foregroundStyle(AppColors.textSecondary)
+                Text(track.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary).lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                Text(artistAndAlbum(for: track)).font(.body).foregroundStyle(AppColors.textSecondary).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxWidth: .infinity, alignment: .leading)
             PlaybackSlider(audioPlayer: audioPlayer)
             HStack { Text(format(audioPlayer.state.elapsedTime)); Spacer(); Text(format(audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
-            HStack(spacing: 38) {
-                Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }
-                Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)) }
-                Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }
+            HStack(spacing: availableSize.width < 360 ? 24 : 40) {
+                Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }.accessibilityLabel("Previous track")
+                Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)).frame(width: 64, height: 64) }.accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
+                Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }.accessibilityLabel("Next track")
             }.foregroundStyle(AppColors.textPrimary)
             HStack {
                 Text(audioPlayer.state.currentOutputRoute).font(.caption).foregroundStyle(AppColors.textTertiary).lineLimit(1)
@@ -49,7 +50,16 @@ struct NowPlayingView: View {
             EmptyState(icon: "music.note", title: "Nothing playing", message: "Import a local audio file from Library first.")
         }
     }
+    private func artistAndAlbum(for track: StoredTrack) -> String {
+        let artist = container.storage?.artistName(for: track.artistID)
+        let album = container.storage?.albumTitle(for: track.albumID)
+        return [artist, album].compactMap { $0 }.joined(separator: " • ").ifEmpty("Local Music")
+    }
     private func format(_ seconds: TimeInterval) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
+}
+
+private extension String {
+    func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
 }
 
 private struct PlaybackSlider: View {

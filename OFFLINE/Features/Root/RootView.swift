@@ -5,15 +5,15 @@ struct RootView: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
     var body: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $coordinator.selectedTab) {
+        TabView(selection: $coordinator.selectedTab) {
                 NavigationStack { HomeView(coordinator: coordinator) }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
                 NavigationStack { SearchView(coordinator: coordinator) }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
                 NavigationStack { LibraryView(coordinator: coordinator) }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
                 NavigationStack { DownloadsView() }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
-            }
-            .tint(AppColors.accentPrimary)
-            if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator) }
+        }
+        .tint(AppColors.accentPrimary)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.horizontal, AppSpacing.sm).padding(.top, AppSpacing.sm) }
         }
         .preferredColorScheme(.dark)
         .sheet(item: $coordinator.sheet) { sheet in
@@ -76,7 +76,11 @@ struct MiniPlayer: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
     private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
-    var body: some View { if let track { HStack(spacing: AppSpacing.md) { StoredArtworkView(track: track, size: 42); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) }; Spacer(); Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play"); Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("Next track") }.padding(.horizontal, AppSpacing.md).padding(.vertical, 6).background(.ultraThinMaterial).contentShape(Rectangle()).onTapGesture { coordinator.showingNowPlaying = true }.accessibilityIdentifier("mini-player") } }
+    var body: some View { if let track { HStack(spacing: AppSpacing.sm) {
+        Button { coordinator.showingNowPlaying = true } label: { HStack(spacing: AppSpacing.sm) { StoredArtworkView(track: track, size: 44); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) } }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Open Now Playing")
+        Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
+        Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("Next track")
+    }.padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AppRadius.medium)).accessibilityIdentifier("mini-player") } }
 }
 
 struct ProgressRow: View {
