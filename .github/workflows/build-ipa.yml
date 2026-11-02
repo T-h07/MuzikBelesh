@@ -1,0 +1,29 @@
+name: Build unsigned IPA
+on:
+  workflow_dispatch:
+  push: {branches: [feature/phase-00-foundation]}
+permissions:
+  contents: read
+  actions: write
+jobs:
+  package:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Generate and resolve
+        run: xcodegen generate && xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+      - name: Build unsigned device app
+        run: xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" clean build
+      - name: Package and validate IPA
+        run: bash Scripts/package-ipa.sh
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFLINE-Phase0-unsigned-IPA
+          path: build/ipa/OFFLINE-unsigned.ipa
+          if-no-files-found: error
+
