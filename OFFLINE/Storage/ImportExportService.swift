@@ -73,7 +73,7 @@ final class StorageCoordinator: ObservableObject {
     func exportAudio(track: StoredTrack, to destination: URL) throws {
         let source = try paths.musicURL(relativePath: track.fileRelativePath)
         guard FileManager.default.fileExists(atPath: source.path) else { throw StorageError.missingFile }
-        let target = destination.hasDirectoryPath ? destination.appendingPathComponent(safeFilename(track.title, extension: track.fileExtension)) : destination
+        let target = destination.hasDirectoryPath ? destination.appendingPathComponent(safeFilename(track.title, fileExtension: track.fileExtension)) : destination
         try audio.copyStreaming(from: source, to: target)
         guard try audio.sha256(url: source) == audio.sha256(url: target) else { throw StorageError.exportFailed }
     }
@@ -85,7 +85,7 @@ final class StorageCoordinator: ObservableObject {
 
     private func stableID(prefix: String, value: String) -> String { "\(prefix)-" + normalized(value).data(using: .utf8)!.map { String(format: "%02x", $0) }.joined().prefix(32) }
     private func normalized(_ value: String) -> String { value.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: .diacriticInsensitive, locale: .current).lowercased() }
-    private func safeFilename(_ title: String, extension: String) -> String { let clean = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "\\", with: "-"); return "\(clean).\(extension)" }
+    private func safeFilename(_ title: String, fileExtension: String) -> String { let clean = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "\\", with: "-"); return "\(clean).\(fileExtension)" }
 }
 
 extension UTType {

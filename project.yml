@@ -47,6 +47,7 @@ targets:
         Release: {SWIFT_OPTIMIZATION_LEVEL: -O}
     dependencies:
       - package: YouTubeKit
+      - package: GRDB
         product: GRDB
       - target: OFFLINEShareExtension
   OFFLINETests:
