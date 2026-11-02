@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -12,7 +13,7 @@ struct RootView: View {
                 NavigationStack { DownloadsView() }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
             }
             .tint(AppColors.accentPrimary)
-            if container.audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.bottom, 49) }
+            if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator) }
         }
         .preferredColorScheme(.dark)
         .sheet(item: $coordinator.sheet) { sheet in
@@ -72,9 +73,10 @@ struct SearchBar: View {
 
 struct MiniPlayer: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
-    private var track: StoredTrack? { guard let storage = container.storage, let id = container.audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
-    var body: some View { if let track { HStack(spacing: AppSpacing.md) { ArtworkView(name: "music-note", size: 42); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) }; Spacer(); Button { Task { await container.audioPlayer.togglePlayback() } } label: { Image(systemName: container.audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary) }.accessibilityLabel(container.audioPlayer.state.isPlaying ? "Pause" : "Play"); Button { Task { await container.audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary) }.accessibilityLabel("Next track") }.padding(.horizontal, AppSpacing.md).padding(.vertical, 8).background(.ultraThinMaterial).contentShape(Rectangle()).onTapGesture { coordinator.showingNowPlaying = true }.accessibilityIdentifier("mini-player") } }
+    private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+    var body: some View { if let track { HStack(spacing: AppSpacing.md) { StoredArtworkView(track: track, size: 42); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) }; Spacer(); Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play"); Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("Next track") }.padding(.horizontal, AppSpacing.md).padding(.vertical, 6).background(.ultraThinMaterial).contentShape(Rectangle()).onTapGesture { coordinator.showingNowPlaying = true }.accessibilityIdentifier("mini-player") } }
 }
 
 struct ProgressRow: View {

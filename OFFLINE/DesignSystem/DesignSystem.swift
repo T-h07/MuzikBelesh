@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum AppColors {
     static let backgroundPrimary = Color.black
@@ -58,7 +59,28 @@ struct ArtworkView: View {
     let name: String
     var size: CGFloat
     var body: some View { ZStack { RoundedRectangle(cornerRadius: AppRadius.medium).fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)); Image(systemName: "music.note").font(.system(size: size * 0.32, weight: .semibold)).foregroundStyle(.white.opacity(0.88)) }.frame(width: size, height: size) }
-    private var colors: [Color] { let options: [[Color]] = [[.indigo, .purple], [.orange, .red], [.blue, .cyan], [.green, .teal], [.pink, .purple]]; return options[abs(name.hashValue) % options.count] }
+    private var colors: [Color] { let options: [[Color]] = [[Color(hex: "24302A"), Color(hex: "101510")], [Color(hex: "2A3024"), Color(hex: "11150D")], [Color(hex: "303326"), Color(hex: "111111")]]; let stable = name.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }; return options[abs(stable) % options.count] }
+}
+
+struct StoredArtworkView: View {
+    @EnvironmentObject private var container: AppContainer
+    let track: StoredTrack
+    let size: CGFloat
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else { ArtworkView(name: track.id, size: size) }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+        .task(id: track.artworkRelativePath) {
+            guard let relativePath = track.artworkRelativePath, let storage = container.storage,
+                  let url = try? storage.paths.artworkURL(relativePath: relativePath) else { return }
+            image = await Task.detached(priority: .userInitiated) { UIImage(contentsOfFile: url.path) }.value
+        }
+    }
 }
 
 struct EmptyState: View {

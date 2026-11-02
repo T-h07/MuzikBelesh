@@ -3,14 +3,17 @@ import SwiftUI
 struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
     @State private var showingQueue = false
 
-    private var track: StoredTrack? { guard let storage = container.storage, let id = container.audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+    private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: AppSpacing.xl) { content }
+            GeometryReader { proxy in
+                ScrollView { VStack(spacing: AppSpacing.lg) { content }.frame(minHeight: proxy.size.height, alignment: .center).padding(.vertical, AppSpacing.md) }
+            }
             .padding(.horizontal, AppSpacing.xl)
             .padding(.bottom, AppSpacing.xxl)
             .navigationTitle("Now Playing")
@@ -23,30 +26,41 @@ struct NowPlayingView: View {
 
     @ViewBuilder private var content: some View {
         if let track {
-            ArtworkView(name: "music-note", size: 320).padding(.top, AppSpacing.xxl)
+            StoredArtworkView(track: track, size: min(280, max(180, UIScreen.main.bounds.width - 64))).frame(maxWidth: .infinity)
             VStack(spacing: AppSpacing.sm) {
                 Text(track.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary)
                 Text(track.originalFilename ?? "Local Music").foregroundStyle(AppColors.textSecondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Slider(value: Binding(get: { container.audioPlayer.state.elapsedTime }, set: { value in Task { await container.audioPlayer.seek(to: value) } }), in: 0...max(container.audioPlayer.state.duration, 0.01)).tint(AppColors.accentPrimary).disabled(!container.audioPlayer.state.canSeek)
-            HStack { Text(format(container.audioPlayer.state.elapsedTime)); Spacer(); Text(format(container.audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
+            PlaybackSlider(audioPlayer: audioPlayer)
+            HStack { Text(format(audioPlayer.state.elapsedTime)); Spacer(); Text(format(audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
             HStack(spacing: 38) {
-                Button { Task { await container.audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2) }
-                Button { Task { await container.audioPlayer.togglePlayback() } } label: { Image(systemName: container.audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)) }
-                Button { Task { await container.audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2) }
+                Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }
+                Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)) }
+                Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }
             }.foregroundStyle(AppColors.textPrimary)
             HStack {
-                Text(container.audioPlayer.state.currentOutputRoute).font(.caption).foregroundStyle(AppColors.textTertiary).lineLimit(1)
+                Text(audioPlayer.state.currentOutputRoute).font(.caption).foregroundStyle(AppColors.textTertiary).lineLimit(1)
                 Spacer()
                 Button { showingQueue = true } label: { Image(systemName: "list.bullet").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Up Next")
             }
-            if case .failed(let message) = container.audioPlayer.state.status { Text(message).font(.caption).foregroundStyle(AppColors.error).multilineTextAlignment(.center) }
+            if case .failed(let message) = audioPlayer.state.status { Text(message).font(.caption).foregroundStyle(AppColors.error).multilineTextAlignment(.center) }
             Text("Shuffle, repeat, and sleep timer arrive in Phase 4.").font(.caption2).foregroundStyle(AppColors.textTertiary).multilineTextAlignment(.center)
         } else {
             EmptyState(icon: "music.note", title: "Nothing playing", message: "Import a local audio file from Library first.")
         }
     }
     private func format(_ seconds: TimeInterval) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
+}
+
+private struct PlaybackSlider: View {
+    @ObservedObject var audioPlayer: AudioPlayerService
+    @State private var draftPosition: TimeInterval?
+    var body: some View {
+        let duration = max(audioPlayer.state.duration, 0.01)
+        Slider(value: Binding(get: { draftPosition ?? audioPlayer.state.elapsedTime }, set: { draftPosition = min(max($0, 0), duration) }), in: 0...duration, onEditingChanged: { editing in
+            if !editing, let draftPosition { Task { await audioPlayer.seek(to: draftPosition) }; self.draftPosition = nil }
+        }).tint(AppColors.accentPrimary).disabled(!audioPlayer.state.canSeek)
+    }
 }
 
 struct QueueView: View {
