@@ -1,0 +1,37 @@
+name: CI
+on:
+  pull_request: {branches: [develop]}
+  push: {branches: [develop]}
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions: {contents: read}
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          test "$(xcodegen --version)" = "Version: 2.46.0"
+      - name: Toolchain diagnostics
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          swift --version
+          xcodegen --version
+          xcrun simctl list devices available
+      - name: Generate project
+        run: xcodegen generate
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+      - name: Select simulator
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
+          test -n "$DEVICE_ID"
+          echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+      - name: Build and test
+        run: xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" test CODE_SIGNING_ALLOWED=NO
+
