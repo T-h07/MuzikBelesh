@@ -21,7 +21,9 @@ The CI build passed 22 tests and the unsigned IPA build passed. The IPA contains
 
 The responsive UI correction uses a safe-area inset for the mini-player instead of a tab-bar offset, separates its navigation and transport hit regions, and sizes Now Playing artwork from the available geometry. Home shortcuts use adaptive columns, and imported library rows retain 44-point actions with truncation for long filenames.
 
-The app now declares `UILaunchScreen` in both the XcodeGen source configuration and the checked-in source plist. The IPA packaging script verifies the compiled launch-screen key, `Assets.car`, and the embedded Share extension. Build number `2` is used for the device re-test; the bundle identifier remains unchanged so an in-place update can retain user data.
+The app now declares `UILaunchScreen` in both the XcodeGen source configuration and the checked-in source plist. The IPA packaging script verifies the compiled launch-screen key, `Assets.car`, and the embedded Share extension. Build number `3` is used for the device re-test; the bundle identifier remains unchanged so an in-place update can retain user data.
+
+The final playback/navigation hotfix puts the mini-player safe-area inset inside each tab page, leaving the native tab bar outside that inset. It adds Previous, refreshes the deterministic available-track context after imports, serializes track transitions, ignores stale item-end notifications, and skips missing upcoming files without changing unrelated records.
 
 ## Required re-test on iPhone 13 Pro Max
 

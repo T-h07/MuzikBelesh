@@ -6,6 +6,14 @@ final class Phase3AudioTests: XCTestCase {
         let context = PlaybackContext(trackIDs: ["a", "b", "c"], currentIndex: 1)
         XCTAssertEqual(context.previousID, "a"); XCTAssertEqual(context.nextID, "c")
         XCTAssertNil(context.settingCurrent("missing").nextID)
+        XCTAssertNil(context.settingCurrent("a").previousID)
+        XCTAssertNil(context.settingCurrent("c").nextID)
+    }
+
+    func testEmptyAndSingleTrackContextsHaveNoNavigation() {
+        XCTAssertNil(PlaybackContext(trackIDs: [], currentIndex: nil).nextID)
+        let single = PlaybackContext(trackIDs: ["only"], currentIndex: 0)
+        XCTAssertNil(single.previousID); XCTAssertNil(single.nextID)
     }
 
     func testPlaybackStateDoesNotAllowInvalidSeekValues() {

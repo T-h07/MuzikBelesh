@@ -6,20 +6,38 @@ struct RootView: View {
     @ObservedObject var coordinator: AppCoordinator
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
-                NavigationStack { HomeView(coordinator: coordinator) }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
-                NavigationStack { SearchView(coordinator: coordinator) }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
-                NavigationStack { LibraryView(coordinator: coordinator) }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
-                NavigationStack { DownloadsView() }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
+            TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
+            TabContent(coordinator: coordinator) { NavigationStack { SearchView(coordinator: coordinator) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
+            TabContent(coordinator: coordinator) { NavigationStack { LibraryView(coordinator: coordinator) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
+            TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
         .tint(AppColors.accentPrimary)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.horizontal, AppSpacing.sm).padding(.top, AppSpacing.sm) }
-        }
         .preferredColorScheme(.dark)
         .sheet(item: $coordinator.sheet) { sheet in
             switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet() }
         }
         .fullScreenCover(isPresented: $coordinator.showingNowPlaying) { NowPlayingView(coordinator: coordinator) }
+    }
+}
+
+private struct TabContent<Content: View>: View {
+    @EnvironmentObject private var audioPlayer: AudioPlayerService
+    let coordinator: AppCoordinator
+    let content: Content
+
+    init(coordinator: AppCoordinator, @ViewBuilder content: () -> Content) {
+        self.coordinator = coordinator
+        self.content = content()
+    }
+
+    var body: some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            if audioPlayer.state.currentTrackID != nil {
+                MiniPlayer(coordinator: coordinator)
+                    .padding(.horizontal, AppSpacing.sm)
+                    .padding(.top, AppSpacing.sm)
+            }
+        }
     }
 }
 
@@ -76,10 +94,11 @@ struct MiniPlayer: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
     private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
-    var body: some View { if let track { HStack(spacing: AppSpacing.sm) {
+    var body: some View { if let track { HStack(spacing: AppSpacing.xs) {
         Button { coordinator.showingNowPlaying = true } label: { HStack(spacing: AppSpacing.sm) { StoredArtworkView(track: track, size: 44); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) } }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Open Now Playing")
+        Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipPrevious && audioPlayer.state.elapsedTime <= 3).accessibilityLabel("Previous track")
         Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
-        Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel("Next track")
+        Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")
     }.padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AppRadius.medium)).accessibilityIdentifier("mini-player") } }
 }
 
