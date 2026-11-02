@@ -13,7 +13,7 @@ jobs:
       - name: Install XcodeGen
         run: |
           brew install xcodegen
-          xcodegen --version
+          test "$(xcodegen --version)" = "Version: 2.46.0"
       - name: Generate and resolve
         run: xcodegen generate && xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
       - name: Build unsigned device app
