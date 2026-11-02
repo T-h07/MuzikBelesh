@@ -33,7 +33,7 @@ final class AudioPlayerService: ObservableObject {
             Task { @MainActor in self?.handleInterruption(notification) }
         }
         context.trackIDs = (try? storage?.tracks.all().map(\.id)) ?? []
-        if let saved = persistence.restore(), let id = saved.currentTrackID { state.currentTrackID = id; state.elapsedTime = TimeInterval(saved.positionMs) / 1000; context = context.settingCurrent(id); state.canSkipNext = context.nextID != nil; state.canSkipPrevious = context.previousID != nil }
+        if let saved = persistence.restore(), let id = saved.currentTrackID { state.currentTrackID = id; state.elapsedTime = TimeInterval(saved.positionMs) / 1000; context = context.settingCurrent(id); state.canSkipNext = context.nextID != nil; state.canSkipPrevious = context.previousID != nil; let position = state.elapsedTime; Task { @MainActor [weak self] in await self?.restorePausedItem(trackID: id, position: position) } }
         remoteCommands.register(service: self)
     }
 
@@ -69,6 +69,14 @@ final class AudioPlayerService: ObservableObject {
     func next() async { guard let id = context.nextID else { state.status = .ended; player.pause(); publishCurrent(); persist(); return }; try? await play(trackID: id) }
     func previous() async { if state.elapsedTime > 3 { await seek(to: 0); return }; guard let id = context.previousID else { await seek(to: 0); return }; try? await play(trackID: id) }
     func seek(to seconds: TimeInterval) async { guard state.canSeek else { return }; let bounded = min(max(seconds, 0), state.duration); state.isSeeking = true; await player.seek(to: CMTime(seconds: bounded, preferredTimescale: 600)); state.elapsedTime = bounded; state.isSeeking = false; publishCurrent(); persist() }
+
+    private func restorePausedItem(trackID: String, position: TimeInterval) async {
+        guard let resolved = try? resolver.resolve(trackID: trackID) else { fail("The saved track is no longer available"); return }
+        replaceItem(with: AVPlayerItem(url: resolved.url), trackID: trackID, track: resolved.track)
+        state.status = .paused
+        if position > 0 { await player.seek(to: CMTime(seconds: min(position, max(state.duration, position)), preferredTimescale: 600)); state.elapsedTime = position }
+        publish(track: resolved.track)
+    }
 
     private func replaceItem(with newItem: AVPlayerItem, trackID: String, track: StoredTrack) {
         removeItemObservers(); item = newItem; state.currentTrackID = trackID; state.status = .loading; state.elapsedTime = 0

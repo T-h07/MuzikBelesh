@@ -13,5 +13,5 @@
 | 8 | iOS Share extension | `feature/phase-08-sharing` |
 | 9 | Integration, testing and v1.0 release | `feature/phase-09-release` |
 
-Phase 0 — **Completed — device-verified with documented Phase 8 limitation**. Phase 1 — **Completed — design system, four-tab navigation, mock stores, simulator/UI-test smoke coverage, and unsigned IPA verification**. Phase 2 — **Completed — GRDB persistence, Files-visible local music storage, import/export, duplicate detection, recovery foundations, and current-head CI/IPA verification**. Phase 3 and later remain unimplemented.
+Phase 0 — **Completed — device-verified with documented Phase 8 limitation**. Phase 1 — **Completed — design system, four-tab navigation, mock stores, simulator/UI-test smoke coverage, and unsigned IPA verification**. Phase 2 — **Completed — GRDB persistence, Files-visible local music storage, import/export, duplicate detection, recovery foundations, and current-head CI/IPA verification**. Phase 3 — **In progress — native AVPlayer playback and system media integration; physical-device acceptance pending**. Phase 4 and later remain unimplemented.
 
