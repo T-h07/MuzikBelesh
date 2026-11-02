@@ -41,3 +41,9 @@ Install artifact `OFFLINE-unsigned-IPA` from the [unsigned IPA workflow](https:/
 - Now Playing controls are fully visible; mini-player buttons do not open Now Playing accidentally.
 - Background playback, lock-screen controls, headphone controls, export, and Share extension remain functional.
 - A competing audio/video app interrupts Muzik Belesh and the in-app state changes to paused/interrupted without falsely resuming.
+# Phase 3 final acceptance
+
+Status: **Complete — developer-reported and accepted physical iPhone validation.**
+
+The developer tested the final Phase 3 IPA on an iPhone 13 Pro Max and accepted local MP3/M4A importing, SQLite integrity, real playback, seeking, Previous/Next, automatic advancement, export, background playback, Lock Screen and earphone controls, app icon, full-screen layout, mini-player navigation, and access to all four tabs while playing. These results are manual device evidence, not automated Codex hardware testing. Exhaustive Bluetooth compatibility, every interruption scenario, and prolonged stress testing remain **NOT VERIFIED**.
+

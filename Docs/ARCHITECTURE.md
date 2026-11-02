@@ -8,5 +8,5 @@ The YouTubeKit adapter is isolated under `OFFLINE/Feasibility/YouTube`. It valid
 
 The Share extension is a separate target with its own bundle identifier and activation metadata. Phase 0 validates received URLs and finishes cleanly; the physical iPhone test confirmed Share-sheet appearance and URL receipt. No unsupported extension-to-app launch or App Group entitlement is assumed. Automatic handoff is deferred to Phase 8.
 
-Later phases may add the production YouTube integration, download manager, and supported Share handoff. Phase 2 provides the GRDB repositories and Phase 3 provides the AVFoundation/MediaPlayer playback subsystem. Development infrastructure remains outside runtime code.
+Phase 2 provides the GRDB repositories and Phase 3 provides the AVFoundation/MediaPlayer playback subsystem. Phase 3 is complete and was accepted through developer-reported iPhone 13 Pro Max validation. Later phases may add the production YouTube integration, download manager, and supported Share handoff. Development infrastructure remains outside runtime code.
 
