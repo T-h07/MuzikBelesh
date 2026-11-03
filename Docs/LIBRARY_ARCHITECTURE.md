@@ -44,3 +44,16 @@ virtual groups, not duplicated parent records. Empty parents are retained and hi
 from track-derived groups, preserving their identity and referenced custom artwork.
 
 Physical device acceptance remains separate from automated success.
+
+Universal search uses LibrarySearchEngine/LibrarySearchResults over an immutable
+observed snapshot, with normalized substring matching on a detached task. Both search
+surfaces share LibrarySearchSession generation/cancellation protection and the same
+result/destination components. Scopes restrict those results without rewriting the
+query or playlist membership order. RootView owns native enum-valued search focus;
+fields, tab/presentation transitions and result actions use that single focus binding.
+
+Build 65's physical E failure is recorded separately from its A-D/F-J PASS report.
+Default CURRENT_PROJECT_VERSION and MARKETING_VERSION are shared at project level,
+and simulator/device CI supplies one build value to app and extension. Compact tests
+exercise installation, layout and keyboard interaction rather than accepting an
+installation failure as a layout result.

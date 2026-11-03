@@ -28,6 +28,29 @@ FAIL until physical keyboard and universal-search retests pass; passing CI canno
 change that result. The other checks retain their reported build-65 PASS evidence
 and must be monitored for regression during the update.
 
+## Focused retest on the replacement build — NOT RUN
+
+1. Install over build 65 through SideStore. Record iOS version, build and embedded
+   SHA. Verify existing music, playlists, artwork, likes and custom orders remain.
+2. Open Search (Your Library selected by default). Open/type/dismiss the keyboard
+   with Search/Return and toolbar Done; repeat five times. While editing, change
+   tabs, return, clear the query, scroll results and select a song/collection. The
+   keyboard must close appropriately with no force-close, stale focus or blocked tab.
+3. Repeat with a song playing and a Sleep Timer active. Tabs, mini-player and timer
+   must stay accessible and properly placed relative to the keyboard.
+4. Search actual song titles, artists, albums/album artists, playlist names and
+   descriptions. All must show the matching nonempty groups/counts. Open each kind.
+   Verify Unicode/diacritics/case/whitespace and literal percent/underscore names.
+5. In Library, retain one query while changing All, Songs, Albums, Artists, Playlists
+   and Liked Songs. Each filter must restrict the same matches, and Liked Songs must
+   exclude unliked tracks. Create, rename and delete a dedicated playlist and edit
+   metadata; results must refresh without relaunch and obsolete names must disappear.
+6. Exercise all seven sorts without changing custom playlist order. Relaunch and
+   repeat a query against the saved collection. Repeat offline in Airplane Mode.
+
+Record E as PASS only after the physical retest succeeds. CI success by itself does
+not change build 65's FAIL result or authorize integration. PR #6 stays open.
+
 Status: **REJECTED — build 65 fails acceptance check E; fixes require physical retesting**.
 Use iPhone 13 Pro Max. Record iOS version, version/build/embedded SHA, workflow URLs,
 action order and timestamps. Use PASS / FAIL / NOT RUN / BLOCKED. No result below

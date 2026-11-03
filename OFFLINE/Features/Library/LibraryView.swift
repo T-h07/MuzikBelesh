@@ -5,16 +5,13 @@ struct LibraryView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
+    @FocusState.Binding var searchFocus: LibrarySearchField?
     @State private var showingImporter = false
     @State private var showingPlaylistEditor = false
     @State private var importMessage: String?
     @State private var query = ""
-    @State private var results: [StoredTrack] = []
+    @StateObject private var search = LibrarySearchSession()
     private let filters = ["All", "Songs", "Playlists", "Albums", "Artists", "Liked Songs"]
-    private var visible: [StoredTrack] {
-        let values = query.isEmpty ? library.snapshot.tracks : results
-        return coordinator.libraryFilter == "Liked Songs" ? values.filter { library.snapshot.likedIDs.contains($0.id) } : values
-    }
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -28,10 +25,14 @@ struct LibraryView: View {
                         }
                     }
                 }.accessibilityIdentifier("library-filters")
+                SearchBar(text: $query, placeholder: "Songs, albums, artists or playlists", focus: $searchFocus, field: .library)
                 content
             }.padding(.horizontal, AppSpacing.lg).padding(.top, AppSpacing.md).padding(.bottom, 30)
         }
         .navigationBarHidden(true).screenBackground()
+        .scrollDismissesKeyboard(.immediately).scrollBounceBehavior(.always)
+        .onDisappear { searchFocus = nil }
+        .onChange(of: coordinator.libraryFilter) { _, _ in searchFocus = nil }
         .sheet(isPresented: $showingPlaylistEditor) { PlaylistEditorView() }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.audio, .supportedAudio], allowsMultipleSelection: true) { result in
             Task { @MainActor in
@@ -46,57 +47,27 @@ struct LibraryView: View {
                 } catch { library.report(error) }
             }
         }
-        .task(id: "\(query)|\(library.revision)") {
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-                let values = try await library.search(query)
-                guard !Task.isCancelled else { return }; results = values
-            } catch is CancellationError { } catch { if !Task.isCancelled { library.report(error) } }
+        .task(id: LibrarySearchRequest(query: query, revision: library.revision)) {
+            await search.update(query: query, snapshot: library.snapshot)
         }
     }
     private var header: some View {
         HStack {
             Text("Library").font(.largeTitle.bold()).foregroundStyle(AppColors.textPrimary)
             Spacer()
-            Button { showingImporter = true } label: { Label("Import", systemImage: "square.and.arrow.down").lineLimit(1) }
+            Button { searchFocus = nil; showingImporter = true } label: { Label("Import", systemImage: "square.and.arrow.down").lineLimit(1) }
                 .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).frame(minHeight: 44).accessibilityIdentifier("library-import")
         }
     }
     @ViewBuilder private var content: some View {
-        switch coordinator.libraryFilter {
-        case "Playlists":
-            Button { showingPlaylistEditor = true } label: { Label("Create Playlist", systemImage: "plus.circle.fill") }
+        if coordinator.libraryFilter == "Playlists" {
+            Button { searchFocus = nil; showingPlaylistEditor = true } label: { Label("Create Playlist", systemImage: "plus.circle.fill") }
                 .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-playlist")
-            if library.snapshot.playlists.isEmpty {
-                EmptyState(icon: "rectangle.stack", title: "No playlists", message: "Create a playlist and add your local songs.")
-            }
-            ForEach(library.snapshot.playlists) { playlist in
-                NavigationLink { PlaylistDetailView(playlistID: playlist.id) } label: { PlaylistLibraryRow(playlist: playlist) }
-                    .accessibilityIdentifier("playlist-" + playlist.id)
-            }
-        case "Albums":
-            if library.albumGroups.isEmpty { EmptyState(icon: "square.stack", title: "No albums", message: "Import music, then edit its album metadata.") }
-            ForEach(library.albumGroups) { group in
-                NavigationLink { AlbumDetailView(groupID: group.id) } label: { LibraryGroupRow(group: group) }
-            }
-        case "Artists":
-            if library.artistGroups.isEmpty { EmptyState(icon: "person", title: "No artists", message: "Import music, then edit its artist metadata.") }
-            ForEach(library.artistGroups) { group in
-                NavigationLink { ArtistDetailView(groupID: group.id) } label: { LibraryGroupRow(group: group) }
-            }
-        default:
-            SearchBar(text: $query, placeholder: "Search title, artist or album")
-            HStack {
-                Text(coordinator.libraryFilter == "Liked Songs" ? "Liked Songs" : "Imported Music").font(.title3.weight(.semibold)).foregroundStyle(AppColors.textPrimary)
-                Spacer(); LibrarySortMenu()
-            }
-            if visible.isEmpty {
-                EmptyState(icon: coordinator.libraryFilter == "Liked Songs" ? "heart" : "music.note", title: query.isEmpty ? (coordinator.libraryFilter == "Liked Songs" ? "No liked songs" : "Your library is empty") : "No library matches", message: "Import local music or try another search.", actionTitle: "Import Audio") { showingImporter = true }
-            }
-            ForEach(visible) { track in
-                StoredTrackRow(track: track, contextTrackIDs: visible.map(\.id), contextKind: coordinator.libraryFilter == "Liked Songs" ? "liked" : (query.isEmpty ? "library" : "search"))
-            }
         }
+        if ["All", "Songs", "Liked Songs"].contains(coordinator.libraryFilter) { HStack { Spacer(); LibrarySortMenu() } }
+        if let results = search.results {
+            LibrarySearchResultsView(results: results, scope: LibrarySearchScope(rawValue: coordinator.libraryFilter) ?? .all, contextKind: query.isEmpty ? "library" : "search", onInteraction: { searchFocus = nil })
+        } else { ProgressView("Searching Library").frame(maxWidth: .infinity) }
     }
 }
 
@@ -151,6 +122,7 @@ struct StoredTrackRow: View {
     var contextKind: String = "library"
     var contextSourceID: String? = nil
     var playlistID: String? = nil
+    var onInteraction: () -> Void = { }
     @State private var showingEditor = false
     @State private var showingPlaylists = false
     @State private var confirmingDeletion = false
@@ -168,6 +140,9 @@ struct StoredTrackRow: View {
         .padding(.vertical, AppSpacing.xs).contextMenu { actions }
         .sheet(isPresented: $showingEditor) { TrackEditorView(trackID: track.id) }
         .sheet(isPresented: $showingPlaylists) { AddToPlaylistView(trackIDs: [track.id]) }
+        .onChange(of: showingEditor) { _, shown in if shown { onInteraction() } }
+        .onChange(of: showingPlaylists) { _, shown in if shown { onInteraction() } }
+        .onChange(of: confirmingDeletion) { _, shown in if shown { onInteraction() } }
         .confirmationDialog("Delete Song from Library?", isPresented: $confirmingDeletion, titleVisibility: .visible) {
             Button("Delete Song", role: .destructive) {
                 Task { do { _ = try await library.deleteTrack(id: track.id, confirmed: true) } catch { rowError = MusicLibraryService.message(error) } }
@@ -201,8 +176,9 @@ struct StoredTrackRow: View {
         if let playlistID { Button { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } label: { Label("Remove from Playlist", systemImage: "minus.circle") } }
         Button(role: .destructive) { confirmingDeletion = true } label: { Label(track.availability == .missing ? "Remove Missing Entry" : "Delete Song", systemImage: "trash") }
     }
-    private func play() { Task { await library.play(track.id, ids: ids, kind: contextKind, sourceID: contextSourceID) } }
+    private func play() { onInteraction(); Task { await library.play(track.id, ids: ids, kind: contextKind, sourceID: contextSourceID) } }
     private func export() {
+        onInteraction()
         Task {
             do {
                 guard let storage = container.storage else { throw LibraryError.operationFailed }

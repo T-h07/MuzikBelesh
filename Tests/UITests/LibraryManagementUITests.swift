@@ -87,6 +87,59 @@ final class LibraryManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Library Search Road"].waitForExistence(timeout: 5))
     }
 
+    func testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible() {
+        openLibrary(); app.staticTexts["Fixture A"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Open Now Playing"].waitForExistence(timeout: 5))
+        app.buttons["Open Now Playing"].tap(); app.buttons["Sleep Timer"].tap()
+        app.buttons["5 min"].tap(); app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["sleep-timer-indicator"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Search"].tap()
+        let field = app.textFields["search-field"]
+        field.tap(); field.typeText("Fixture")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
+        XCTAssertTrue(app.buttons["Open Now Playing"].isHittable)
+        XCTAssertTrue(app.buttons["sleep-timer-indicator"].isHittable)
+        XCTAssertFalse(app.keyboards.firstMatch.frame.intersects(app.buttons["Open Now Playing"].frame))
+        XCTAssertFalse(app.keyboards.firstMatch.frame.intersects(app.buttons["sleep-timer-indicator"].frame))
+        screenshot("Keyboard-With-Player-And-Timer")
+        app.tabBars.buttons["Library"].tap(); absent(app.keyboards.firstMatch)
+        XCTAssertTrue(app.buttons["Open Now Playing"].isHittable)
+        app.tabBars.buttons["Search"].tap(); field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        app.scrollViews["local-search-results"].swipeUp(); absent(app.keyboards.firstMatch)
+        field.tap(); app.buttons["Clear search"].tap(); absent(app.keyboards.firstMatch)
+        change(field, to: "Fixture\n")
+        tapVisible(app.staticTexts["Fixture B"].firstMatch)
+        absent(app.keyboards.firstMatch)
+        XCTAssertTrue(app.buttons["Open Now Playing"].isHittable)
+        screenshot("Search-Keyboard-Navigation")
+    }
+
+    func testUniversalLibraryGroupsFiltersAndSearchAfterRelaunch() {
+        createPlaylist("Fixture Road")
+        app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
+        app.tabBars.buttons["Search"].tap()
+        change(app.textFields["search-field"], to: "Fixture\n")
+        for kind in ["songs", "albums", "artists", "playlists"] {
+            let section = app.descendants(matching: .any).matching(identifier: "search-section-" + kind).firstMatch
+            for _ in 0..<4 { if section.exists { break }; app.scrollViews["local-search-results"].swipeUp() }
+            XCTAssertTrue(section.exists)
+        }
+        tapVisible(app.staticTexts["Fixture Road"].firstMatch)
+        XCTAssertTrue(app.navigationBars["Playlist"].waitForExistence(timeout: 5)); absent(app.keyboards.firstMatch)
+        app.tabBars.buttons["Library"].tap()
+        openLibrary("Songs"); change(app.textFields["search-field"], to: "Fixture\n")
+        openLibrary("Albums")
+        XCTAssertEqual(app.textFields["search-field"].value as? String, "Fixture")
+        XCTAssertFalse(app.buttons["track-actions-ui-track-a"].exists)
+        XCTAssertTrue(app.staticTexts["Fixture Album"].waitForExistence(timeout: 5))
+        openLibrary("Playlists")
+        XCTAssertEqual(app.textFields["search-field"].value as? String, "Fixture")
+        XCTAssertTrue(app.staticTexts["Fixture Road"].waitForExistence(timeout: 5))
+        screenshot("Universal-Library-Search")
+    }
+
     func testLibraryAlbumArtistAndSortingLayouts() {
         openLibrary()
         app.buttons["library-sort"].tap(); app.buttons["Name A–Z"].tap()

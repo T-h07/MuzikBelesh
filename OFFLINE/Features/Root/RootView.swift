@@ -1,20 +1,29 @@
 import SwiftUI
 
+enum LibrarySearchField: Hashable { case search, library }
+
 struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
+    @FocusState private var searchFocus: LibrarySearchField?
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
             TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
-            TabContent(coordinator: coordinator) { NavigationStack { SearchView(coordinator: coordinator) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
-            TabContent(coordinator: coordinator) { NavigationStack { LibraryView(coordinator: coordinator) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
+            TabContent(coordinator: coordinator) { NavigationStack { SearchView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
+            TabContent(coordinator: coordinator) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
             TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
         .tint(AppColors.accentPrimary)
-        .onChange(of: scenePhase) { _, phase in if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } } }
+        .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }
+        .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
+        .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
+            else { searchFocus = nil }
+        }
         .preferredColorScheme(.dark)
         .alert("Library", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
             Button("OK") { library.error = nil }
@@ -94,7 +103,27 @@ struct PlaylistCard: View {
 struct SearchBar: View {
     @Binding var text: String
     let placeholder: String
-    var body: some View { HStack(spacing: AppSpacing.sm) { Image(systemName: "magnifyingglass").foregroundStyle(AppColors.textSecondary); TextField(placeholder, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled().foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("search-field"); if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Clear search") } }.padding(.horizontal, AppSpacing.md).padding(.vertical, 11).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium)) }
+    @FocusState.Binding var focus: LibrarySearchField?
+    let field: LibrarySearchField
+    var body: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "magnifyingglass").foregroundStyle(AppColors.textSecondary)
+            TextField(placeholder, text: $text)
+                .focused($focus, equals: field).submitLabel(.search).onSubmit { focus = nil }
+                .textInputAutocapitalization(.never).autocorrectionDisabled().foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("search-field")
+            if !text.isEmpty {
+                Button { text = ""; focus = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.textSecondary).frame(minWidth: 44, minHeight: 22) }.accessibilityLabel("Clear search")
+            }
+        }.padding(.horizontal, AppSpacing.md).padding(.vertical, 11).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+            .toolbar {
+                if focus == field {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { focus = nil }.accessibilityIdentifier("keyboard-done")
+                    }
+                }
+            }
+    }
 }
 
 struct MiniPlayer: View {

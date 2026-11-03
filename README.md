@@ -19,7 +19,9 @@ Title, Artist, Album, optional Album Artist and artwork from Edit Metadata. Edit
 change application metadata only; audio bytes, hashes, managed paths and identities
 stay intact. Export returns the original encoded audio.
 
-Library search matches title, artist and album without a network request. Seven
+Library and Search find songs, albums, artists and playlists without a network request.
+All groups matches with counts; category filters keep the entered query. Search defaults
+to Your Library. Search/Done, scrolling and tab changes dismiss the keyboard. Seven
 sort modes persist between launches. Each playlist keeps its own custom order.
 Playback captures a collection's current order; membership/reorder edits affect
 future starts. Permanent track deletion removes it from the active snapshot and

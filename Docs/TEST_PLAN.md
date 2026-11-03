@@ -41,4 +41,20 @@ the physical checklist. The existing UI smoke and all Phase 0-4 tests remain ena
 CI retains xcresult, enforces bounded waits/test timeouts and records the selected
 simulator/toolchain. Final counts, environment, workflow and artifact URLs belong
 in the PR for the exact tested source. A compile or simulator run is not physical
-acceptance; PHASE_05_DEVICE_TESTING.md remains NOT RUN until evidence is supplied.
+acceptance; physical outcomes are recorded separately in PHASE_05_DEVICE_TESTING.md.
+
+Build 65 was physically rejected for search/keyboard check E. Its developer-reported
+A-D/F-J results are PASS, with iOS version NOT PROVIDED; E stays FAIL pending retest.
+New failing-before UI regressions cover submit dismissal, playlist search and the
+missing Library field in playlist mode. Universal-search unit tests cover all four
+entity types, scopes/likes, Unicode/literals, live CRUD/metadata, persistence/sort
+isolation, cancelled responses and deliberately out-of-order completions. UI tests
+exercise real keyboards, Done/Search, tab changes, scroll/clear, result navigation,
+mini-player access, All/filter consistency and relaunch. The compact test must install
+the app/extension with matching nonempty versions before its assertions can run.
+
+Failing-before evidence: CI 41720899168 on d9ab131 passed all 167 unit/integration
+tests and failed the new UI cases for the absent Library search field in Playlists,
+the absent playlist entity result, and the missing keyboard Done control. An existing
+metadata/search UI flow also exceeded its two-minute execution allowance. It remains
+enabled and must pass with the fixes; no timeout or failure is treated as acceptance.
