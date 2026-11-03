@@ -3,27 +3,31 @@ import SwiftUI
 enum LibrarySearchField: Hashable { case search, library }
 
 struct RootView: View {
+    @EnvironmentObject private var container: AppContainer
+    let coordinator: AppCoordinator
+    var body: some View {
+        KeyboardSafeHost(content: RootTabsView(coordinator: coordinator)
+            .environmentObject(container)
+            .environmentObject(container.audioPlayer)
+            .environmentObject(container.library))
+            .ignoresSafeArea().preferredColorScheme(.dark)
+    }
+}
+
+private struct RootTabsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
     @FocusState private var searchFocus: LibrarySearchField?
-    @State private var keyboardTop: CGFloat?
     var body: some View {
-        GeometryReader { available in
-            let origin = available.frame(in: .global).minY
-            let height = keyboardTop.map { min(available.size.height, max(0, $0 - origin)) } ?? available.size.height
-            TabView(selection: $coordinator.selectedTab) {
+        TabView(selection: $coordinator.selectedTab) {
                 TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
                 TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { SearchView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
                 TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
                 TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
-            }
-            .frame(width: available.size.width, height: height)
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-        .background { KeyboardLayoutRegion { keyboardTop = $0 }.ignoresSafeArea().allowsHitTesting(false) }
         .tint(AppColors.accentPrimary)
         .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }

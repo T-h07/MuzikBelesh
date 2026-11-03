@@ -26,8 +26,8 @@ available to the playlist song picker; neither path interpolates query text as S
 The root owns native search focus for both fields. Search/Return and the accessible
 keyboard Done control dismiss it. Scrolling results dismisses immediately. Query
 clearing, tab changes, navigation, result playback, sheets and backgrounding release
-focus. A read-only UIKit keyboard layout guide reports the keyboard's window boundary;
-the root sizes the native tab controller to that available region,
+focus. A native hosting container constrains the tab content's physical bounds to
+UIKit's keyboard layout guide,
 keeping the real tab bar reachable above the keyboard. The mini-player and Sleep Timer
 continue to use safe-area insets above that bar. Keyboard,
 tab and player accessibility are verified in UI tests and require physical retesting.
