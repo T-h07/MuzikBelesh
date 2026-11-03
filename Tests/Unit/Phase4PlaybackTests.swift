@@ -28,7 +28,7 @@ final class Phase4PlaybackTests: XCTestCase {
         XCTAssertFalse(active)
     }
 
-    func testSleepTimerStoresSelectedDurationAndResetKeepsIt() async {
+    func testSleepTimerStoresSelectedDurationAndResetKeepsIt() async throws {
         let timer = await MainActor.run { SleepTimerService() }
         await MainActor.run { timer.start(minutes: 5) }
         let selected = await MainActor.run { timer.durationSeconds }
