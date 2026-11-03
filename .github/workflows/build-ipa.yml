@@ -1,8 +1,6 @@
 name: Build unsigned IPA
 on:
   workflow_dispatch:
-  push:
-    branches: ['feature/**']
 concurrency:
   group: unsigned-ipa-${{ github.ref }}
   cancel-in-progress: true
