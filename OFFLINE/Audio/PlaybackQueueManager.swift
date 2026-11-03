@@ -56,7 +56,7 @@ import SwiftUI
         syncFromNavigator(); persist(); return id
     }
     func previousID() -> String? { navigator.previous() }
-    func hasNext() -> Bool { navigator.setExplicitQueue(entries.map(\.trackID)); return navigator.hasNext() }
+    func hasNext() -> Bool { navigator.hasNext(explicitQueue: entries.map(\.trackID)) }
     func hasPrevious() -> Bool { navigator.hasPrevious() }
     func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?) {
         currentID = currentTrackID

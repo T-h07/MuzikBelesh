@@ -24,13 +24,19 @@ final class PlaybackNavigationEngine {
     }
 
     func setContext(_ ids: [String], currentID: String?) {
-        let filtered = ids.filter { !context.isEmpty ? ids.contains($0) : true }
+        let filtered = ids
         var unique: [String] = []
         for id in filtered where !unique.contains(id) { unique.append(id) }
+        let libraryChanged = context != unique
         context = unique
         self.currentID = currentID
-        if shuffleEnabled && !shuffleOrder.isEmpty && Set(shuffleOrder) == Set(context.filter { $0 != currentID }) { return }
-        if shuffleEnabled { rebuildShuffle(excluding: currentID) }
+        guard shuffleEnabled else { return }
+        if shuffleOrder.isEmpty && shufflePosition == 0 { rebuildShuffle(excluding: currentID); return }
+        guard libraryChanged else { return }
+        let available = Set(context)
+        shuffleOrder = shuffleOrder.filter { available.contains($0) && $0 != currentID }
+        let known = Set(shuffleOrder)
+        shuffleOrder.append(contentsOf: context.filter { $0 != currentID && !known.contains($0) })
     }
 
     func setCurrent(_ id: String?) { currentID = id }
@@ -68,7 +74,16 @@ final class PlaybackNavigationEngine {
         history = Array(history.prefix(max(0, historyPosition + 1))); history.append(id); historyPosition = history.count - 1
     }
 
-    func hasNext() -> Bool { !explicitQueue.isEmpty || repeatMode == .one && currentID != nil || context.count > 1 && repeatMode == .all || (currentID == nil && !context.isEmpty) || (currentID.flatMap { context.firstIndex(of: $0) }.map { $0 + 1 < context.count } ?? false) }
+    func hasNext(explicitQueue: [String]? = nil) -> Bool {
+        if !(explicitQueue ?? self.explicitQueue).isEmpty { return true }
+        guard !context.isEmpty else { return false }
+        if repeatMode == .one { return currentID != nil }
+        if shuffleEnabled {
+            return shufflePosition < shuffleOrder.count || repeatMode == .all
+        }
+        guard let currentID, let index = context.firstIndex(of: currentID) else { return true }
+        return index + 1 < context.count || repeatMode == .all
+    }
     func hasPrevious() -> Bool { previous() != nil || historyPosition > 0 }
 
     private func rebuildShuffle(excluding id: String?) { shuffleOrder = makeShuffle(context.filter { $0 != id }); shufflePosition = 0 }

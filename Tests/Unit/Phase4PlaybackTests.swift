@@ -37,6 +37,23 @@ final class Phase4PlaybackTests: XCTestCase {
         navigator.cycleRepeat()
         XCTAssertEqual(navigator.next(), "b")
     }
+
+    func testShuffleHasNextUsesRemainingCycleAtLastIndexedTrackWithoutMutation() {
+        let navigator = PlaybackNavigationEngine(makeShuffle: { Array($0) })
+        navigator.restore(context: ["a", "b", "c", "d", "e", "f"], currentID: "f", shuffleEnabled: true, repeatMode: .off, shuffleOrder: ["b", "e", "a"], shufflePosition: 0, history: ["f"], historyPosition: 0, explicitQueue: [])
+        XCTAssertTrue(navigator.hasNext())
+        XCTAssertTrue(navigator.hasNext())
+        XCTAssertEqual(navigator.next(), "b")
+    }
+
+    func testShuffleRefreshPreservesRemainingOrderAndCursor() {
+        let navigator = PlaybackNavigationEngine(makeShuffle: { Array($0) })
+        navigator.restore(context: ["a", "b", "c"], currentID: "a", shuffleEnabled: true, repeatMode: .all, shuffleOrder: ["b", "c"], shufflePosition: 1, history: ["a", "b"], historyPosition: 1, explicitQueue: [])
+        navigator.setContext(["a", "b", "c"], currentID: "b")
+        XCTAssertEqual(navigator.shuffleOrder, ["b", "c"])
+        XCTAssertEqual(navigator.shufflePosition, 1)
+        XCTAssertEqual(navigator.next(), "c")
+    }
     func testRepeatCyclesOffAllOne() {
         XCTAssertEqual(RepeatMode.allCases, [.off, .all, .one])
     }
