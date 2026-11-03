@@ -299,8 +299,8 @@ final class PlaybackServiceAuditTests: XCTestCase {
             let replacements = player.replacements
             await service.seek(to: 3)
             player.duringSeek = nil
-            if mode != .all { await fulfillment(of: [done], timeout: 5) }
-            else { done.fulfill() }
+            if mode == .all { done.fulfill() }
+            await fulfillment(of: [done], timeout: 5)
             await service.completedItem(generation: generation)
             XCTAssertEqual(player.replacements, replacements + 1)
             XCTAssertEqual(service.state.currentTrackID, mode == .all ? "track-0" : "track-1")
