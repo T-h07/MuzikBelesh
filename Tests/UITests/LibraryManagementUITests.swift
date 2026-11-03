@@ -23,9 +23,14 @@ final class LibraryManagementUITests: XCTestCase {
     private func openLibrary(_ filter: String = "Songs") {
         app.tabBars.buttons["Library"].tap()
         let chip = app.buttons["library-filter-" + filter.replacingOccurrences(of: " ", with: "-")]
-        if !chip.isHittable { app.scrollViews["library-filters"].swipeRight(); app.scrollViews["library-filters"].swipeRight() }
-        for _ in 0..<4 { if chip.isHittable { break }; app.scrollViews["library-filters"].swipeLeft() }
-        XCTAssertTrue(chip.waitForExistence(timeout: 5)); chip.tap()
+        let filters = app.scrollViews["library-filters"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        // XCTest can raise an error while computing isHittable for a chip beyond
+        // a horizontal scroll view. Reveal the whole frame before tapping it.
+        func visible() -> Bool { !chip.frame.isEmpty && filters.frame.intersection(app.frame).contains(chip.frame) }
+        if !visible() { filters.swipeRight(); filters.swipeRight() }
+        for _ in 0..<4 { if visible() { break }; filters.swipeLeft() }
+        XCTAssertTrue(visible(), "The selected library category must be fully visible"); chip.tap()
     }
     private func change(_ field: XCUIElement, to text: String) {
         XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap()
