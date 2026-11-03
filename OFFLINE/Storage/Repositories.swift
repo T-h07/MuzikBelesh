@@ -54,7 +54,7 @@ final class GRDBPlaybackRepository: PlaybackRepository {
         }
     }
     func state() throws -> StoredPlaybackState? { try db.read { try StoredPlaybackState.fetchOne($0, key: "default") } }
-    func replaceQueue(_ entries: [StoredQueueEntry]) throws { try db.write { db in try db.inTransaction { try db.execute(sql: "DELETE FROM playback_queue_entries"); for entry in entries { try entry.save(db) }; return .commit } } }
+    func replaceQueue(_ entries: [StoredQueueEntry]) throws { try db.write { db in try db.execute(sql: "DELETE FROM playback_queue_entries"); for entry in entries { try entry.save(db) } } }
     func queue() throws -> [StoredQueueEntry] { try db.read { try StoredQueueEntry.order(Column("position")).fetchAll($0) } }
     func addHistory(_ entry: StoredHistoryEntry) throws { try db.write { try entry.save($0) } }
     func history(limit: Int) throws -> [StoredHistoryEntry] { try db.read { try StoredHistoryEntry.order(Column("startedAt").desc).limit(limit).fetchAll($0) } }

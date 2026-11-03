@@ -52,6 +52,14 @@ https://github.com/T-h07/MuzikBelesh/actions/runs/41642815968 failed:
 three new tests, four assertions. Other baseline tests and UI smoke passed.
 Those exact regression tests remain in the suite unchanged.
 
+Intermediate run b66bb7e (41645685336) executed 54 unit tests: the four navigator
+audit tests passed, but three assertions failed. The symlink test exposed that
+Foundation leaves symlinks unresolved when the leaf does not exist; containment
+now checks each component. Two endpoint assertions incorrectly required Repeat Off
+to continue from the final indexed track. That test now starts at the first indexed
+track with a valid successor, preserving its Next/playing assertions. Native AVPlayer,
+timer, queue, stress and UI smoke checks passed in that intermediate run.
+
 PlaybackServiceAuditTests uses the real service, queue and navigator with an
 injected transport; six synthetic WAV fixtures exercise endpoint seeks in all
 repeat modes, paused recovery, stale/duplicate completion, timer expiry inside seek,

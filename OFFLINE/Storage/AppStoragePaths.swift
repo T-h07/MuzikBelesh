@@ -48,8 +48,12 @@ struct AppStoragePaths {
 
     func relativeURL(_ relativePath: String, in root: URL) throws -> URL {
         guard !relativePath.isEmpty, !relativePath.contains(".."), !relativePath.hasPrefix("/") else { throw StorageError.invalidPath }
-        let url = root.appendingPathComponent(relativePath)
-        guard url.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(root.resolvingSymlinksInPath().standardizedFileURL.path + "/") else { throw StorageError.invalidPath }
+        let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
+        var url = resolvedRoot
+        for component in relativePath.split(separator: "/") {
+            url = url.appendingPathComponent(String(component)).resolvingSymlinksInPath().standardizedFileURL
+            guard url.path.hasPrefix(resolvedRoot.path + "/") else { throw StorageError.invalidPath }
+        }
         return url
     }
 

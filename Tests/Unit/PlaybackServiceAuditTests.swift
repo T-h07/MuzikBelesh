@@ -40,12 +40,12 @@ final class PlaybackServiceAuditTests: XCTestCase {
             for paused in [false, true] {
                 let (_, player, service, root) = try fixture()
                 defer { try? FileManager.default.removeItem(at: root) }
-                try await service.play(trackID: "track-0")
+                try await service.play(trackID: "track-5") // first indexed track, with an eligible manual successor in Repeat Off
                 while service.queue.repeatMode != mode { service.queue.cycleRepeat() }
                 if paused { service.pause() }
                 let generation = service.activeItemGeneration
                 await service.seek(to: 3)
-                if !paused && mode == .all { XCTAssertNotEqual(service.state.currentTrackID, "track-0") }
+                if !paused && mode == .all { XCTAssertNotEqual(service.state.currentTrackID, "track-5") }
                 else { XCTAssertEqual(service.state.elapsedTime, 0) }
                 if paused || mode == .off { XCTAssertFalse(player.isPlaying) }
                 await service.completedItem(generation: generation)
@@ -79,7 +79,7 @@ final class PlaybackServiceAuditTests: XCTestCase {
         service.queue.cycleRepeat() // All -> One
         service.sleepTimer.start(minutes: 1)
         let deadline = try XCTUnwrap(service.sleepTimer.deadline)
-        player.duringSeek = { service.sleepTimer.checkDeadline(now: deadline.addingTimeInterval(1)) }
+        player.duringSeek = { [weak service] in service?.sleepTimer.checkDeadline(now: deadline.addingTimeInterval(1)) }
         await service.seek(to: 3)
         player.duringSeek = nil
         await service.completedItem(generation: service.activeItemGeneration)
@@ -169,6 +169,18 @@ final class PlaybackServiceAuditTests: XCTestCase {
         XCTAssertTrue(service.state.canSkipNext)
         XCTAssertTrue(player.isPlaying)
         XCTAssertNotEqual(service.state.currentTrackID, "track-0")
+        let rapid = expectation(description: "Four ordered remote skips")
+        rapid.expectedFulfillmentCount = 4
+        var selected: [String] = []
+        for _ in 0..<4 {
+            service.enqueueRemote(command: "rapid-test-next") {
+                await service.next()
+                selected.append(service.state.currentTrackID ?? "")
+                rapid.fulfill()
+            }
+        }
+        await fulfillment(of: [rapid], timeout: 10)
+        XCTAssertEqual(selected, ["track-4", "track-3", "track-2", "track-1"])
         remote.unregister(); XCTAssertEqual(remote.registrationCount, 0)
     }
 
@@ -176,7 +188,7 @@ final class PlaybackServiceAuditTests: XCTestCase {
         let (_, player, service, root) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         try await service.play(trackID: "track-0")
-        player.duringSeek = { service.pause() }
+        player.duringSeek = { [weak service] in service?.pause() }
         await service.seek(to: 1)
         player.duringSeek = nil
         XCTAssertFalse(player.isPlaying)
@@ -184,5 +196,19 @@ final class PlaybackServiceAuditTests: XCTestCase {
         let count = player.seeks.count
         await service.seek(to: .nan); await service.seek(to: .infinity)
         XCTAssertEqual(player.seeks.count, count)
+    }
+
+    @MainActor func testSeekBackwardAfterRepeatOffCompletionResumesSameItem() async throws {
+        let (_, player, service, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await service.play(trackID: "track-0") // final indexed track in date-descending context
+        service.queue.cycleRepeat(); service.queue.cycleRepeat() // All -> One -> Off
+        await service.completedItem(generation: service.activeItemGeneration)
+        XCTAssertEqual(service.state.status, .ended)
+        await service.seek(to: 1)
+        XCTAssertEqual(service.state.status, .paused)
+        try await service.play()
+        XCTAssertEqual(service.state.currentTrackID, "track-0")
+        XCTAssertTrue(player.isPlaying)
     }
 }

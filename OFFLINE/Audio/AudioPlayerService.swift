@@ -34,6 +34,8 @@ final class AudioPlayerService: ObservableObject {
     private var userPausedDuringInterruption = false
     private var itemGeneration = 0
     private let endpointTolerance: TimeInterval = 0.25
+    private var remoteOperations: [(String, () async -> Void)] = []
+    private var processingRemote = false
 
     init(storage: StorageCoordinator?, player: PlaybackPlayer? = nil, registerRemoteCommands: Bool = true, makeShuffle: @escaping ([String]) -> [String] = { $0.shuffled() }) {
         self.player = player ?? NativePlaybackPlayer()
@@ -148,11 +150,17 @@ final class AudioPlayerService: ObservableObject {
 
     func playFromRemote() async { do { try await play() } catch { handleTransitionFailure(error) } }
     func enqueueRemote(command: String, operation: @escaping () async -> Void) {
+        remoteOperations.append((command, operation))
+        guard !processingRemote else { return }
+        processingRemote = true
         Task { @MainActor [weak self] in
-            #if DEBUG
-            self?.debugTransition(action: "remote-\(command)", detail: "service=\(self.map { ObjectIdentifier($0).hashValue } ?? 0)")
-            #endif
-            await operation()
+            guard let self else { return }
+            defer { self.processingRemote = false }
+            while !self.remoteOperations.isEmpty {
+                let (command, operation) = self.remoteOperations.removeFirst()
+                self.debugTransition(action: "remote-\(command)", detail: "service=\(ObjectIdentifier(self).hashValue)")
+                await operation()
+            }
         }
     }
     func pause() { intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
@@ -244,6 +252,7 @@ final class AudioPlayerService: ObservableObject {
             guard finished else { handleTransitionFailure(AudioPlaybackError.playerFailed("Seek was cancelled.")); return }
             state.elapsedTime = bounded
             completedGeneration = nil
+            if !wantsPlayback { state.status = .paused } else { synchronizeTransport() }
         }
         updateSkipAvailability(); publishCurrent(); persist()
     }

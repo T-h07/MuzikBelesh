@@ -42,6 +42,7 @@ final class PlaybackHistoryService {
     var isActive: Bool { deadline != nil }
     var remaining: TimeInterval { max(0, deadline?.timeIntervalSinceNow ?? 0) }
     init(deadline: Date? = nil, duration: TimeInterval? = nil) { self.deadline = deadline; self.durationSeconds = duration; schedule() }
+    deinit { task?.cancel() }
     func start(minutes: Int) { start(duration: TimeInterval(minutes) * 60) }
     func start(duration: TimeInterval) { guard duration.isFinite, duration >= 60, duration <= 7 * 24 * 60 * 60 else { return }; durationSeconds = duration; deadline = Date().addingTimeInterval(duration); schedule(); onChange?() }
     func cancel() { task?.cancel(); task = nil; deadline = nil; durationSeconds = nil; onChange?() }
