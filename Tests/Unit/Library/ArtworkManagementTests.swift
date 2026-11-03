@@ -59,6 +59,7 @@ final class ArtworkManagementTests: XCTestCase {
         var shared = try XCTUnwrap(f.storage.tracks.find(id: f.ids[1])); shared.artworkRelativePath = old; try f.storage.tracks.save(shared)
         try await library.saveMetadata(trackID: f.ids[0], draft: draft, artworkData: LibraryFixture.image(png: false))
         XCTAssertTrue(FileManager.default.fileExists(atPath: try f.paths.artworkURL(relativePath: old).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try f.paths.artworkURL(relativePath: ManagedLibraryFiles.thumbnailName(old)).path))
         try await library.saveMetadata(trackID: f.ids[1], draft: draft, artworkData: nil, removeArtwork: true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: try f.paths.artworkURL(relativePath: old).path))
         XCTAssertNotNil(try f.storage.tracks.find(id: f.ids[0])?.artworkRelativePath)

@@ -36,6 +36,9 @@ enum ManagedLibraryFiles {
     static func cleanupArtwork(_ path: String?, paths: AppStoragePaths, db: DatabaseQueue) throws {
         guard let path, ownedArtwork(path) else { return }
         try db.write { database in
+            // A thumbnail belongs to its full-size cover even when no row points
+            // directly at the thumbnail. Keep both while that cover is shared.
+            guard try artworkReferences(path, db: database) == 0 else { return }
             for candidate in [path, thumbnailName(path)] where try artworkReferences(candidate, db: database) == 0 {
                 let url = try paths.artworkURL(relativePath: candidate)
                 if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
