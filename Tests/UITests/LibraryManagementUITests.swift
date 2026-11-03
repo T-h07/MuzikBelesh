@@ -58,6 +58,35 @@ final class LibraryManagementUITests: XCTestCase {
     }
     private func actions(_ id: String) { tapVisible(app.buttons["track-actions-" + id]) }
 
+    func testSearchSubmitDismissesKeyboardAndCanReopen() {
+        app.tabBars.buttons["Search"].tap()
+        let field = app.textFields["search-field"]
+        field.tap(); field.typeText("Fixture\n")
+        absent(app.keyboards.firstMatch)
+        field.tap(); XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["keyboard-done"].tap(); absent(app.keyboards.firstMatch)
+        app.tabBars.buttons["Library"].tap()
+        XCTAssertTrue(app.staticTexts["Library"].waitForExistence(timeout: 5))
+    }
+
+    func testNewPlaylistIsImmediatelySearchableFromSearchTab() {
+        createPlaylist("Searchable Road")
+        app.tabBars.buttons["Search"].tap(); app.buttons["Your Library"].tap()
+        change(app.textFields["search-field"], to: "Searchable Road")
+        XCTAssertTrue(app.staticTexts["Searchable Road"].waitForExistence(timeout: 8))
+        app.staticTexts["Searchable Road"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Playlist"].waitForExistence(timeout: 5))
+        absent(app.keyboards.firstMatch)
+    }
+
+    func testLibrarySearchRemainsAvailableWhenFilteringPlaylists() {
+        createPlaylist("Library Search Road")
+        let field = app.textFields["search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        change(field, to: "Library Search Road\n")
+        XCTAssertTrue(app.staticTexts["Library Search Road"].waitForExistence(timeout: 5))
+    }
+
     func testLibraryAlbumArtistAndSortingLayouts() {
         openLibrary()
         app.buttons["library-sort"].tap(); app.buttons["Name A–Z"].tap()
