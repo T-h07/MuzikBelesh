@@ -27,7 +27,7 @@ final class PlaybackNavigationEngine {
         let filtered = ids
         var unique: [String] = []
         for id in filtered where !unique.contains(id) { unique.append(id) }
-        let libraryChanged = context != unique
+        let oldContext = Set(context)
         context = unique
         self.currentID = currentID
         let available = Set(context)
@@ -36,11 +36,9 @@ final class PlaybackNavigationEngine {
         history = before + after; historyPosition = before.count - 1
         guard shuffleEnabled else { return }
         if shuffleOrder.isEmpty && shufflePosition == 0 { rebuildShuffle(excluding: currentID); return }
-        guard libraryChanged else { return }
         let consumed = Array(shuffleOrder.prefix(shufflePosition)).filter { available.contains($0) }
         let remaining = Array(shuffleOrder.dropFirst(shufflePosition)).filter { available.contains($0) }
-        let known = Set(shuffleOrder)
-        shuffleOrder = consumed + remaining + context.filter { $0 != currentID && !known.contains($0) }
+        shuffleOrder = consumed + remaining + context.filter { $0 != currentID && !oldContext.contains($0) }
         shufflePosition = consumed.count
     }
 

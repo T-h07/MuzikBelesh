@@ -24,4 +24,12 @@ final class AuditRegressionTests: XCTestCase {
         engine.setContext(["a", "c"], currentID: "c")
         XCTAssertEqual(engine.previous(), "a")
     }
+
+    func testMalformedRestoredOrderDropsUnknownIDsWithoutResettingCursor() {
+        let engine = PlaybackNavigationEngine(makeShuffle: { $0 })
+        engine.restore(context: ["a", "b", "c"], currentID: "a", shuffleEnabled: true, repeatMode: .off, shuffleOrder: ["unknown", "b", "c"], shufflePosition: 1, history: ["a"], historyPosition: 0, explicitQueue: [])
+        engine.setContext(["a", "b", "c"], currentID: "a")
+        XCTAssertTrue(engine.hasNext())
+        XCTAssertEqual(engine.next(), "b")
+    }
 }
