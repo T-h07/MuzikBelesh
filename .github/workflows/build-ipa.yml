@@ -1,8 +1,6 @@
 name: Build unsigned IPA
 on:
   workflow_dispatch:
-  push:
-    branches: ['feature/**']
 concurrency:
   group: unsigned-ipa-${{ github.ref }}
   cancel-in-progress: true
@@ -19,13 +17,18 @@ jobs:
       - name: Generate and resolve
         run: xcodegen generate && xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
       - name: Build unsigned device app
-        run: xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" clean build
+        run: |
+          GIT_COMMIT_SHORT="${GITHUB_SHA:0:7}"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" clean build
       - name: Package and validate IPA
         run: bash Scripts/package-ipa.sh
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: OFFLINE-unsigned-IPA
-          path: build/ipa/OFFLINE-unsigned.ipa
+          path: |
+            build/ipa/OFFLINE-unsigned.ipa
+            build/ipa/OFFLINE-build-manifest.json
           if-no-files-found: error
 

@@ -1,0 +1,3 @@
+# Sleep Timer
+
+The timer supports 5, 10, 15, 30, 45, and 60 minute presets plus validated durations of at least one minute. It stores one absolute deadline and the selected duration, so queue, shuffle, repeat, seek, and track transitions cannot reset or erase it. Foreground and playback checkpoints reconcile the deadline after suspension. Cancel clears it; reset replaces it with the same duration. Expiration pauses the authoritative AVPlayer, preserves the current track and queue, and does not advance automatically. The active timer is observed directly by the Now Playing, mini-player, tab, and Settings indicators.

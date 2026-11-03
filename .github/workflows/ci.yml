@@ -1,17 +1,21 @@
 name: CI
 on:
   pull_request: {branches: [develop]}
-  push: {branches: [develop]}
+  push:
+    branches: [develop, 'feature/**']
   workflow_dispatch:
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 permissions: {contents: read}
 jobs:
   build-and-test:
     runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install XcodeGen
         run: |
           brew install xcodegen
@@ -33,5 +37,15 @@ jobs:
           test -n "$DEVICE_ID"
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
       - name: Build and test
-        run: xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" test CODE_SIGNING_ALLOWED=NO
+        run: |
+          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playback-test-results
+          path: build/TestResults.xcresult
+          if-no-files-found: ignore
 

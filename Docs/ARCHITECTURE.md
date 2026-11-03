@@ -10,3 +10,11 @@ The Share extension is a separate target with its own bundle identifier and acti
 
 Phase 2 provides the GRDB repositories and Phase 3 provides the AVFoundation/MediaPlayer playback subsystem. Phase 3 is complete and was accepted through developer-reported iPhone 13 Pro Max validation. Later phases may add the production YouTube integration, download manager, and supported Share handoff. Development infrastructure remains outside runtime code.
 
+# Phase 4 playback responsibilities
+
+`AudioPlayerService` remains the only AVPlayer authority. `PlaybackQueueManager` owns persistent queue occurrences, context ordering, shuffle cycles, and repeat mode; `PlaybackHistoryService` records actual starts; `SleepTimerService` owns a persisted deadline and asks the same service to pause. No feature creates a second player.
+
+The audit adds an injectable `PlaybackPlayer` transport and a suspending FIFO command
+gate to the existing service. Queue candidates commit after asset validation and
+item selection; queue and playback snapshots are saved in one SQLite transaction.
+See [the audit register and acceptance plan](APPLICATION_AUDIT.md).

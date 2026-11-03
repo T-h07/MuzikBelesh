@@ -67,6 +67,13 @@ struct StoredPlaybackState: Codable, FetchableRecord, PersistableRecord {
     var positionMs: Int64
     var shuffleEnabled: Bool
     var repeatMode: String
+    var contextTrackIDsJSON: String? = nil
+    var shuffleOrderJSON: String? = nil
+    var shufflePosition: Int? = nil
+    var sleepTimerDeadlineMs: Int64? = nil
+    var sleepTimerDurationMs: Int64? = nil
+    var navigationHistoryJSON: String? = nil
+    var navigationHistoryPosition: Int? = nil
     var dateModified: Date
 }
 
@@ -76,6 +83,7 @@ struct StoredQueueEntry: Codable, FetchableRecord, PersistableRecord, Identifiab
     var trackID: String
     var position: Int
     var dateAdded: Date
+    var origin: String = "addToQueue"
 }
 
 struct StoredHistoryEntry: Codable, FetchableRecord, PersistableRecord, Identifiable {

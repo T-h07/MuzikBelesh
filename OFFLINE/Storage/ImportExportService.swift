@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import GRDB
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -29,7 +31,7 @@ final class StorageCoordinator: ObservableObject {
         reload()
     }
 
-    func reload() { library = (try? tracks.all()) ?? [] }
+    func reload() { do { library = try tracks.all() } catch { lastError = "Local music could not be loaded." } }
     func artistName(for id: String?) -> String? { guard let id else { return nil }; return try? database.dbQueue.read { try String.fetchOne($0, sql: "SELECT name FROM artists WHERE id = ?", arguments: [id]) } }
     func albumTitle(for id: String?) -> String? { guard let id else { return nil }; return try? database.dbQueue.read { try String.fetchOne($0, sql: "SELECT title FROM albums WHERE id = ?", arguments: [id]) } }
 
@@ -45,6 +47,8 @@ final class StorageCoordinator: ObservableObject {
         var destination: URL?
         var artworkURL: URL?
         do {
+            try await database.dbQueue.write { try operation.save($0) }
+            try Task.checkCancellation()
             let metadata = try await audio.validate(source)
             try audio.copyStreaming(from: source, to: stagingURL)
             let hash = try audio.sha256(url: stagingURL)
@@ -53,7 +57,7 @@ final class StorageCoordinator: ObservableObject {
                 return ImportResult(track: existing, duplicate: true)
             }
 
-            let id = UUID().uuidString
+            let id = operationID
             let relativeAudio = "\(id).\(ext)"
             destination = try paths.musicURL(relativePath: relativeAudio)
             let artworkRelative: String?
@@ -68,12 +72,17 @@ final class StorageCoordinator: ObservableObject {
 
             let artistName = normalizedOptional(metadata.artist)
             let albumTitle = normalizedOptional(metadata.album)
-            let artistID = artistName.map { stableID(prefix: "artist", value: $0) }
-            let albumID = albumTitle.map { stableID(prefix: "album", value: "\($0)|\(artistName ?? "")") }
+            let artistID = try artistName.map { name in
+                try database.dbQueue.read { db in try String.fetchOne(db, sql: "SELECT id FROM artists WHERE normalizedName = ? LIMIT 1", arguments: [name]) } ?? stableID(prefix: "artist", value: name)
+            }
+            let albumID = try albumTitle.map { title in
+                try database.dbQueue.read { db in try String.fetchOne(db, sql: "SELECT id FROM albums WHERE normalizedTitle = ? AND artistID IS ? LIMIT 1", arguments: [title, artistID]) } ?? stableID(prefix: "album", value: "\(title)|\(artistName ?? "")")
+            }
             let now = Date()
             let track = StoredTrack(id: id, title: metadata.title, artistID: artistID, albumID: albumID, durationMs: metadata.durationMs, fileRelativePath: relativeAudio, fileExtension: ext, fileSizeBytes: (try FileManager.default.attributesOfItem(atPath: stagingURL.path)[.size] as? NSNumber)?.int64Value ?? 0, contentSHA256: hash, artworkRelativePath: artworkRelative, availability: .available, dateAdded: now, dateModified: now, originalFilename: source.lastPathComponent, metadataSource: "local_import")
 
             try audio.copyStreaming(from: stagingURL, to: destination!)
+            try Task.checkCancellation()
             try await database.dbQueue.write { db in
                 try operation.save(db)
                 if let artistName, let artistID {
@@ -87,12 +96,13 @@ final class StorageCoordinator: ObservableObject {
                 try db.execute(sql: "UPDATE import_operations SET state = 'committed', dateUpdated = ? WHERE id = ?", arguments: [now, operationID])
             }
             try? FileManager.default.removeItem(at: stagingURL)
-            reload()
+            await MainActor.run { reload() }
             return ImportResult(track: track, duplicate: false)
         } catch {
             try? FileManager.default.removeItem(at: stagingURL)
             if let destination { try? FileManager.default.removeItem(at: destination) }
             if let artworkURL { try? FileManager.default.removeItem(at: artworkURL) }
+            try? await database.dbQueue.write { db in try db.execute(sql: "UPDATE import_operations SET state = 'rolled_back', dateUpdated = ? WHERE id = ?", arguments: [Date(), operationID]) }
             throw error is StorageError ? error : StorageError.importIncomplete
         }
     }
@@ -106,11 +116,21 @@ final class StorageCoordinator: ObservableObject {
     }
 
     func reconcileMissingFiles() throws {
+        let interrupted = try database.dbQueue.read { try StoredImportOperation.filter(Column("state") == "staging").fetchAll($0) }
+        for operation in interrupted where UUID(uuidString: operation.id) != nil {
+            guard try tracks.find(id: operation.id) == nil else { continue }
+            let ext = URL(fileURLWithPath: operation.stagingRelativePath).pathExtension
+            guard SupportedAudioFormat.extensions.contains(ext) else { continue }
+            let audio = try paths.musicURL(relativePath: "\(operation.id).\(ext)")
+            let artwork = try paths.artworkURL(relativePath: "\(operation.id).jpg")
+            for file in [audio, artwork] where FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+            try database.dbQueue.write { db in try db.execute(sql: "UPDATE import_operations SET state = 'rolled_back', dateUpdated = ? WHERE id = ?", arguments: [Date(), operation.id]) }
+        }
         for track in try tracks.all() { let url = try paths.musicURL(relativePath: track.fileRelativePath); if !FileManager.default.fileExists(atPath: url.path) { try tracks.updateAvailability(id: track.id, .missing) } }
         for file in (try? FileManager.default.contentsOfDirectory(at: paths.imports, includingPropertiesForKeys: nil)) ?? [] { try? FileManager.default.removeItem(at: file) }
     }
 
-    private func stableID(prefix: String, value: String) -> String { "\(prefix)-" + normalized(value).data(using: .utf8)!.map { String(format: "%02x", $0) }.joined().prefix(32) }
+    private func stableID(prefix: String, value: String) -> String { "\(prefix)-" + SHA256.hash(data: Data(normalized(value).utf8)).map { String(format: "%02x", $0) }.joined() }
     private func normalized(_ value: String) -> String { value.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: .diacriticInsensitive, locale: .current).lowercased() }
     private func normalizedOptional(_ value: String?) -> String? {
         guard let value else { return nil }

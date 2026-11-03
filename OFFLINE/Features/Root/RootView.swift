@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
@@ -12,9 +13,10 @@ struct RootView: View {
             TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
         .tint(AppColors.accentPrimary)
+        .onChange(of: scenePhase) { _, phase in if phase == .active { audioPlayer.reconcileLifecycle() } }
         .preferredColorScheme(.dark)
         .sheet(item: $coordinator.sheet) { sheet in
-            switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet() }
+            switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
         }
         .fullScreenCover(isPresented: $coordinator.showingNowPlaying) { NowPlayingView(coordinator: coordinator) }
     }
@@ -24,6 +26,7 @@ private struct TabContent<Content: View>: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     let coordinator: AppCoordinator
     let content: Content
+    @State private var showingTimer = false
 
     init(coordinator: AppCoordinator, @ViewBuilder content: () -> Content) {
         self.coordinator = coordinator
@@ -32,12 +35,12 @@ private struct TabContent<Content: View>: View {
 
     var body: some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if audioPlayer.state.currentTrackID != nil {
-                MiniPlayer(coordinator: coordinator)
-                    .padding(.horizontal, AppSpacing.sm)
-                    .padding(.top, AppSpacing.sm)
-            }
+            VStack(spacing: AppSpacing.xs) {
+                SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
+                if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.horizontal, AppSpacing.sm) }
+            }.padding(.top, AppSpacing.sm)
         }
+        .sheet(isPresented: $showingTimer) { SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
     }
 }
 
@@ -66,10 +69,10 @@ struct TrackContextMenu: View {
     @EnvironmentObject private var container: AppContainer
     let track: MockTrack
     var body: some View {
-        Button {} label: { Label("Import local audio to play", systemImage: "waveform") }
-        Button { container.playback.addToQueue(track.id) } label: { Label("Add to Queue", systemImage: "text.badge.plus") }
+        Button {} label: { Label("Demo track · import local audio to play", systemImage: "waveform") }.disabled(true)
+        Button { container.playback.addToQueue(track.id) } label: { Label("Add to Demo Queue", systemImage: "text.badge.plus") }
         Button { container.music.toggleLiked(track.id) } label: { Label(container.music.likedTrackIDs.contains(track.id) ? "Unlike" : "Like", systemImage: "heart") }
-        Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
+        Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Demo Playlist", systemImage: "text.badge.plus") }
     }
 }
 

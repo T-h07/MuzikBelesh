@@ -11,7 +11,7 @@ struct AudioMetadata: Equatable {
 }
 
 enum SupportedAudioFormat {
-    static let extensions = Set(["m4a", "mp3", "wav", "aiff", "aif", "caf"])
+    static let extensions = Set(["m4a", "mp3", "aac", "wav", "aiff", "aif", "caf"])
     static func isSupported(_ url: URL) -> Bool { extensions.contains(url.pathExtension.lowercased()) }
 }
 
@@ -45,16 +45,23 @@ final class AudioFileService {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()
-        while autoreleasepool(invoking: { let data = try? handle.read(upToCount: 1024 * 1024); if let data, !data.isEmpty { hasher.update(data: data); return true }; return false }) { }
+        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hasher.update(data: data) }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     func copyStreaming(from source: URL, to destination: URL) throws {
+        guard source.resolvingSymlinksInPath().standardizedFileURL != destination.resolvingSymlinksInPath().standardizedFileURL else { throw StorageError.invalidPath }
         let input = try FileHandle(forReadingFrom: source)
         defer { try? input.close() }
-        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        guard !FileManager.default.fileExists(atPath: destination.path), FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw StorageError.exportFailed }
         let output = try FileHandle(forWritingTo: destination)
         defer { try? output.close() }
-        while let data = try input.read(upToCount: 1024 * 1024), !data.isEmpty { try output.write(contentsOf: data) }
+        do {
+            while let data = try input.read(upToCount: 1024 * 1024), !data.isEmpty { try output.write(contentsOf: data) }
+        } catch {
+            try? output.close()
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
     }
 }

@@ -33,7 +33,9 @@ targets:
       properties:
         CFBundleDisplayName: Muzik Belesh
         CFBundleShortVersionString: '0.1.0'
-        CFBundleVersion: '3'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
+        MBBuildCommit: '$(GIT_COMMIT_SHORT)'
+        MBBuildDate: '$(BUILD_DATE)'
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
@@ -44,6 +46,9 @@ targets:
         TARGETED_DEVICE_FAMILY: '1'
         SUPPORTS_MACCATALYST: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GIT_COMMIT_SHORT: local
+        BUILD_DATE: unknown
+        CURRENT_PROJECT_VERSION: '3'
       configs:
         Debug: {SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG}
         Release: {SWIFT_OPTIMIZATION_LEVEL: -O}
@@ -88,6 +93,8 @@ targets:
       properties:
         CFBundleDisplayName: Muzik Belesh
         CFBundlePackageType: 'XPC!'
+        CFBundleShortVersionString: '0.1.0'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
