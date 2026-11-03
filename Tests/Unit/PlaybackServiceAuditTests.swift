@@ -124,9 +124,12 @@ final class PlaybackServiceAuditTests: XCTestCase {
             case 9: await service.completedItem(generation: service.activeItemGeneration)
             case 10: await service.seek(to: 3)
             default:
-                let restored = PlaybackQueueManager(storage: storage)
+                let restored = PlaybackQueueManager(storage: storage, makeShuffle: { $0 })
                 XCTAssertEqual(restored.shuffleEnabled, service.queue.shuffleEnabled)
                 XCTAssertEqual(restored.repeatMode, service.queue.repeatMode)
+                restored.setContext(service.queue.contextTrackIDs, current: service.state.currentTrackID)
+                XCTAssertEqual(restored.nextID(), service.queue.nextID(), "Restoration must preserve the future successor at operation \(step)")
+                restored.cancelCandidate(); service.queue.cancelCandidate()
             }
             XCTAssertTrue(service.state.elapsedTime.isFinite)
             XCTAssertFalse(service.state.isSeeking)
