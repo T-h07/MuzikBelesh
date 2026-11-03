@@ -23,6 +23,7 @@ final class PlaybackNavigationEngine {
         self.shuffleOrder = shuffleOrder; self.shufflePosition = min(shuffleOrder.count, max(0, shufflePosition))
         self.history = history; self.historyPosition = history.isEmpty ? -1 : min(max(-1, historyPosition), history.count - 1)
         self.explicitQueue = explicitQueue
+        reconcileHistoryCursor()
     }
 
     func setContext(_ ids: [String], currentID: String?) {
@@ -46,13 +47,19 @@ final class PlaybackNavigationEngine {
 
     func setCurrent(_ id: String?) { currentID = id }
     func setExplicitQueue(_ ids: [String]) { explicitQueue = ids }
-    func setShuffleEnabled(_ enabled: Bool) { shuffleEnabled = enabled; if enabled { rebuildShuffle(excluding: currentID) } else { shuffleOrder = []; shufflePosition = 0 } }
+    func setShuffleEnabled(_ enabled: Bool) {
+        guard enabled != shuffleEnabled else { return }
+        reconcileHistoryCursor()
+        shuffleEnabled = enabled
+        if enabled { rebuildShuffle(excluding: currentID) }
+        else { shuffleOrder = []; shufflePosition = 0 }
+    }
     func cycleRepeat() { repeatMode = RepeatMode.allCases[(RepeatMode.allCases.firstIndex(of: repeatMode)! + 1) % RepeatMode.allCases.count] }
 
     func next(reason: PlaybackAdvanceReason = .automatic) -> String? {
         if !explicitQueue.isEmpty { return explicitQueue.removeFirst() }
         guard !context.isEmpty else { return nil }
-        if historyPosition + 1 < history.count { return history[historyPosition + 1] }
+        if shuffleEnabled, hasCurrentHistoryEntry, historyPosition + 1 < history.count { return history[historyPosition + 1] }
         if repeatMode == .one, let currentID { return currentID }
         if shuffleEnabled {
             if shufflePosition >= shuffleOrder.count {
@@ -69,23 +76,27 @@ final class PlaybackNavigationEngine {
     }
 
     func previous() -> String? {
-        if historyPosition > 0 { return history[historyPosition - 1] }
-        if shuffleEnabled { return nil }
-        guard let currentID, let index = context.firstIndex(of: currentID), index > 0 else { return nil }
-        return context[index - 1]
+        if shuffleEnabled {
+            return hasCurrentHistoryEntry && historyPosition > 0 ? history[historyPosition - 1] : nil
+        }
+        guard let currentID, let index = context.firstIndex(of: currentID) else { return nil }
+        if index > 0 { return context[index - 1] }
+        return repeatMode == .all ? context.last : nil
     }
 
     func didStart(_ id: String, direction: NavigationDirection) {
         currentID = id
-        if direction == .previous, historyPosition > 0 { historyPosition -= 1; return }
-        if historyPosition + 1 < history.count, history[historyPosition + 1] == id { historyPosition += 1; return }
+        // Only move the history cursor when the committed song matches that slot.
+        // A sequential predecessor need not be the previous history entry.
+        if direction == .previous, historyPosition > 0, history[historyPosition - 1] == id { historyPosition -= 1; return }
+        if direction == .forward, historyPosition >= 0, historyPosition + 1 < history.count, history[historyPosition + 1] == id { historyPosition += 1; return }
         history = Array(history.prefix(max(0, historyPosition + 1))); history.append(id); historyPosition = history.count - 1
     }
 
     func hasNext(reason: PlaybackAdvanceReason = .automatic, explicitQueue: [String]? = nil) -> Bool {
         if !(explicitQueue ?? self.explicitQueue).isEmpty { return true }
         guard !context.isEmpty else { return false }
-        if historyPosition + 1 < history.count { return true }
+        if shuffleEnabled, hasCurrentHistoryEntry, historyPosition + 1 < history.count { return true }
         if repeatMode == .one { return currentID != nil }
         if shuffleEnabled {
             return shufflePosition < shuffleOrder.count || repeatMode == .all || reason == .manual
@@ -93,7 +104,17 @@ final class PlaybackNavigationEngine {
         guard let currentID, let index = context.firstIndex(of: currentID) else { return true }
         return index + 1 < context.count || repeatMode == .all
     }
-    func hasPrevious() -> Bool { previous() != nil || historyPosition > 0 }
+    func hasPrevious() -> Bool { previous() != nil }
+
+    private var hasCurrentHistoryEntry: Bool {
+        history.indices.contains(historyPosition) && history[historyPosition] == currentID
+    }
+
+    private func reconcileHistoryCursor() {
+        guard !hasCurrentHistoryEntry else { return }
+        // Keep the history; repair only its cursor against the committed song.
+        historyPosition = currentID.flatMap { history.lastIndex(of: $0) } ?? -1
+    }
 
     func copy() -> PlaybackNavigationEngine {
         let result = PlaybackNavigationEngine(makeShuffle: makeShuffle)

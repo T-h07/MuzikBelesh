@@ -72,13 +72,11 @@ import SwiftUI
         normalizeAndPersist()
     }
     func cancelCandidate() { pendingNavigator = nil; pendingQueueEntryID = nil }
-    func previousID(historyOnly: Bool = false) -> String? {
-        if historyOnly && navigator.historyPosition <= 0 { return nil }
-        return navigator.previous()
-    }
+    func previousID() -> String? { navigator.previous() }
     func hasNext(reason: PlaybackAdvanceReason = .automatic) -> Bool { navigator.hasNext(reason: reason, explicitQueue: entries.map(\.trackID)) }
     var navigationDiagnostics: [String: String] {
         ["shuffle": String(shuffleEnabled), "repeat": repeatMode.rawValue,
+         "navigationPolicy": shuffleEnabled ? "playback-history" : "library-order",
          "shufflePosition": String(navigator.shufflePosition), "cycleLength": String(navigator.shuffleOrder.count),
          "historyPosition": String(navigator.historyPosition), "historyLength": String(navigator.history.count),
          "automaticNext": String(hasNext()), "manualNext": String(hasNext(reason: .manual)),

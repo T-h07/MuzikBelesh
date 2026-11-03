@@ -201,3 +201,68 @@ in-place update remain **unverified until physical retest**. Export diagnostics
 before relaunch if the failure recurs; include device/iOS/build/SHA and the time.
 
 **FINAL STATUS: PHASE 4 END-OF-TRACK RECOVERY REWORK — AWAITING PHYSICAL DEVICE RETEST.**
+
+
+## Phase 4 follow-up: Previous uses the active navigation policy (2026-11-03)
+
+Physical report on `e8dc874ff214cb2b0496a5d6dbbe2e7590699e73`, iPhone 13 Pro Max:
+Future is the first indexed Library song, Peso the second. With Repeat Off, the
+first Previous restarts Future and the second unexpectedly selects Peso. Shuffle
+state is not inferred from the screenshots; both modes are tested independently.
+
+### Confirmed mechanism
+
+`PlaybackNavigationEngine.previous()` returned the previous history entry before
+checking Shuffle. Thus history `[Peso, Future]` overrode the first Library boundary
+in sequential mode. `AudioPlayerService.previous()` correctly applied the >3s
+restart rule, which explains why only the second press exposed the bad successor.
+Seeking to zero preserved the history; the bug was the policy used to read it.
+`hasPrevious()` also advertised availability from history despite the linear
+boundary. The same history precedence existed in Next/hasNext, so switching out of
+Shuffle could retain an unrelated forward branch too.
+
+A second defect was `didStart(..., .previous)` blindly decrementing historyPosition.
+If the indexed predecessor differed from the historical predecessor, the cursor
+could point at a song other than currentID. Returning to Shuffle or restoring that
+snapshot could then use an incorrect predecessor.
+
+### Corrected policy
+
+- Shuffle Off navigates Library order. Repeat Off/One has no predecessor at index
+  zero. Repeat All wraps at Library boundaries in both directions. History from
+  other playback/context ordering cannot override either linear direction.
+- Shuffle On follows actual committed history for Previous and forward history
+  replay, with Repeat Off and All. Without previous history it does not invent a
+  predecessor using Library index. The service can safely restart the current song.
+- Ordinary playback above three seconds still restarts before changing song.
+  Ended/failed recovery uses this same mode-dependent predecessor; if none exists,
+  the existing reload/restart fallback remains. This supersedes the earlier
+  incident's mode-independent wording about terminal history navigation.
+- History is retained on Shuffle toggles. Cursor movement requires the committed
+  song to match the adjacent history slot; otherwise the actual transition is
+  recorded at the current branch. Only an abandoned forward branch is replaced,
+  following the existing navigation-history model. Mode switches and restoration
+  repair a mismatched cursor against currentID without clearing the history.
+- Context filtering retains available history and its current position. Normal
+  context refresh during an in-flight selection does not prematurely move the
+  committed history cursor. Snapshot schema and atomic persistence are unchanged.
+
+### Regression evidence and device retest
+
+Test-only source `842cb43` reproduces the sequential first/second-index history
+precedence and the service's 10s restart followed by an incorrect second Previous.
+[Failing-before CI](https://github.com/T-h07/MuzikBelesh/actions/runs/41673577761)
+records three failing regression cases with five failed assertions across 78
+unit/integration tests; the UI test and independent Shuffle On cases passed.
+The expanded tests cover all twelve requested conditions,
+including mode toggles, committed cursor identity, persisted history restoration,
+context filtering, Repeat All, and the same remote dispatch/capability path used by
+Lock Screen. Existing EOF, native AVPlayer, timer, queue and SQLite tests remain in
+the full suite. Final source, CI and IPA provenance are recorded in PR #5.
+
+Physical iPhone retesting is still required. With Repeat Off, verify Future at
+10s restarts; near zero the next Previous stays on Future with Shuffle Off and
+selects the genuinely preceding Peso with Shuffle On. Retest both toggle directions,
+relaunch and Lock Screen; export Settings / Diagnostics if behavior differs.
+The trace now labels `navigationPolicy` as `library-order` or `playback-history`.
+No physical success is claimed. PR #5 stays open; no merge or Phase 5 work.

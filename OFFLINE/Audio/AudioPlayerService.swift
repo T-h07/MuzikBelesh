@@ -200,7 +200,7 @@ final class AudioPlayerService: ObservableObject {
         if !ended && state.elapsedTime > 3 { await performSeek(to: 0); return }
         queue.cancelCandidate()
         var attempted = Set<String>()
-        while let id = queue.previousID(historyOnly: ended), attempted.insert(id).inserted {
+        while let id = queue.previousID(), attempted.insert(id).inserted {
             do { try await selectTrack(id, direction: .previous); return }
             catch let error as AudioPlaybackError where error == .missingFile || error == .trackNotFound || error == .unsupportedAudio {
                 try? storage?.tracks.updateAvailability(id: id, .missing)

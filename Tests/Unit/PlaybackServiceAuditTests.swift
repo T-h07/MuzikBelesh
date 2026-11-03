@@ -1,4 +1,5 @@
 import AVFoundation
+import MediaPlayer
 import XCTest
 @testable import OFFLINE
 
@@ -17,6 +18,31 @@ import XCTest
 }
 
 final class PlaybackServiceAuditTests: XCTestCase {
+    @MainActor func testPreviousCapabilitiesAndRemoteDispatchAgreeWithoutShuffleHistory() async throws {
+        let (_, player, service, root) = try fixture(duration: 20)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await service.play(trackID: "track-4")
+        while service.queue.repeatMode != .off { service.queue.cycleRepeat() }
+        service.queue.toggleShuffle()
+        let generation = service.activeItemGeneration
+        XCTAssertFalse(service.state.canSkipPrevious)
+        XCTAssertFalse(MPRemoteCommandCenter.shared().previousTrackCommand.isEnabled)
+        let done = expectation(description: "Remote Previous with no backward history restarts safely")
+        service.enqueueRemote(command: "previous") { await service.previous(); done.fulfill() }
+        await fulfillment(of: [done], timeout: 5)
+        XCTAssertEqual(service.state.currentTrackID, "track-4")
+        XCTAssertEqual(service.activeItemGeneration, generation)
+        XCTAssertEqual(player.seeks.last, 0)
+        XCTAssertTrue(player.isPlaying)
+        service.queue.toggleShuffle()
+        XCTAssertTrue(service.state.canSkipPrevious, "Linear mode has the first indexed song as predecessor")
+        XCTAssertTrue(MPRemoteCommandCenter.shared().previousTrackCommand.isEnabled)
+        await service.previous()
+        XCTAssertEqual(service.state.currentTrackID, "track-5")
+        XCTAssertFalse(service.state.canSkipPrevious)
+        XCTAssertFalse(MPRemoteCommandCenter.shared().previousTrackCommand.isEnabled)
+    }
+
     @MainActor func testReportedFirstIndexedPreviousRestartsThenUsesModeBoundary() async throws {
         for shuffle in [false, true] {
             let (_, player, service, root) = try fixture(duration: 20)
@@ -130,7 +156,7 @@ final class PlaybackServiceAuditTests: XCTestCase {
         XCTAssertTrue(service.diagnostics.events.contains { $0.action == "completion-accepted" })
     }
 
-    @MainActor func testPlayAndPreviousRecoverEndedWithoutHistoryForAllModes() async throws {
+    @MainActor func testPlayAndPreviousRecoverEndedWithoutHistoryUsingActiveContext() async throws {
         for mode in [RepeatMode.off, .all, .one] {
             for command in ["play", "previous"] {
                 let (_, player, service, root) = try fixture()
@@ -146,7 +172,8 @@ final class PlaybackServiceAuditTests: XCTestCase {
                 XCTAssertGreaterThan(player.replacements, replacements)
                 XCTAssertEqual(service.state.elapsedTime, 0)
                 XCTAssertEqual(service.state.status, .playing)
-                if mode != .all || command == "previous" { XCTAssertEqual(service.state.currentTrackID, "track-0") }
+                if command == "previous" { XCTAssertEqual(service.state.currentTrackID, "track-1", "Sequential EOF recovery uses the indexed predecessor") }
+                else if mode != .all { XCTAssertEqual(service.state.currentTrackID, "track-0") }
             }
         }
     }
@@ -371,6 +398,104 @@ final class PlaybackServiceAuditTests: XCTestCase {
         XCTAssertEqual(service.activeItemGeneration, generation)
         XCTAssertLessThan(player.player.currentTime().seconds, 2.7)
         service.stop()
+    }
+
+
+    @MainActor func testSecondIndexedPreviousIgnoresUnrelatedHistoryAndNeverWrapsOff() async throws {
+        let (storage, player, service, root) = try fixture(duration: 20)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await service.play(trackID: "track-0") // unrelated last indexed song
+        try await service.play(trackID: "track-4") // second indexed song
+        while service.queue.repeatMode != .off { service.queue.cycleRepeat() }
+        await service.previous()
+        XCTAssertEqual(service.state.currentTrackID, "track-5")
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(service.state.elapsedTime, 0)
+        XCTAssertFalse(service.state.canSkipPrevious)
+        let saved = try XCTUnwrap(storage.playback.state())
+        let history = try JSONDecoder().decode([String].self, from: Data(try XCTUnwrap(saved.navigationHistoryJSON).utf8))
+        XCTAssertEqual(history, ["track-0", "track-4", "track-5"])
+        XCTAssertEqual(saved.navigationHistoryPosition, 2)
+        await service.previous()
+        XCTAssertEqual(service.state.currentTrackID, "track-5")
+        service.queue.toggleShuffle()
+        await service.previous()
+        XCTAssertEqual(service.state.currentTrackID, "track-4", "Enabling Shuffle uses the actual last played song")
+        XCTAssertTrue(player.isPlaying)
+    }
+
+    @MainActor func testSwitchingShuffleModesPreservesHistoryButEnforcesLinearBoundary() async throws {
+        for initiallyShuffled in [false, true] {
+            let (_, player, service, root) = try fixture(duration: 20)
+            defer { try? FileManager.default.removeItem(at: root) }
+            try await service.play(trackID: "track-4")
+            try await service.play(trackID: "track-5")
+            while service.queue.repeatMode != .off { service.queue.cycleRepeat() }
+            if initiallyShuffled { service.queue.toggleShuffle() }
+            service.queue.toggleShuffle()
+            await service.previous()
+            XCTAssertEqual(service.state.currentTrackID, initiallyShuffled ? "track-5" : "track-4")
+            XCTAssertTrue(player.isPlaying)
+            XCTAssertEqual(service.diagnosticSnapshot["gateOperation"], "none")
+        }
+    }
+
+    @MainActor func testRestoredPreviousUsesSameModePolicyForAppAndRemote() async throws {
+        for shuffle in [false, true] {
+            for remote in [false, true] {
+                let (storage, _, original, root) = try fixture(duration: 20)
+                defer { try? FileManager.default.removeItem(at: root) }
+                try await original.play(trackID: "track-4")
+                try await original.play(trackID: "track-5")
+                while original.queue.repeatMode != .off { original.queue.cycleRepeat() }
+                if shuffle { original.queue.toggleShuffle() }
+                await original.seek(to: 10)
+                original.pause()
+                let player = FakePlaybackPlayer()
+                let restored = AudioPlayerService(storage: storage, player: player, registerRemoteCommands: false)
+                for _ in 0..<100 {
+                    if player.replacements > 0 { break }
+                    try await Task.sleep(nanoseconds: 1_000_000)
+                }
+                XCTAssertGreaterThan(player.replacements, 0)
+                try await restored.play()
+                for expected in ["track-5", shuffle ? "track-4" : "track-5"] {
+                    if remote {
+                        let done = expectation(description: "Restored remote Previous completes")
+                        restored.enqueueRemote(command: "previous") { await restored.previous(); done.fulfill() }
+                        await fulfillment(of: [done], timeout: 5)
+                    } else { await restored.previous() }
+                    XCTAssertEqual(restored.state.currentTrackID, expected)
+                    XCTAssertEqual(restored.state.elapsedTime, 0)
+                    XCTAssertTrue(player.isPlaying)
+                    XCTAssertEqual(restored.state.status, .playing)
+                }
+                XCTAssertEqual(try storage.tracks.all().count, 6)
+                XCTAssertEqual(try storage.playback.state()?.currentTrackID, shuffle ? "track-4" : "track-5")
+            }
+        }
+    }
+
+    @MainActor func testShufflePreviousHistoryAndThreeSecondRuleWithRepeatOffAndAll() async throws {
+        for mode in [RepeatMode.off, .all] {
+            let (_, player, service, root) = try fixture(duration: 20)
+            defer { try? FileManager.default.removeItem(at: root) }
+            try await service.play(trackID: "track-4") // Peso
+            try await service.play(trackID: "track-5") // Future
+            try await service.play(trackID: "track-3") // Track C
+            service.queue.toggleShuffle()
+            while service.queue.repeatMode != mode { service.queue.cycleRepeat() }
+            await service.previous()
+            XCTAssertEqual(service.state.currentTrackID, "track-5")
+            await service.seek(to: 10)
+            await service.previous()
+            XCTAssertEqual(service.state.currentTrackID, "track-5")
+            XCTAssertEqual(service.state.elapsedTime, 0)
+            await service.previous()
+            XCTAssertEqual(service.state.currentTrackID, "track-4")
+            XCTAssertTrue(player.isPlaying)
+            XCTAssertEqual(service.queue.repeatMode, mode)
+        }
     }
 
     @MainActor private func fixture(duration: Double = 3) throws -> (StorageCoordinator, FakePlaybackPlayer, AudioPlayerService, URL) {
