@@ -71,6 +71,7 @@ struct StoredPlaybackState: Codable, FetchableRecord, PersistableRecord {
     var shuffleOrderJSON: String? = nil
     var shufflePosition: Int? = nil
     var sleepTimerDeadlineMs: Int64? = nil
+    var sleepTimerDurationMs: Int64? = nil
     var dateModified: Date
 }
 

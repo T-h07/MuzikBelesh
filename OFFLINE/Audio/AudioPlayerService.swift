@@ -34,10 +34,12 @@ final class AudioPlayerService: ObservableObject {
         queue = PlaybackQueueManager(storage: storage)
         history = PlaybackHistoryService(storage: storage)
         let savedDeadline: Date?
+        let savedDuration: TimeInterval?
         if let storage, let saved = (try? storage.playback.state()) ?? nil, let milliseconds = saved.sleepTimerDeadlineMs {
             savedDeadline = Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1000)
-        } else { savedDeadline = nil }
-        sleepTimer = SleepTimerService(deadline: savedDeadline)
+            savedDuration = saved.sleepTimerDurationMs.map { TimeInterval($0) / 1000 }
+        } else { savedDeadline = nil; savedDuration = nil }
+        sleepTimer = SleepTimerService(deadline: savedDeadline, duration: savedDuration)
         queue.onStateChanged = { [weak self] in self?.persist() }
         sleepTimer.onExpire = { [weak self] in self?.expireSleepTimer() }
         sleepTimer.onChange = { [weak self] in self?.persist() }
@@ -61,6 +63,7 @@ final class AudioPlayerService: ObservableObject {
     }
 
     func play(trackID: String) async throws {
+        guard reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Sleep Timer has expired") }
         guard !transitionInFlight else { throw AudioPlaybackError.playerFailed("Another track transition is in progress") }
         transitionInFlight = true
         defer { transitionInFlight = false }
@@ -83,6 +86,7 @@ final class AudioPlayerService: ObservableObject {
     }
 
     func play() async throws {
+        guard reconcileSleepTimer() else { return }
         guard state.currentTrackID != nil else { throw AudioPlaybackError.trackNotFound }
         try session.configure(); player.play(); state.status = .playing; state.lastError = nil; publishCurrent(); persist()
     }
@@ -93,6 +97,7 @@ final class AudioPlayerService: ObservableObject {
     func stop() { player.pause(); player.replaceCurrentItem(with: nil); item = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
 
     func next() async {
+        guard reconcileSleepTimer() else { return }
         refreshContext()
         while let id = queue.nextID() {
             do { try await play(trackID: id); return }
@@ -105,6 +110,7 @@ final class AudioPlayerService: ObservableObject {
     }
 
     func previous() async {
+        guard reconcileSleepTimer() else { return }
         refreshContext()
         if state.elapsedTime > 3 { await seek(to: 0); return }
         while let id = queue.previousID() {
@@ -150,8 +156,9 @@ final class AudioPlayerService: ObservableObject {
     private func updateSkipAvailability() { state.canSkipNext = context.nextID != nil; state.canSkipPrevious = context.previousID != nil; remoteCommands.updateCapabilities(state: state) }
     private func publish(track: StoredTrack) { let artwork = track.artworkRelativePath.flatMap { try? storage?.paths.artworkURL(relativePath: $0) }.flatMap { try? Data(contentsOf: $0) }; nowPlaying.update(state: state, track: track, artist: storage?.artistName(for: track.artistID), album: storage?.albumTitle(for: track.albumID), artworkData: artwork); state.currentOutputRoute = session.outputRouteName }
     private func publishCurrent() { guard let storage, let id = state.currentTrackID, let track = try? storage.tracks.find(id: id) else { return }; publish(track: track) }
-    private func persist() { queue.persistState(currentTrackID: state.currentTrackID, positionMs: Int64(max(0, state.elapsedTime) * 1000), sleepDeadline: sleepTimer.deadline) }
+    private func persist() { queue.persistState(currentTrackID: state.currentTrackID, positionMs: Int64(max(0, state.elapsedTime) * 1000), sleepDeadline: sleepTimer.deadline, sleepTimerDuration: sleepTimer.durationSeconds) }
     private func expireSleepTimer() { player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; state.lastError = nil; publishCurrent(); persist() }
+    private func reconcileSleepTimer() -> Bool { guard let deadline = sleepTimer.deadline, deadline <= Date() else { return true }; sleepTimer.cancel(); expireSleepTimer(); return false }
     private func fail(_ message: String) { player.pause(); state.status = .failed(message: message); state.lastError = message; publishCurrent(); persist() }
     private func handleTransitionFailure(_ error: Error) { state.lastError = error.localizedDescription; NSLog("Muzik Belesh playback transition failed: %@", error.localizedDescription); publishCurrent(); persist() }
     private func handleRouteChange(route: String, reason: AVAudioSession.RouteChangeReason) { state.currentOutputRoute = route; if reason == .oldDeviceUnavailable && state.isPlaying { pause() }; publishCurrent() }

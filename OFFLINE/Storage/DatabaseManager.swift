@@ -76,6 +76,9 @@ final class DatabaseManager {
                 t.add(column: "origin", .text).notNull().defaults(to: "addToQueue")
             }
         }
+        migrator.registerMigration("v007_sleep_timer_duration") { db in
+            try db.alter(table: "playback_state") { t in t.add(column: "sleepTimerDurationMs", .integer) }
+        }
         try migrator.migrate(dbQueue)
     }
 

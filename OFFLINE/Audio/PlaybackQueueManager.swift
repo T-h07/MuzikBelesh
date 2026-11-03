@@ -56,15 +56,15 @@ import SwiftUI
         return contextTrackIDs.first
     }
     func previousID() -> String? { guard let currentID, let index = contextTrackIDs.firstIndex(of: currentID), index > 0 else { return nil }; return contextTrackIDs[index - 1] }
-    func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?) {
+    func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?) {
         currentID = currentTrackID
-        let state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, dateModified: Date())
+        let state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, sleepTimerDurationMs: sleepTimerDuration.map { Int64($0 * 1000) }, dateModified: Date())
         try? storage?.playback.save(state)
     }
     private func insert(trackID: String, at: Int, origin: QueueEntryOrigin) { guard isAvailable(trackID) else { return }; entries.insert(PlaybackQueueEntry(id: UUID().uuidString, trackID: trackID, position: at, insertedAt: Date(), origin: origin), at: min(at, entries.count)); normalizeAndPersist() }
-    private func normalizeAndPersist() { entries = entries.enumerated().map { PlaybackQueueEntry(id: $0.element.id, trackID: $0.element.trackID, position: $0.offset, insertedAt: $0.element.insertedAt, origin: $0.element.origin) }; let stored = entries.map { StoredQueueEntry(id: $0.id, trackID: $0.trackID, position: $0.position, dateAdded: $0.insertedAt, origin: $0.origin.rawValue) }; try? storage?.playback.replaceQueue(stored) }
+    private func normalizeAndPersist() { entries = entries.enumerated().map { PlaybackQueueEntry(id: $0.element.id, trackID: $0.element.trackID, position: $0.offset, insertedAt: $0.element.insertedAt, origin: $0.element.origin) }; let stored = entries.map { StoredQueueEntry(id: $0.id, trackID: $0.trackID, position: $0.position, dateAdded: $0.insertedAt, origin: $0.origin.rawValue) }; try? storage?.playback.replaceQueue(stored); onStateChanged?() }
     private func rebuildShuffle(excluding: String?) { shuffleOrder = contextTrackIDs.filter { $0 != excluding }.shuffled(); if let last = shuffleOrder.last, let first = shuffleOrder.first, last == first, shuffleOrder.count > 1 { shuffleOrder.swapAt(0, 1) }; shufflePosition = 0 }
-    private func persist() { persistState(currentTrackID: currentID, positionMs: 0, sleepDeadline: nil); onStateChanged?() }
+    private func persist() { onStateChanged?() }
     private func encode(_ value: [String]) -> String? { try? String(data: JSONEncoder().encode(value), encoding: .utf8) }
     private func decode(_ value: String?) -> [String]? { guard let value, let data = value.data(using: .utf8) else { return nil }; return try? JSONDecoder().decode([String].self, from: data) }
     private func reconcile() { entries = entries.filter { isAvailable($0.trackID) }; normalizeAndPersist() }

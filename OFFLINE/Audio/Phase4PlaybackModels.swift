@@ -35,16 +35,17 @@ final class PlaybackHistoryService {
 
 @MainActor final class SleepTimerService: ObservableObject {
     @Published private(set) var deadline: Date?
+    @Published private(set) var durationSeconds: TimeInterval?
     private var task: Task<Void, Never>?
     var onExpire: (() -> Void)?
     var onChange: (() -> Void)?
     var isActive: Bool { deadline != nil }
     var remaining: TimeInterval { max(0, deadline?.timeIntervalSinceNow ?? 0) }
-    init(deadline: Date? = nil) { self.deadline = deadline; schedule() }
-    func start(minutes: Int) { deadline = Date().addingTimeInterval(TimeInterval(minutes * 60)); schedule(); onChange?() }
-    func start(duration: TimeInterval) { guard duration >= 60 else { return }; deadline = Date().addingTimeInterval(duration); schedule(); onChange?() }
-    func cancel() { task?.cancel(); task = nil; deadline = nil; onChange?() }
-    func reset(minutes: Int) { start(minutes: minutes) }
+    init(deadline: Date? = nil, duration: TimeInterval? = nil) { self.deadline = deadline; self.durationSeconds = duration; schedule() }
+    func start(minutes: Int) { start(duration: TimeInterval(minutes * 60)) }
+    func start(duration: TimeInterval) { guard duration >= 60 else { return }; durationSeconds = duration; deadline = Date().addingTimeInterval(duration); schedule(); onChange?() }
+    func cancel() { task?.cancel(); task = nil; deadline = nil; durationSeconds = nil; onChange?() }
+    func reset() { guard let durationSeconds else { return }; start(duration: durationSeconds) }
     func reconcile(onExpire: @escaping () -> Void) { self.onExpire = onExpire; if let deadline, deadline <= Date() { self.deadline = nil; onExpire() } else { schedule() } }
     private func schedule() { task?.cancel(); guard let deadline else { return }; task = Task { [weak self] in let ns = UInt64(max(0, deadline.timeIntervalSinceNow) * 1_000_000_000); try? await Task.sleep(nanoseconds: ns); guard !Task.isCancelled else { return }; await MainActor.run { guard let self, self.deadline == deadline else { return }; self.deadline = nil; self.onExpire?() } } }
 }

@@ -6,6 +6,7 @@ struct NowPlayingView: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
     @State private var showingQueue = false
+    @State private var showingTimer = false
 
     private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
 
@@ -21,6 +22,7 @@ struct NowPlayingView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
             .screenBackground()
             .sheet(isPresented: $showingQueue) { NavigationStack { QueueView() } }
+            .sheet(isPresented: $showingTimer) { SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
         }
     }
 
@@ -42,15 +44,15 @@ struct NowPlayingView: View {
             HStack(spacing: AppSpacing.lg) {
                 Button { audioPlayer.queue.toggleShuffle() } label: { Image(systemName: "shuffle").foregroundStyle(audioPlayer.queue.shuffleEnabled ? AppColors.accentPrimary : AppColors.textSecondary) }.accessibilityLabel("Shuffle")
                 Button { audioPlayer.queue.cycleRepeat() } label: { Image(systemName: audioPlayer.queue.repeatMode.symbol).foregroundStyle(audioPlayer.queue.repeatMode == .off ? AppColors.textSecondary : AppColors.accentPrimary) }.accessibilityLabel("Repeat (audioPlayer.queue.repeatMode.rawValue)")
-                Button { coordinator.sheet = .sleepTimer } label: { Image(systemName: audioPlayer.sleepTimer.isActive ? "moon.fill" : "moon").foregroundStyle(audioPlayer.sleepTimer.isActive ? AppColors.accentPrimary : AppColors.textSecondary) }.accessibilityLabel("Sleep Timer")
+                Button { showingTimer = true } label: { Image(systemName: audioPlayer.sleepTimer.isActive ? "moon.fill" : "moon").foregroundStyle(audioPlayer.sleepTimer.isActive ? AppColors.accentPrimary : AppColors.textSecondary) }.accessibilityLabel("Sleep Timer")
             }
+            SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
             HStack {
                 Text(audioPlayer.state.currentOutputRoute).font(.caption).foregroundStyle(AppColors.textTertiary).lineLimit(1)
                 Spacer()
                 Button { showingQueue = true } label: { Image(systemName: "list.bullet").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Up Next")
             }
             if case .failed(let message) = audioPlayer.state.status { Text(message).font(.caption).foregroundStyle(AppColors.error).multilineTextAlignment(.center) }
-            Text("Shuffle, repeat, and sleep timer arrive in Phase 4.").font(.caption2).foregroundStyle(AppColors.textTertiary).multilineTextAlignment(.center)
         } else {
             EmptyState(icon: "music.note", title: "Nothing playing", message: "Import a local audio file from Library first.")
         }
@@ -102,7 +104,7 @@ private struct StoredQueueRow: View {
     var body: some View { HStack(spacing: AppSpacing.md) { StoredArtworkView(track: track, size: 48); VStack(alignment: .leading) { Text(track.title).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(origin == .playNext ? "Play Next" : "Queued").font(.caption).foregroundStyle(AppColors.textSecondary) }; Spacer() } }
 }
 
-struct SleepTimerSheet: View {
+private struct LegacySleepTimerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     let options = [0, 5, 10, 15, 30, 45, 60]

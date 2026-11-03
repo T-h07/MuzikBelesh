@@ -14,7 +14,7 @@ struct RootView: View {
         .tint(AppColors.accentPrimary)
         .preferredColorScheme(.dark)
         .sheet(item: $coordinator.sheet) { sheet in
-            switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet() }
+            switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
         }
         .fullScreenCover(isPresented: $coordinator.showingNowPlaying) { NowPlayingView(coordinator: coordinator) }
     }
@@ -24,6 +24,7 @@ private struct TabContent<Content: View>: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     let coordinator: AppCoordinator
     let content: Content
+    @State private var showingTimer = false
 
     init(coordinator: AppCoordinator, @ViewBuilder content: () -> Content) {
         self.coordinator = coordinator
@@ -32,12 +33,12 @@ private struct TabContent<Content: View>: View {
 
     var body: some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if audioPlayer.state.currentTrackID != nil {
-                MiniPlayer(coordinator: coordinator)
-                    .padding(.horizontal, AppSpacing.sm)
-                    .padding(.top, AppSpacing.sm)
-            }
+            VStack(spacing: AppSpacing.xs) {
+                SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
+                if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.horizontal, AppSpacing.sm) }
+            }.padding(.top, AppSpacing.sm)
         }
+        .sheet(isPresented: $showingTimer) { SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
     }
 }
 
