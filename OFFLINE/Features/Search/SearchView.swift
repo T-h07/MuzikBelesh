@@ -17,7 +17,8 @@ struct SearchView: View {
                 Picker("Search mode", selection: $mode) { ForEach(SearchMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).tint(AppColors.accentPrimary)
             }.padding(.horizontal, AppSpacing.xl).padding(.vertical, AppSpacing.lg)
             ScrollView { resultsContent.padding(.horizontal, AppSpacing.xl).padding(.bottom, AppSpacing.lg) }
-                .scrollDismissesKeyboard(.immediately).scrollBounceBehavior(.always).accessibilityIdentifier("local-search-results")
+                .scrollBounceBehavior(.always).accessibilityIdentifier("local-search-results")
+                .simultaneousGesture(DragGesture().onChanged { _ in searchFocus = nil })
         }.navigationBarHidden(true).screenBackground()
         .onDisappear { searchFocus = nil }
         .onChange(of: mode) { _, _ in searchFocus = nil }

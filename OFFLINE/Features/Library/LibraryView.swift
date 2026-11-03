@@ -30,7 +30,8 @@ struct LibraryView: View {
             }.padding(.horizontal, AppSpacing.lg).padding(.top, AppSpacing.md).padding(.bottom, 30)
         }
         .navigationBarHidden(true).screenBackground()
-        .scrollDismissesKeyboard(.immediately).scrollBounceBehavior(.always)
+        .scrollBounceBehavior(.always)
+        .simultaneousGesture(DragGesture().onChanged { _ in searchFocus = nil })
         .onDisappear { searchFocus = nil }
         .onChange(of: coordinator.libraryFilter) { _, _ in searchFocus = nil }
         .sheet(isPresented: $showingPlaylistEditor) { PlaylistEditorView() }
