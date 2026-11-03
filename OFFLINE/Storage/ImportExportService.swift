@@ -47,7 +47,7 @@ final class StorageCoordinator: ObservableObject {
         var destination: URL?
         var artworkURL: URL?
         do {
-            try database.dbQueue.write { try operation.save($0) }
+            try await database.dbQueue.write { try operation.save($0) }
             try Task.checkCancellation()
             let metadata = try await audio.validate(source)
             try audio.copyStreaming(from: source, to: stagingURL)
