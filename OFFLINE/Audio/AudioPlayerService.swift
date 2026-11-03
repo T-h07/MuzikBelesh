@@ -26,6 +26,7 @@ final class AudioPlayerService: ObservableObject {
     private var userPausedDuringInterruption = false
     private var transitionInFlight = false
     private var completionInFlight = false
+    private var remoteCommandTail: Task<Void, Never>?
 
     init(storage: StorageCoordinator?) {
         self.storage = storage
@@ -65,6 +66,7 @@ final class AudioPlayerService: ObservableObject {
     func play(trackID: String, direction: NavigationDirection = .forward) async throws {
         guard reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Sleep Timer has expired") }
         while transitionInFlight { await Task.yield() }
+        guard reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Sleep Timer has expired") }
         transitionInFlight = true
         defer { transitionInFlight = false }
         do {
@@ -93,6 +95,16 @@ final class AudioPlayerService: ObservableObject {
     }
 
     func playFromRemote() async { try? await play() }
+    func enqueueRemote(command: String, operation: @escaping () async -> Void) {
+        let previous = remoteCommandTail
+        remoteCommandTail = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            #if DEBUG
+            NSLog("Muzik Belesh remote command=%@ current=%@ shuffle=%@ repeat=%@ service=%ld", command, self?.state.currentTrackID ?? "none", self?.queue.shuffleEnabled.description ?? "false", self?.queue.repeatMode.rawValue ?? "off", self.map { ObjectIdentifier($0).hashValue } ?? 0)
+            #endif
+            await operation()
+        }
+    }
     func pause() { player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
     func togglePlayback() async { if state.isPlaying { pause() } else { try? await play() } }
     func stop() { player.pause(); player.replaceCurrentItem(with: nil); item = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }

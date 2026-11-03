@@ -8,6 +8,7 @@ import SwiftUI
     @Published private(set) var repeatMode: RepeatMode = .all
     var onStateChanged: (() -> Void)?
     private let storage: StorageCoordinator?
+    private let navigator = PlaybackNavigationEngine()
     private var shuffleOrder: [String] = []
     private var shufflePosition = 0
     private var currentID: String?
@@ -32,15 +33,13 @@ import SwiftUI
         }
         if (try? storage.playback.state()) == nil { repeatMode = .all }
         reconcile()
+        navigator.restore(context: contextTrackIDs, currentID: currentID, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode, shuffleOrder: shuffleOrder, shufflePosition: shufflePosition, history: navigationHistory, historyPosition: navigationHistoryPosition, explicitQueue: entries.map(\.trackID))
     }
 
-    func setContext(_ ids: [String], current: String?) { contextTrackIDs = ids.filter { isAvailable($0) }; currentID = current; if shuffleEnabled && shuffleOrder.isEmpty { rebuildShuffle(excluding: current) } }
-    func setCurrent(_ id: String?) { currentID = id }
+    func setContext(_ ids: [String], current: String?) { contextTrackIDs = ids.filter { isAvailable($0) }; currentID = current; navigator.setContext(contextTrackIDs, currentID: current); syncFromNavigator() }
+    func setCurrent(_ id: String?) { currentID = id; navigator.setCurrent(id) }
     func didStart(_ id: String, direction: NavigationDirection = .forward) {
-        currentID = id
-        if direction == .previous, navigationHistoryPosition > 0 { navigationHistoryPosition -= 1; persist(); return }
-        if navigationHistoryPosition + 1 < navigationHistory.count, navigationHistory[navigationHistoryPosition + 1] == id { navigationHistoryPosition += 1 }
-        else { navigationHistory = Array(navigationHistory.prefix(max(0, navigationHistoryPosition + 1))); navigationHistory.append(id); navigationHistoryPosition = navigationHistory.count - 1 }
+        navigator.didStart(id, direction: direction); syncFromNavigator()
         persist()
     }
     func addToQueue(trackID: String) { insert(trackID: trackID, at: entries.count, origin: .addToQueue) }
@@ -49,35 +48,25 @@ import SwiftUI
     func remove(id: String) { entries.removeAll { $0.id == id }; normalizeAndPersist() }
     func clear() { entries.removeAll(); normalizeAndPersist() }
     func move(from offsets: IndexSet, to destination: Int) { entries.move(fromOffsets: offsets, toOffset: destination); normalizeAndPersist() }
-    func toggleShuffle() { shuffleEnabled.toggle(); if shuffleEnabled { rebuildShuffle(excluding: currentID) }; persist() }
-    func cycleRepeat() { repeatMode = RepeatMode.allCases[(RepeatMode.allCases.firstIndex(of: repeatMode)! + 1) % RepeatMode.allCases.count]; persist() }
+    func toggleShuffle() { navigator.setShuffleEnabled(!shuffleEnabled); syncFromNavigator(); persist() }
+    func cycleRepeat() { navigator.cycleRepeat(); syncFromNavigator(); persist() }
     func nextID() -> String? {
-        if let first = entries.first { entries.removeFirst(); normalizeAndPersist(); return first.trackID }
-        guard !contextTrackIDs.isEmpty else { return nil }
-        if repeatMode == .one, let currentID { return currentID }
-        if shuffleEnabled {
-            if shuffleOrder.isEmpty || shufflePosition >= shuffleOrder.count {
-                guard repeatMode == .all else { return nil }; rebuildShuffle(excluding: currentID)
-            }
-            guard shufflePosition < shuffleOrder.count else { return nil }
-            let id = shuffleOrder[shufflePosition]; shufflePosition += 1; persist(); return id
-        }
-        guard let currentID, let index = contextTrackIDs.firstIndex(of: currentID) else { return contextTrackIDs.first }
-        if index + 1 < contextTrackIDs.count { return contextTrackIDs[index + 1] }
-        guard repeatMode == .all else { return nil }
-        return contextTrackIDs.first
+        navigator.setExplicitQueue(entries.map(\.trackID)); guard let id = navigator.next() else { return nil }
+        if let index = entries.firstIndex(where: { $0.trackID == id }) { entries.remove(at: index); normalizeAndPersist() }
+        syncFromNavigator(); persist(); return id
     }
-    func previousID() -> String? { if navigationHistoryPosition > 0 { return navigationHistory[navigationHistoryPosition - 1] }; guard let currentID, let index = contextTrackIDs.firstIndex(of: currentID), index > 0 else { return nil }; return contextTrackIDs[index - 1] }
-    func hasNext() -> Bool { if !entries.isEmpty { return true }; if repeatMode == .one { return currentID != nil }; if contextTrackIDs.count > 1 && repeatMode == .all { return true }; guard let currentID, let index = contextTrackIDs.firstIndex(of: currentID) else { return !contextTrackIDs.isEmpty }; return index + 1 < contextTrackIDs.count || repeatMode == .all }
-    func hasPrevious() -> Bool { navigationHistoryPosition > 0 || previousID() != nil }
+    func previousID() -> String? { navigator.previous() }
+    func hasNext() -> Bool { navigator.setExplicitQueue(entries.map(\.trackID)); return navigator.hasNext() }
+    func hasPrevious() -> Bool { navigator.hasPrevious() }
     func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?) {
         currentID = currentTrackID
+        syncFromNavigator()
         let state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, sleepTimerDurationMs: sleepTimerDuration.map { Int64($0 * 1000) }, navigationHistoryJSON: encode(navigationHistory), navigationHistoryPosition: navigationHistoryPosition, dateModified: Date())
         try? storage?.playback.save(state)
     }
     private func insert(trackID: String, at: Int, origin: QueueEntryOrigin) { guard isAvailable(trackID) else { return }; entries.insert(PlaybackQueueEntry(id: UUID().uuidString, trackID: trackID, position: at, insertedAt: Date(), origin: origin), at: min(at, entries.count)); normalizeAndPersist() }
     private func normalizeAndPersist() { entries = entries.enumerated().map { PlaybackQueueEntry(id: $0.element.id, trackID: $0.element.trackID, position: $0.offset, insertedAt: $0.element.insertedAt, origin: $0.element.origin) }; let stored = entries.map { StoredQueueEntry(id: $0.id, trackID: $0.trackID, position: $0.position, dateAdded: $0.insertedAt, origin: $0.origin.rawValue) }; try? storage?.playback.replaceQueue(stored); onStateChanged?() }
-    private func rebuildShuffle(excluding: String?) { shuffleOrder = contextTrackIDs.filter { $0 != excluding }.shuffled(); if let last = shuffleOrder.last, let first = shuffleOrder.first, last == first, shuffleOrder.count > 1 { shuffleOrder.swapAt(0, 1) }; shufflePosition = 0 }
+    private func syncFromNavigator() { contextTrackIDs = navigator.context; currentID = navigator.currentID; shuffleEnabled = navigator.shuffleEnabled; repeatMode = navigator.repeatMode; shuffleOrder = navigator.shuffleOrder; shufflePosition = navigator.shufflePosition; navigationHistory = navigator.history; navigationHistoryPosition = navigator.historyPosition }
     private func persist() { onStateChanged?() }
     private func encode(_ value: [String]) -> String? { try? String(data: JSONEncoder().encode(value), encoding: .utf8) }
     private func decode(_ value: String?) -> [String]? { guard let value, let data = value.data(using: .utf8) else { return nil }; return try? JSONDecoder().decode([String].self, from: data) }

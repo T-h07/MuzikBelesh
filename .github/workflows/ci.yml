@@ -1,7 +1,8 @@
 name: CI
 on:
   pull_request: {branches: [develop]}
-  push: {branches: [develop]}
+  push:
+    branches: [develop, 'feature/**']
   workflow_dispatch:
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -33,5 +34,8 @@ jobs:
           test -n "$DEVICE_ID"
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
       - name: Build and test
-        run: xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" test CODE_SIGNING_ALLOWED=NO
+        run: |
+          GIT_COMMIT_SHORT="${GITHUB_SHA:0:7}"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
 

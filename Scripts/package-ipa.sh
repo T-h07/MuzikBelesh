@@ -10,6 +10,10 @@ ditto "$APP_SOURCE" "$OUTPUT_DIR/Payload/OFFLINE.app"
 plutil -p "$OUTPUT_DIR/Payload/OFFLINE.app/Info.plist" >/dev/null
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$OUTPUT_DIR/Payload/OFFLINE.app/Info.plist")"
 [[ "$BUNDLE_ID" == "com.th07.muzikbelesh" ]] || { echo "Unexpected bundle identifier: $BUNDLE_ID" >&2; exit 1; }
+if [[ -n "${GITHUB_SHA:-}" ]]; then
+  BUILD_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :MBBuildCommit' "$OUTPUT_DIR/Payload/OFFLINE.app/Info.plist")"
+  [[ "$BUILD_COMMIT" == "${GITHUB_SHA:0:7}" ]] || { echo "Build provenance mismatch: $BUILD_COMMIT" >&2; exit 1; }
+fi
 [[ -x "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE" ]] || { echo "Missing executable" >&2; exit 1; }
 file "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE"
 [[ -f "$OUTPUT_DIR/Payload/OFFLINE.app/Assets.car" ]] || { echo "Compiled asset catalog missing" >&2; exit 1; }

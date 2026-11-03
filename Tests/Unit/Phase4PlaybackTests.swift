@@ -2,6 +2,41 @@ import XCTest
 @testable import OFFLINE
 
 final class Phase4PlaybackTests: XCTestCase {
+    func testNavigatorShuffleCycleIsUniqueAndStableAcrossCommandSources() {
+        let navigator = PlaybackNavigationEngine(makeShuffle: { Array($0.reversed()) })
+        navigator.setContext(["a", "b", "c", "d", "e"], currentID: "e")
+        navigator.setShuffleEnabled(true)
+        navigator.didStart("e", direction: .forward)
+        for expected in ["d", "c", "b", "a"] {
+            XCTAssertEqual(navigator.next(), expected)
+            navigator.didStart(expected, direction: .forward)
+        }
+        XCTAssertEqual(Set(["e", "d", "c", "b", "a"]), Set(navigator.history))
+    }
+
+    func testNavigatorPreviousUsesPlaybackHistoryAndWrapsRepeatAll() {
+        let navigator = PlaybackNavigationEngine(makeShuffle: { $0 })
+        navigator.setContext(["a", "b", "c"], currentID: "a")
+        navigator.didStart("a", direction: .forward)
+        XCTAssertEqual(navigator.next(), "b"); navigator.didStart("b", direction: .forward)
+        XCTAssertEqual(navigator.next(), "c"); navigator.didStart("c", direction: .forward)
+        XCTAssertEqual(navigator.previous(), "b"); navigator.didStart("b", direction: .previous)
+        XCTAssertEqual(navigator.previous(), "a")
+        navigator.didStart("a", direction: .previous)
+        XCTAssertEqual(navigator.next(), "b")
+        navigator.didStart("b", direction: .forward)
+        XCTAssertEqual(navigator.next(), "c")
+        navigator.didStart("c", direction: .forward)
+        XCTAssertEqual(navigator.next(), "a")
+    }
+
+    func testNavigatorRepeatModes() {
+        let navigator = PlaybackNavigationEngine(makeShuffle: { $0 })
+        navigator.setContext(["a", "b"], currentID: "b")
+        XCTAssertEqual(navigator.next(), "a")
+        navigator.cycleRepeat()
+        XCTAssertEqual(navigator.next(), "b")
+    }
     func testRepeatCyclesOffAllOne() {
         XCTAssertEqual(RepeatMode.allCases, [.off, .all, .one])
     }
