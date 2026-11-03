@@ -17,6 +17,13 @@ final class PlaylistManagementTests: XCTestCase {
         let f = try LibraryFixture(); let a = try f.repository.createPlaylist(name: "Road"); let b = try f.repository.createPlaylist(name: "Road")
         XCTAssertNotEqual(a.id, b.id); XCTAssertEqual(try f.storage.playlists.all().count, 2)
     }
+    func testOverlongDescriptionDoesNotSilentlyTruncateOrPartiallySave() throws {
+        let f = try LibraryFixture(); let p = try f.repository.createPlaylist(name: "Keep", description: "Keep description")
+        XCTAssertThrowsError(try f.repository.createPlaylist(name: "Invalid", description: String(repeating: "x", count: 2001)))
+        XCTAssertThrowsError(try f.repository.updatePlaylist(id: p.id, name: "Discard", description: String(repeating: "x", count: 2001)))
+        let saved = try XCTUnwrap(f.storage.playlists.all().first)
+        XCTAssertEqual(saved.name, "Keep"); XCTAssertEqual(saved.description, "Keep description"); XCTAssertEqual(try f.storage.playlists.all().count, 1)
+    }
     func testRenameAndDescriptionPreserveMembershipIdentityAndDateCreated() throws {
         let f = try LibraryFixture(); let p = try f.repository.createPlaylist(name: "Before")
         try f.repository.addTracks(f.ids, playlistID: p.id)

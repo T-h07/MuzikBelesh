@@ -156,6 +156,15 @@ final class StorageCoordinator: ObservableObject {
         }
     }
 
+    func exportData(trackID: String) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) { [self] in
+            guard let track = try tracks.find(id: trackID), track.availability == .available else { throw StorageError.missingFile }
+            let url = try paths.musicURL(relativePath: track.fileRelativePath)
+            guard try audio.sha256(url: url) == track.contentSHA256 else { throw StorageError.exportFailed }
+            return try Data(contentsOf: url, options: .mappedIfSafe)
+        }.value
+    }
+
     func exportAudio(track: StoredTrack, to destination: URL) throws {
         let source = try paths.musicURL(relativePath: track.fileRelativePath)
         guard FileManager.default.fileExists(atPath: source.path) else { throw StorageError.missingFile }

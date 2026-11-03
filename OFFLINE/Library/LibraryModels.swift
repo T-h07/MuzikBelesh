@@ -3,11 +3,13 @@ import CryptoKit
 import GRDB
 
 enum LibraryError: LocalizedError, Equatable, Sendable {
-    case invalidName, invalidTitle, invalidOrder, notFound, confirmationRequired, invalidImage, operationFailed, deletionInProgress
+    case invalidName, invalidTitle, invalidMetadata, invalidDescription, invalidOrder, notFound, confirmationRequired, invalidImage, operationFailed, deletionInProgress
     var errorDescription: String? {
         switch self {
         case .invalidName: return "Enter a playlist name between 1 and 120 characters."
         case .invalidTitle: return "Enter a song title between 1 and 300 characters."
+        case .invalidMetadata: return "Artist and album names must be at most 300 characters."
+        case .invalidDescription: return "Playlist descriptions must be at most 2000 characters."
         case .invalidOrder: return "The playlist changed. Reload it and try reordering again."
         case .notFound: return "This library item is no longer available."
         case .confirmationRequired: return "Confirm deletion before removing this item."
@@ -68,6 +70,10 @@ enum LibraryIdentity {
         let result = title.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
         guard !result.isEmpty, result.count <= 300 else { throw LibraryError.invalidTitle }
         return result
+    }
+    static func validatedDescription(_ value: String) throws -> String {
+        guard value.count <= 2000 else { throw LibraryError.invalidDescription }
+        return value
     }
 }
 

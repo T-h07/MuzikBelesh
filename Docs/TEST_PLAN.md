@@ -16,3 +16,29 @@ The application audit adds recorded failing-before navigator regressions, fake-p
 tests of the real service, native AVPlayer seek checks, a deterministic 240-operation
 six-track stress scenario, and filesystem safety tests. See APPLICATION_AUDIT.md for
 evidence limits, deferred scenarios and the physical acceptance matrix.
+
+
+# Phase 5 verification
+
+Tests/Unit/Library uses isolated UUID databases/directories and generated original
+WAV/JPEG/PNG fixtures. Coverage includes playlist validation/CRUD/membership/order,
+rollback, likes, metadata identity/bytes, artist/album/compilation grouping, artwork
+staging/reference cleanup, bound Unicode/literal search, seven deterministic sorts,
+source/hash duplicates, concurrent imports, deletion recovery and v008 upgrades.
+The ten-track SQLite/filesystem test closes/recreates its services and validates
+all files, persistent data, playback order, a live metadata edit and native startup.
+
+LibraryManagementUITests launches a DEBUG-only isolated test root with three real
+stored WAVs. Reset is explicit for the first launch; restart tests keep that same
+root. Production storage is never used by destructive UI tests. Workflows cover
+playlist CRUD, multi-add, accessible reorder controls (the same repository used by
+native drag), removal, likes, editing/cancel, search/play, confirmed deletion and
+restart persistence. Stable accessibility IDs replace absolute screen coordinates.
+UI screenshots are kept as XCTest attachments and exported to library-ui-screenshots.
+Native drag, system Photos selection and device-specific media routing remain in
+the physical checklist. The existing UI smoke and all Phase 0-4 tests remain enabled.
+
+CI retains xcresult, enforces bounded waits/test timeouts and records the selected
+simulator/toolchain. Final counts, environment, workflow and artifact URLs belong
+in the PR for the exact tested source. A compile or simulator run is not physical
+acceptance; PHASE_05_DEVICE_TESTING.md remains NOT RUN until evidence is supplied.

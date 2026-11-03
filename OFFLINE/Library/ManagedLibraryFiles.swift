@@ -52,8 +52,11 @@ enum ManagedLibraryFiles {
             try thumb.write(to: paths.artworkURL(relativePath: thumbnailName(operation.stagedPath)), options: .atomic)
             return operation
         } catch {
-            try? cleanupArtwork(operation.stagedPath, paths: paths, db: db)
-            try? db.write { _ = try ManagedFileOperation.deleteOne($0, key: operation.id) }
+            // Keep the recovery record if cleanup itself fails.
+            do {
+                try cleanupArtwork(operation.stagedPath, paths: paths, db: db)
+                _ = try db.write { try ManagedFileOperation.deleteOne($0, key: operation.id) }
+            } catch { }
             throw LibraryError.operationFailed
         }
     }
@@ -61,6 +64,11 @@ enum ManagedLibraryFiles {
         let referenced = try db.read { try artworkReferences(operation.stagedPath, db: $0) > 0 }
         try cleanupArtwork(referenced ? operation.originalPath : operation.stagedPath, paths: paths, db: db)
         _ = try db.write { try ManagedFileOperation.deleteOne($0, key: operation.id) }
+    }
+    static func removalArtworkOperation(ownerID: String, path: String, db: DatabaseQueue) throws -> ManagedFileOperation {
+        let operation = ManagedFileOperation(id: UUID().uuidString, kind: "remove-artwork", ownerID: ownerID, originalPath: nil, stagedPath: path, state: "prepared", dateUpdated: Date())
+        try db.write { try operation.insert($0) }
+        return operation
     }
 
     static func removeFromPlayback(_ id: String, db: Database) throws {

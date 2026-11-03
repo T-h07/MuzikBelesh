@@ -1,9 +1,26 @@
 import XCTest
 import GRDB
 import ImageIO
+import MediaPlayer
 @testable import OFFLINE
 
 final class ArtworkManagementTests: XCTestCase {
+    @MainActor func testCurrentTrackArtworkAndTextRefreshWithoutReplacingPlaybackItem() async throws {
+        let f = try LibraryFixture(); let (player, transport, library) = f.services()
+        try await player.play(trackID: f.ids[0]); await player.seek(to: 0.5)
+        let generation = player.activeItemGeneration
+        let draft = TrackMetadataDraft(title: "Updated Now Playing", artist: "Edited Artist", album: "Edited Album")
+        try await library.saveMetadata(trackID: f.ids[0], draft: draft, artworkData: LibraryFixture.image())
+        await libraryEventually { MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] is MPMediaItemArtwork }
+        let info = try XCTUnwrap(MPNowPlayingInfoCenter.default().nowPlayingInfo)
+        XCTAssertEqual(info[MPMediaItemPropertyTitle] as? String, draft.title)
+        XCTAssertEqual(info[MPMediaItemPropertyArtist] as? String, draft.artist)
+        XCTAssertEqual(info[MPMediaItemPropertyAlbumTitle] as? String, draft.album)
+        XCTAssertEqual(player.activeItemGeneration, generation); XCTAssertEqual(player.state.elapsedTime, 0.5); XCTAssertTrue(transport.isPlaying)
+        try await library.saveMetadata(trackID: f.ids[0], draft: draft, artworkData: nil, removeArtwork: true)
+        await libraryEventually { MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil }
+        XCTAssertEqual(player.activeItemGeneration, generation); player.stop()
+    }
     @MainActor func testJPEGAndPNGArtworkPersistAndProduceThumbnails() async throws {
         for png in [false, true] {
             let f = try LibraryFixture(); let (_, _, library) = f.services()
@@ -89,5 +106,29 @@ final class ArtworkManagementTests: XCTestCase {
         try ManagedLibraryFiles.cleanupArtwork("../keep.jpg", paths: f.paths, db: f.storage.database.dbQueue)
         try ManagedLibraryFiles.cleanupArtwork("artwork-\(UUID().uuidString).jpg", paths: f.paths, db: f.storage.database.dbQueue)
         XCTAssertEqual(try Data(contentsOf: outside), Data([1, 2, 3])); XCTAssertEqual(try f.storage.tracks.all().count, 4)
+    }
+    func testArtworkRemovalRecoveryUsesReferencesBeforeDeletingAnything() throws {
+        let f = try LibraryFixture(); let draft = TrackMetadataDraft(title: "Art", artist: "", album: "")
+        let art = try ManagedLibraryFiles.stageArtwork(LibraryFixture.image(), ownerID: f.ids[0], oldPath: nil, kind: "track-artwork", paths: f.paths, db: f.storage.database.dbQueue)
+        try f.repository.editMetadata(trackID: f.ids[0], draft: draft, artworkPath: art.stagedPath, replaceArtwork: true, artworkOperation: art.id)
+        try ManagedLibraryFiles.finishArtwork(art, paths: f.paths, db: f.storage.database.dbQueue)
+        _ = try ManagedLibraryFiles.removalArtworkOperation(ownerID: f.ids[0], path: art.stagedPath, db: f.storage.database.dbQueue)
+        try ManagedLibraryFiles.recover(paths: f.paths, db: f.storage.database.dbQueue)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try f.paths.artworkURL(relativePath: art.stagedPath).path), "Prepared removal without a committed metadata change preserves the cover")
+        let remove = try ManagedLibraryFiles.removalArtworkOperation(ownerID: f.ids[0], path: art.stagedPath, db: f.storage.database.dbQueue)
+        try f.repository.editMetadata(trackID: f.ids[0], draft: draft, replaceArtwork: true, artworkOperation: remove.id)
+        _ = try StorageCoordinator(paths: f.paths)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try f.paths.artworkURL(relativePath: art.stagedPath).path))
+    }
+    func testPlaylistDeletionArtworkCleanupRecoversAfterCommit() throws {
+        let f = try LibraryFixture(); let p = try f.repository.createPlaylist(name: "Cover")
+        let art = try ManagedLibraryFiles.stageArtwork(LibraryFixture.image(), ownerID: p.id, oldPath: nil, kind: "playlist-artwork", paths: f.paths, db: f.storage.database.dbQueue)
+        try f.storage.database.dbQueue.write { db in try db.execute(sql: "UPDATE playlists SET artworkRelativePath = ? WHERE id = ?", arguments: [art.stagedPath, p.id]) }
+        try ManagedLibraryFiles.finishArtwork(art, paths: f.paths, db: f.storage.database.dbQueue)
+        _ = try ManagedLibraryFiles.removalArtworkOperation(ownerID: p.id, path: art.stagedPath, db: f.storage.database.dbQueue)
+        _ = try f.repository.deletePlaylist(id: p.id, confirmed: true)
+        _ = try StorageCoordinator(paths: f.paths)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try f.paths.artworkURL(relativePath: art.stagedPath).path))
+        XCTAssertEqual(try f.storage.tracks.all().count, 4)
     }
 }

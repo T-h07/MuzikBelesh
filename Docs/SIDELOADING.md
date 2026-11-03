@@ -16,3 +16,17 @@ The Phase 3 final unsigned IPA is accepted for in-place SideStore testing by dev
 # Phase 4 IPA note
 
 The unsigned IPA workflow remains unchanged for SideStore. The Phase 4 package must retain `Assets.car`, the app icon resources, and `PlugIns/OFFLINEShareExtension.appex`; timer and queue state are application data and are not packaged into the IPA.
+
+
+# Phase 5 in-place update
+
+Use the IPA and manifest linked in the Phase 5 PR, from the same source as its final
+passing CI. Verify version/build/embedded commit before testing. Packaging validates
+app/extension metadata, canonical bundle IDs, assets, background audio and source SHA.
+Keep the existing SideStore identity/container. v009 adds library metadata/search,
+context and recovery fields without resetting v001-v008 data. Existing audio bytes
+and paths do not change merely because metadata is edited.
+
+Physical migration/update and all PHASE_05_DEVICE_TESTING.md cases are still NOT RUN
+until the developer records results. Do not infer them from an unsigned build or
+synthetic migration tests. No production GitHub Release or stable tag is published.

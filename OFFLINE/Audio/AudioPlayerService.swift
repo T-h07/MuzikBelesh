@@ -13,6 +13,9 @@ final class AudioPlayerService: ObservableObject {
     private var intentRevision = 0
     private var timerExpired = false
     private var completedGeneration: Int?
+    private var artworkTask: Task<Void, Never>?
+    private var artworkCachePath: String?
+    private var artworkCacheData: Data?
     private var transportVerification: Task<Void, Never>?
     private var transportObserver: NSKeyValueObservation?
     private var wantsPlayback = false
@@ -92,7 +95,7 @@ final class AudioPlayerService: ObservableObject {
     }
 
     deinit {
-        transportVerification?.cancel()
+        transportVerification?.cancel(); artworkTask?.cancel()
         if let timeObserver { nativePlayer?.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
@@ -183,7 +186,7 @@ final class AudioPlayerService: ObservableObject {
     }
     func pause() { record("pause-request"); intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
     func togglePlayback() async { if wantsPlayback { pause() } else { await playFromRemote() } }
-    func stop() { record("stop-request"); intentRevision += 1; wantsPlayback = false; itemGeneration += 1; removeItemObservers(); player.pause(); player.replaceCurrentItem(with: nil); item = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
+    func stop() { record("stop-request"); intentRevision += 1; wantsPlayback = false; itemGeneration += 1; removeItemObservers(); player.pause(); player.replaceCurrentItem(with: nil); item = nil; artworkTask?.cancel(); artworkCachePath = nil; artworkCacheData = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
 
     func next() async {
         guard await beginCommand("next") else { return }
@@ -425,7 +428,27 @@ final class AudioPlayerService: ObservableObject {
         try await selectTrack(id, autoplay: keepPlaying, recordNavigation: false)
         updateSkipAvailability()
     }
-    private func publish(track: StoredTrack) { let artwork = track.artworkRelativePath.flatMap { try? storage?.paths.artworkURL(relativePath: $0) }.flatMap { try? Data(contentsOf: $0) }; nowPlaying.update(state: state, track: track, artist: storage?.artistName(for: track.artistID), album: storage?.albumTitle(for: track.albumID), artworkData: artwork); state.currentOutputRoute = session.outputRouteName }
+    private func publish(track selected: StoredTrack) {
+        guard state.currentTrackID == selected.id else { return }
+        // A ready callback may carry metadata captured before an editor saved.
+        let track = (try? storage?.tracks.find(id: selected.id)) ?? selected
+        if artworkCachePath != track.artworkRelativePath {
+            artworkTask?.cancel(); artworkCachePath = track.artworkRelativePath; artworkCacheData = nil
+            if let path = track.artworkRelativePath, let storage, let url = try? storage.paths.artworkURL(relativePath: path) {
+                artworkTask = Task { @MainActor [weak self] in
+                    let data = await Task.detached(priority: .userInitiated) { () -> Data? in
+                        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 20 * 1024 * 1024,
+                              let input = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+                        return try? ManagedLibraryFiles.imageData(input, pixels: 1024)
+                    }.value
+                    guard !Task.isCancelled, let self, self.artworkCachePath == path else { return }
+                    self.artworkCacheData = data; self.publishCurrent()
+                }
+            }
+        }
+        nowPlaying.update(state: state, track: track, artist: storage?.artistName(for: track.artistID), album: storage?.albumTitle(for: track.albumID), artworkData: artworkCacheData)
+        state.currentOutputRoute = session.outputRouteName
+    }
     private func publishCurrent() { guard let storage, let id = state.currentTrackID, let track = try? storage.tracks.find(id: id) else { return }; publish(track: track) }
     private func persist() { queue.persistState(currentTrackID: state.currentTrackID, positionMs: Int64(max(0, state.elapsedTime) * 1000), sleepDeadline: sleepTimer.deadline, sleepTimerDuration: sleepTimer.durationSeconds, contextKind: activeContextKind, contextSourceID: activeContextSourceID) }
     func reconcileLifecycle() { sleepTimer.checkDeadline(); updateSkipAvailability(); persist() }

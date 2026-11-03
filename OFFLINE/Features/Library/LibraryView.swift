@@ -166,7 +166,6 @@ struct StoredTrackRow: View {
                 .accessibilityLabel("Actions for \(track.title)").accessibilityIdentifier("track-actions-" + track.id)
         }
         .padding(.vertical, AppSpacing.xs).contextMenu { actions }
-        .accessibilityIdentifier("stored-track-row-" + track.id)
         .sheet(isPresented: $showingEditor) { TrackEditorView(trackID: track.id) }
         .sheet(isPresented: $showingPlaylists) { AddToPlaylistView(trackIDs: [track.id]) }
         .confirmationDialog("Delete Song from Library?", isPresented: $confirmingDeletion, titleVisibility: .visible) {
@@ -200,15 +199,14 @@ struct StoredTrackRow: View {
         Button { showingEditor = true } label: { Label("Edit Metadata", systemImage: "pencil") }
         Button { export() } label: { Label("Export Audio", systemImage: "square.and.arrow.up") }.disabled(track.availability != .available)
         if let playlistID { Button { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } label: { Label("Remove from Playlist", systemImage: "minus.circle") } }
-        Button(role: .destructive) { confirmingDeletion = true } label: { Label(track.availability == .available ? "Delete Song" : "Remove Missing Entry", systemImage: "trash") }
+        Button(role: .destructive) { confirmingDeletion = true } label: { Label(track.availability == .missing ? "Remove Missing Entry" : "Delete Song", systemImage: "trash") }
     }
     private func play() { Task { await library.play(track.id, ids: ids, kind: contextKind, sourceID: contextSourceID) } }
     private func export() {
         Task {
             do {
                 guard let storage = container.storage else { throw LibraryError.operationFailed }
-                let url = try storage.paths.musicURL(relativePath: track.fileRelativePath)
-                let data = try await Task.detached { try Data(contentsOf: url) }.value
+                let data = try await storage.exportData(trackID: track.id)
                 exportDocument = AudioExportDocument(data: data); showingExporter = true
             } catch { rowError = MusicLibraryService.message(error) }
         }

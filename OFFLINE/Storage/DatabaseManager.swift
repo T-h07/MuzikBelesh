@@ -5,7 +5,9 @@ final class DatabaseManager {
     let dbQueue: DatabaseQueue
 
     init(url: URL, migrationTarget: String? = nil) throws {
-        dbQueue = try DatabaseQueue(path: url.path)
+        var configuration = Configuration()
+        configuration.busyMode = .timeout(5)
+        dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
         try dbQueue.write { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }

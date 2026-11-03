@@ -33,7 +33,7 @@ struct PlaylistDetailView: View {
                                     Text(track.title).lineLimit(1); Spacer()
                                     Button { move(track.id, delta: -1) } label: { Image(systemName: "arrow.up").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel("Move up \(track.title)").accessibilityIdentifier("move-up-" + track.id)
                                     Button { move(track.id, delta: 1) } label: { Image(systemName: "arrow.down").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel("Move down \(track.title)").accessibilityIdentifier("move-down-" + track.id)
-                                }.accessibilityIdentifier("reorder-row-" + track.id)
+                                }
                             } else {
                                 StoredTrackRow(track: track, contextTrackIDs: songs.map(\.id), contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
                                     .swipeActions { Button("Remove from Playlist", role: .destructive) { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } }
@@ -47,14 +47,15 @@ struct PlaylistDetailView: View {
             } else { Text("This playlist was removed.").foregroundStyle(AppColors.textSecondary) }
         }
         .environment(\.editMode, $editMode)
-        .scrollContentBackground(.hidden).screenBackground().navigationTitle("Playlist").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).screenBackground().navigationTitle("Playlist").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }.accessibilityIdentifier("playlist-reorder")
                 Menu {
                     Button("Edit Playlist") { showingEditor = true }
                     Button("Delete Playlist", role: .destructive) { confirmingDelete = true }
-                } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }.accessibilityLabel("Playlist Actions")
+                } label: { Label("Playlist Actions", systemImage: "ellipsis.circle") }
+                    .accessibilityIdentifier("playlist-actions")
             }
         }
         .sheet(isPresented: $showingEditor) { PlaylistEditorView(playlistID: playlistID) }
@@ -88,7 +89,7 @@ struct AlbumDetailView: View {
                     ForEach(library.tracks(group.trackIDs)) { StoredTrackRow(track: $0, contextTrackIDs: group.trackIDs, contextKind: "album", contextSourceID: groupID) }
                 } else { EmptyState(icon: "square.stack", title: "No songs in this album", message: "Its songs may have been edited or removed.") }
             }.padding(AppSpacing.lg)
-        }.navigationTitle("Album").navigationBarTitleDisplayMode(.inline).screenBackground()
+        }.navigationTitle("Album").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar).screenBackground()
     }
 }
 
@@ -110,7 +111,7 @@ struct ArtistDetailView: View {
                     ForEach(library.tracks(group.trackIDs)) { StoredTrackRow(track: $0, contextTrackIDs: group.trackIDs, contextKind: "artist", contextSourceID: groupID) }
                 } else { EmptyState(icon: "person", title: "No songs for this artist", message: "Its songs may have been edited or removed.") }
             }.padding(AppSpacing.lg)
-        }.navigationTitle("Artist").navigationBarTitleDisplayMode(.inline).screenBackground()
+        }.navigationTitle("Artist").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar).screenBackground()
     }
 }
 

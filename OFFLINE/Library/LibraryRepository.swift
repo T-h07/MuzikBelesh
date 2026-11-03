@@ -45,7 +45,7 @@ final class LibraryRepository {
 
     @discardableResult func createPlaylist(name: String, description: String = "") throws -> StoredPlaylist {
         let now = Date()
-        let playlist = StoredPlaylist(id: UUID().uuidString, name: try LibraryIdentity.validatedName(name), description: String(description.prefix(2000)), artworkRelativePath: nil, dateAdded: now, dateModified: now)
+        let playlist = StoredPlaylist(id: UUID().uuidString, name: try LibraryIdentity.validatedName(name), description: try LibraryIdentity.validatedDescription(description), artworkRelativePath: nil, dateAdded: now, dateModified: now)
         try db.write { try playlist.insert($0) }
         return playlist
     }
@@ -53,7 +53,7 @@ final class LibraryRepository {
         let name = try LibraryIdentity.validatedName(name)
         try db.write { db in
             guard var playlist = try StoredPlaylist.fetchOne(db, key: id) else { throw LibraryError.notFound }
-            playlist.name = name; playlist.description = String(description.prefix(2000)); playlist.dateModified = Date()
+            playlist.name = name; playlist.description = try LibraryIdentity.validatedDescription(description); playlist.dateModified = Date()
             try playlist.update(db)
         }
     }
@@ -98,7 +98,7 @@ final class LibraryRepository {
     static func resolveArtist(_ value: String, db: Database) throws -> String? {
         let name = LibraryIdentity.display(value)
         guard !name.isEmpty else { return nil }
-        guard name.count <= 300 else { throw LibraryError.invalidTitle }
+        guard name.count <= 300 else { throw LibraryError.invalidMetadata }
         let normalized = LibraryIdentity.normalized(name)
         if let id = try String.fetchOne(db, sql: "SELECT id FROM artists WHERE normalizedName = ? ORDER BY id LIMIT 1", arguments: [normalized]) { return id }
         let id = LibraryIdentity.id("artist", [normalized]); let now = Date()
@@ -108,7 +108,7 @@ final class LibraryRepository {
     static func resolveAlbum(_ value: String, artistID: String?, db: Database) throws -> String? {
         let title = LibraryIdentity.display(value)
         guard !title.isEmpty else { return nil }
-        guard title.count <= 300 else { throw LibraryError.invalidTitle }
+        guard title.count <= 300 else { throw LibraryError.invalidMetadata }
         let normalized = LibraryIdentity.normalized(title)
         if let id = try String.fetchOne(db, sql: "SELECT id FROM albums WHERE normalizedTitle = ? AND artistID IS ? ORDER BY id LIMIT 1", arguments: [normalized, artistID]) { return id }
         let id = LibraryIdentity.id("album", [normalized, artistID ?? ""]); let now = Date()

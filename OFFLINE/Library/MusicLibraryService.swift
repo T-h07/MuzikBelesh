@@ -9,6 +9,7 @@ import SwiftUI
     @Published private(set) var revision = 0
     @Published var error: String?
     private(set) var tracksByID: [String: StoredTrack] = [:]
+    private var playlistTrackIDs: [String: [String]] = [:]
     private var artistNames: [String: String] = [:]
     private var albumNames: [String: String] = [:]
     let storage: StorageCoordinator?
@@ -27,6 +28,7 @@ import SwiftUI
     private func apply(_ value: LibrarySnapshot) {
         guard value != snapshot else { return }
         tracksByID = value.trackByID
+        playlistTrackIDs = Dictionary(grouping: value.memberships, by: \.playlistID).mapValues { $0.sorted { $0.position < $1.position }.map(\.trackID) }
         artistNames = Dictionary(uniqueKeysWithValues: value.artists.map { ($0.id, $0.name) })
         albumNames = Dictionary(uniqueKeysWithValues: value.albums.map { ($0.id, $0.title) })
         artistGroups = value.artistGroups; albumGroups = value.albumGroups
@@ -37,9 +39,9 @@ import SwiftUI
     func artistName(_ id: String?) -> String { id.flatMap { artistNames[$0] } ?? "Unknown Artist" }
     func albumTitle(_ id: String?) -> String { id.flatMap { albumNames[$0] } ?? "Unknown Album" }
     func tracks(_ ids: [String]) -> [StoredTrack] { ids.compactMap { tracksByID[$0] } }
-    func playlistTracks(_ id: String) -> [StoredTrack] { snapshot.playlistTracks(id) }
+    func playlistTracks(_ id: String) -> [StoredTrack] { tracks(playlistTrackIDs[id] ?? []) }
     func report(_ error: Error) { self.error = Self.message(error) }
-    static func message(_ error: Error) -> String { (error as? LibraryError)?.localizedDescription ?? (error as? StorageError)?.localizedDescription ?? LibraryError.operationFailed.localizedDescription }
+    static func message(_ error: Error) -> String { (error as? LibraryError)?.localizedDescription ?? (error as? StorageError)?.localizedDescription ?? (error as? AudioPlaybackError)?.localizedDescription ?? LibraryError.operationFailed.localizedDescription }
     func perform(_ operation: () throws -> Void) { do { try operation(); error = nil } catch { report(error) } }
     private func requiredRepository() throws -> LibraryRepository { guard let repository else { throw LibraryError.operationFailed }; return repository }
     func setSort(_ sort: LibrarySort) throws { try requiredRepository().setSort(sort) }
@@ -68,14 +70,14 @@ import SwiftUI
                 var operation: ManagedFileOperation?
                 do {
                     if let artworkData { operation = try ManagedLibraryFiles.stageArtwork(artworkData, ownerID: trackID, oldPath: track.artworkRelativePath, kind: "track-artwork", paths: storage.paths, db: storage.database.dbQueue) }
-                    try repository.editMetadata(trackID: trackID, draft: draft, artworkPath: operation?.stagedPath, replaceArtwork: operation != nil || removeArtwork, artworkOperation: operation?.id)
+                    else if removeArtwork, let path = track.artworkRelativePath { operation = try ManagedLibraryFiles.removalArtworkOperation(ownerID: trackID, path: path, db: storage.database.dbQueue) }
+                    try repository.editMetadata(trackID: trackID, draft: draft, artworkPath: artworkData == nil ? nil : operation?.stagedPath, replaceArtwork: operation != nil || removeArtwork, artworkOperation: operation?.id)
                 } catch {
                     if let operation { try? ManagedLibraryFiles.finishArtwork(operation, paths: storage.paths, db: storage.database.dbQueue) }
                     throw error
                 }
                 // Saving succeeded. Cleanup remains journaled if the filesystem is busy.
                 if let operation { try? ManagedLibraryFiles.finishArtwork(operation, paths: storage.paths, db: storage.database.dbQueue) }
-                else if removeArtwork { try? ManagedLibraryFiles.cleanupArtwork(track.artworkRelativePath, paths: storage.paths, db: storage.database.dbQueue) }
             }.value
         }
     }
@@ -97,7 +99,7 @@ import SwiftUI
                             guard let current = try StoredPlaylist.fetchOne(db, key: playlistID) else { throw LibraryError.notFound }
                             playlist = current
                         } else { playlist = StoredPlaylist(id: playlistID, name: name, description: nil, artworkRelativePath: nil, dateAdded: Date(), dateModified: Date()) }
-                        playlist.name = name; playlist.description = String(description.prefix(2000)); playlist.dateModified = Date()
+                        playlist.name = name; playlist.description = try LibraryIdentity.validatedDescription(description); playlist.dateModified = Date()
                         if let operation { playlist.artworkRelativePath = operation.stagedPath }
                         try playlist.save(db)
                         if let operation { try db.execute(sql: "UPDATE library_file_operations SET state = 'committed' WHERE id = ?", arguments: [operation.id]) }
@@ -109,11 +111,16 @@ import SwiftUI
         return playlistID
     }
     func deletePlaylist(id: String, confirmed: Bool) async throws {
+        guard confirmed else { throw LibraryError.confirmationRequired }
         guard let storage else { throw LibraryError.operationFailed }
         try await storage.mutations.withLock {
             try await Task.detached {
-                let old = try LibraryRepository(db: storage.database.dbQueue).deletePlaylist(id: id, confirmed: confirmed)
-                try? ManagedLibraryFiles.cleanupArtwork(old, paths: storage.paths, db: storage.database.dbQueue)
+                let db = storage.database.dbQueue
+                guard let playlist = try db.read({ try StoredPlaylist.fetchOne($0, key: id) }) else { throw LibraryError.notFound }
+                let operation = try playlist.artworkRelativePath.map { try ManagedLibraryFiles.removalArtworkOperation(ownerID: id, path: $0, db: db) }
+                do { _ = try LibraryRepository(db: db).deletePlaylist(id: id, confirmed: true) }
+                catch { if let operation { try? ManagedLibraryFiles.finishArtwork(operation, paths: storage.paths, db: db) }; throw error }
+                if let operation { try? ManagedLibraryFiles.finishArtwork(operation, paths: storage.paths, db: db) }
             }.value
         }
     }

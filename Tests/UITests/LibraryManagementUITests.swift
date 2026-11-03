@@ -14,7 +14,10 @@ final class LibraryManagementUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Library"].waitForExistence(timeout: 10))
     }
     override func tearDownWithError() throws {
-        if (testRun?.failureCount ?? 0) > 0 { screenshot("Failure") }
+        if (testRun?.failureCount ?? 0) > 0 {
+            screenshot("Failure")
+            let tree = XCTAttachment(string: app.debugDescription); tree.name = "Accessibility Tree"; tree.lifetime = .keepAlways; add(tree)
+        }
         app?.terminate()
     }
     private func openLibrary(_ filter: String = "Songs") {
@@ -53,7 +56,7 @@ final class LibraryManagementUITests: XCTestCase {
     func testPlaylistCRUDMembershipReorderingAndSafeRemoval() {
         createPlaylist("Road")
         app.staticTexts["Road"].firstMatch.tap()
-        app.buttons["Playlist Actions"].tap(); app.buttons["Edit Playlist"].tap()
+        app.buttons["playlist-actions"].tap(); app.buttons["Edit Playlist"].tap()
         change(app.textFields["playlist-name"], to: "Road Renamed")
         app.buttons["playlist-save"].tap()
         XCTAssertTrue(app.staticTexts["Road Renamed"].waitForExistence(timeout: 8))
@@ -61,16 +64,16 @@ final class LibraryManagementUITests: XCTestCase {
         for id in ["ui-track-a", "ui-track-b", "ui-track-c"] { app.buttons["select-track-" + id].tap() }
         app.buttons["playlist-confirm-add"].tap()
         XCTAssertTrue(app.buttons["playlist-reorder"].waitForExistence(timeout: 8)); app.buttons["playlist-reorder"].tap()
-        tapVisible(app.buttons["move-down-ui-track-a"])
-        let a = app.descendants(matching: .any).matching(identifier: "reorder-row-ui-track-a").firstMatch
-        let b = app.descendants(matching: .any).matching(identifier: "reorder-row-ui-track-b").firstMatch
-        expectation(for: NSPredicate { _, _ in a.exists && b.exists && a.frame.minY > b.frame.minY }, evaluatedWith: app)
+        tapVisible(app.buttons["move-up-ui-track-a"])
+        let a = app.buttons["move-up-ui-track-a"]
+        let b = app.buttons["move-up-ui-track-b"]
+        expectation(for: NSPredicate { _, _ in a.exists && b.exists && a.frame.minY < b.frame.minY }, evaluatedWith: app)
         waitForExpectations(timeout: 5)
         screenshot("Playlist-Reordering")
         app.buttons["playlist-reorder"].tap()
         actions("ui-track-a"); app.buttons["Remove from Playlist"].tap()
         absent(app.buttons["track-actions-ui-track-a"])
-        app.buttons["Playlist Actions"].tap(); app.buttons["Delete Playlist"].tap()
+        app.buttons["playlist-actions"].tap(); app.buttons["Delete Playlist"].tap()
         let confirm = app.buttons["confirm-delete-playlist"]
         if confirm.waitForExistence(timeout: 2) { confirm.tap() } else { app.buttons["Delete Playlist"].firstMatch.tap() }
         XCTAssertTrue(app.staticTexts["No playlists"].waitForExistence(timeout: 8))
