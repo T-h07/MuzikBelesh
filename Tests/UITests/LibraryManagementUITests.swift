@@ -53,6 +53,25 @@ final class LibraryManagementUITests: XCTestCase {
     }
     private func actions(_ id: String) { tapVisible(app.buttons["track-actions-" + id]) }
 
+    func testLibraryAlbumArtistAndSortingLayouts() {
+        openLibrary()
+        app.buttons["library-sort"].tap(); app.buttons["Name A–Z"].tap()
+        let a = app.buttons["track-actions-ui-track-a"], b = app.buttons["track-actions-ui-track-b"]
+        expectation(for: NSPredicate { _, _ in a.exists && b.exists && a.frame.minY < b.frame.minY }, evaluatedWith: app)
+        waitForExpectations(timeout: 5); screenshot("Library-Sorted")
+        openLibrary("Artists"); app.staticTexts["Fixture Artist"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["collection-play"].waitForExistence(timeout: 5)); screenshot("Artist-Detail")
+        tapVisible(app.staticTexts["Fixture Album"].firstMatch)
+        XCTAssertTrue(app.navigationBars["Album"].waitForExistence(timeout: 5)); screenshot("Album-Detail")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        createPlaylist("Compact Layout")
+        app.staticTexts["Compact Layout"].firstMatch.tap()
+        app.buttons["playlist-actions"].tap(); app.buttons["Edit Playlist"].tap()
+        XCTAssertTrue(app.textFields["playlist-name"].waitForExistence(timeout: 5)); screenshot("Playlist-Editor")
+        app.buttons["Cancel"].tap()
+    }
+
     func testPlaylistCRUDMembershipReorderingAndSafeRemoval() {
         createPlaylist("Road")
         app.staticTexts["Road"].firstMatch.tap()
