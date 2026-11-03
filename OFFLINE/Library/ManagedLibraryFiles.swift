@@ -3,7 +3,7 @@ import GRDB
 import ImageIO
 import UniformTypeIdentifiers
 
-enum LibraryFileFault { case afterStage, beforeCommit, afterCommit }
+enum LibraryFileFault: Equatable, Sendable { case afterStage, beforeCommit, afterCommit }
 struct LibraryDeletionResult: Sendable { let cleanupPending: Bool }
 
 enum ManagedLibraryFiles {

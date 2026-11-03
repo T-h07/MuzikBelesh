@@ -20,7 +20,7 @@ import SwiftUI
         self.storage = storage; self.player = player
         guard let storage else { error = "Local library storage is unavailable."; return }
         error = storage.lastError
-        observation = ValueObservation.tracking(LibraryRepository.snapshot).start(in: storage.database.dbQueue, scheduling: .immediate, onError: { [weak self] _ in
+        observation = ValueObservation.tracking { db in try LibraryRepository.snapshot(db) }.start(in: storage.database.dbQueue, scheduling: .immediate, onError: { [weak self] _ in
             self?.error = "Library updates could not be read. Try refreshing."
         }, onChange: { [weak self] value in self?.apply(value) })
     }

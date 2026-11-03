@@ -100,7 +100,10 @@ final class StorageCoordinator: ObservableObject {
     private func commitImport(operation: StoredImportOperation, staging: URL, metadata: AudioMetadata, sourceType: String?, sourceIdentifier: String?) throws -> ImportResult {
         let type = sourceType.map { LibraryIdentity.display($0).lowercased() }
         let identifier = sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (type == nil && identifier == nil) || (type?.isEmpty == false && identifier?.isEmpty == false && type!.count <= 100 && identifier!.count <= 500) else { throw LibraryError.operationFailed }
+        if type != nil || identifier != nil {
+            guard let type, let identifier else { throw LibraryError.operationFailed }
+            guard !type.isEmpty, !identifier.isEmpty, type.count <= 100, identifier.count <= 500 else { throw LibraryError.operationFailed }
+        }
         let hash = try audio.sha256(url: staging)
         if let existing = try database.dbQueue.read({ try duplicate(hash: hash, sourceType: type, sourceIdentifier: identifier, db: $0) }) {
             let reused = try database.dbQueue.write { db in try useDuplicate(existing, hash: hash, staging: staging, sourceType: type, sourceIdentifier: identifier, db: db) }

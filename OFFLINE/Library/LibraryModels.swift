@@ -71,7 +71,7 @@ enum LibraryIdentity {
     }
 }
 
-struct PlaylistMembership: Codable, FetchableRecord, Equatable, Sendable {
+struct PlaylistMembership: Codable, FetchableRecord, TableRecord, Equatable, Sendable {
     static let databaseTableName = "playlist_tracks"
     var playlistID: String
     var trackID: String
