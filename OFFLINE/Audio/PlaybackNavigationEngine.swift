@@ -18,7 +18,7 @@ final class PlaybackNavigationEngine {
 
     func restore(context: [String], currentID: String?, shuffleEnabled: Bool, repeatMode: RepeatMode, shuffleOrder: [String], shufflePosition: Int, history: [String], historyPosition: Int, explicitQueue: [String]) {
         self.context = context; self.currentID = currentID; self.shuffleEnabled = shuffleEnabled; self.repeatMode = repeatMode
-        self.shuffleOrder = shuffleOrder; self.shufflePosition = max(0, shufflePosition)
+        self.shuffleOrder = shuffleOrder; self.shufflePosition = min(shuffleOrder.count, max(0, shufflePosition))
         self.history = history; self.historyPosition = history.isEmpty ? -1 : min(max(-1, historyPosition), history.count - 1)
         self.explicitQueue = explicitQueue
     }
@@ -30,13 +30,18 @@ final class PlaybackNavigationEngine {
         let libraryChanged = context != unique
         context = unique
         self.currentID = currentID
+        let available = Set(context)
+        let before = history.prefix(max(0, historyPosition + 1)).filter { available.contains($0) }
+        let after = history.dropFirst(max(0, historyPosition + 1)).filter { available.contains($0) }
+        history = before + after; historyPosition = before.count - 1
         guard shuffleEnabled else { return }
         if shuffleOrder.isEmpty && shufflePosition == 0 { rebuildShuffle(excluding: currentID); return }
         guard libraryChanged else { return }
-        let available = Set(context)
-        shuffleOrder = shuffleOrder.filter { available.contains($0) && $0 != currentID }
+        let consumed = Array(shuffleOrder.prefix(shufflePosition)).filter { available.contains($0) }
+        let remaining = Array(shuffleOrder.dropFirst(shufflePosition)).filter { available.contains($0) }
         let known = Set(shuffleOrder)
-        shuffleOrder.append(contentsOf: context.filter { $0 != currentID && !known.contains($0) })
+        shuffleOrder = consumed + remaining + context.filter { $0 != currentID && !known.contains($0) }
+        shufflePosition = consumed.count
     }
 
     func setCurrent(_ id: String?) { currentID = id }
@@ -47,6 +52,7 @@ final class PlaybackNavigationEngine {
     func next() -> String? {
         if !explicitQueue.isEmpty { return explicitQueue.removeFirst() }
         guard !context.isEmpty else { return nil }
+        if historyPosition + 1 < history.count { return history[historyPosition + 1] }
         if repeatMode == .one, let currentID { return currentID }
         if shuffleEnabled {
             if shufflePosition >= shuffleOrder.count {
@@ -63,6 +69,7 @@ final class PlaybackNavigationEngine {
 
     func previous() -> String? {
         if historyPosition > 0 { return history[historyPosition - 1] }
+        if shuffleEnabled { return nil }
         guard let currentID, let index = context.firstIndex(of: currentID), index > 0 else { return nil }
         return context[index - 1]
     }
@@ -77,6 +84,7 @@ final class PlaybackNavigationEngine {
     func hasNext(explicitQueue: [String]? = nil) -> Bool {
         if !(explicitQueue ?? self.explicitQueue).isEmpty { return true }
         guard !context.isEmpty else { return false }
+        if historyPosition + 1 < history.count { return true }
         if repeatMode == .one { return currentID != nil }
         if shuffleEnabled {
             return shufflePosition < shuffleOrder.count || repeatMode == .all
@@ -86,5 +94,15 @@ final class PlaybackNavigationEngine {
     }
     func hasPrevious() -> Bool { previous() != nil || historyPosition > 0 }
 
-    private func rebuildShuffle(excluding id: String?) { shuffleOrder = makeShuffle(context.filter { $0 != id }); shufflePosition = 0 }
+    func copy() -> PlaybackNavigationEngine {
+        let result = PlaybackNavigationEngine(makeShuffle: makeShuffle)
+        result.restore(context: context, currentID: currentID, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode, shuffleOrder: shuffleOrder, shufflePosition: shufflePosition, history: history, historyPosition: historyPosition, explicitQueue: explicitQueue)
+        return result
+    }
+
+    private func rebuildShuffle(excluding id: String?) {
+        shuffleOrder = makeShuffle(context.filter { $0 != id })
+        if shuffleOrder.isEmpty, context.count == 1, repeatMode == .all { shuffleOrder = context }
+        shufflePosition = 0
+    }
 }

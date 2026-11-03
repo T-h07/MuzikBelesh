@@ -25,8 +25,8 @@ struct SearchView: View {
         }.padding(.top, AppSpacing.md)
     }
     @ViewBuilder private var libraryResults: some View {
-        let results = container.music.search(coordinator.searchQuery)
-        VStack(alignment: .leading, spacing: AppSpacing.md) { if results.isEmpty { EmptyState(icon: "music.note", title: "No library matches", message: "Search your in-memory music collection.") } else { ForEach(results) { TrackRow(track: $0) } } }.padding(.top, AppSpacing.md)
+        let results = (container.storage?.library ?? []).filter { coordinator.searchQuery.isEmpty || $0.title.localizedCaseInsensitiveContains(coordinator.searchQuery) }
+        VStack(alignment: .leading, spacing: AppSpacing.md) { if results.isEmpty { EmptyState(icon: "music.note", title: "No library matches", message: "Search your imported local music.") } else { ForEach(results) { StoredTrackRow(track: $0) } } }.padding(.top, AppSpacing.md)
     }
 }
 

@@ -93,6 +93,8 @@ targets:
       properties:
         CFBundleDisplayName: Muzik Belesh
         CFBundlePackageType: 'XPC!'
+        CFBundleShortVersionString: '0.1.0'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController

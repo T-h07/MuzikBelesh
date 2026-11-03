@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
@@ -12,6 +13,7 @@ struct RootView: View {
             TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
         .tint(AppColors.accentPrimary)
+        .onChange(of: scenePhase) { _, phase in if phase == .active { audioPlayer.reconcileLifecycle() } }
         .preferredColorScheme(.dark)
         .sheet(item: $coordinator.sheet) { sheet in
             switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
@@ -67,10 +69,10 @@ struct TrackContextMenu: View {
     @EnvironmentObject private var container: AppContainer
     let track: MockTrack
     var body: some View {
-        Button {} label: { Label("Import local audio to play", systemImage: "waveform") }
-        Button { container.playback.addToQueue(track.id) } label: { Label("Add to Queue", systemImage: "text.badge.plus") }
+        Button {} label: { Label("Demo track · import local audio to play", systemImage: "waveform") }.disabled(true)
+        Button { container.playback.addToQueue(track.id) } label: { Label("Add to Demo Queue", systemImage: "text.badge.plus") }
         Button { container.music.toggleLiked(track.id) } label: { Label(container.music.likedTrackIDs.contains(track.id) ? "Unlike" : "Like", systemImage: "heart") }
-        Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
+        Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Demo Playlist", systemImage: "text.badge.plus") }
     }
 }
 

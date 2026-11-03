@@ -49,7 +49,7 @@ struct AppStoragePaths {
     func relativeURL(_ relativePath: String, in root: URL) throws -> URL {
         guard !relativePath.isEmpty, !relativePath.contains(".."), !relativePath.hasPrefix("/") else { throw StorageError.invalidPath }
         let url = root.appendingPathComponent(relativePath)
-        guard url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/") else { throw StorageError.invalidPath }
+        guard url.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(root.resolvingSymlinksInPath().standardizedFileURL.path + "/") else { throw StorageError.invalidPath }
         return url
     }
 

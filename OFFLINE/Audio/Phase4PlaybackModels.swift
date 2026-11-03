@@ -42,10 +42,14 @@ final class PlaybackHistoryService {
     var isActive: Bool { deadline != nil }
     var remaining: TimeInterval { max(0, deadline?.timeIntervalSinceNow ?? 0) }
     init(deadline: Date? = nil, duration: TimeInterval? = nil) { self.deadline = deadline; self.durationSeconds = duration; schedule() }
-    func start(minutes: Int) { start(duration: TimeInterval(minutes * 60)) }
-    func start(duration: TimeInterval) { guard duration >= 60 else { return }; durationSeconds = duration; deadline = Date().addingTimeInterval(duration); schedule(); onChange?() }
+    func start(minutes: Int) { start(duration: TimeInterval(minutes) * 60) }
+    func start(duration: TimeInterval) { guard duration.isFinite, duration >= 60, duration <= 7 * 24 * 60 * 60 else { return }; durationSeconds = duration; deadline = Date().addingTimeInterval(duration); schedule(); onChange?() }
     func cancel() { task?.cancel(); task = nil; deadline = nil; durationSeconds = nil; onChange?() }
     func reset() { guard let durationSeconds else { return }; start(duration: durationSeconds) }
+    func checkDeadline(now: Date = Date()) {
+        guard let deadline, deadline <= now else { return }
+        task?.cancel(); task = nil; self.deadline = nil; onExpire?()
+    }
     func reconcile(onExpire: @escaping () -> Void) { self.onExpire = onExpire; if let deadline, deadline <= Date() { self.deadline = nil; onExpire() } else { schedule() } }
     private func schedule() { task?.cancel(); guard let deadline else { return }; task = Task { [weak self] in let ns = UInt64(max(0, deadline.timeIntervalSinceNow) * 1_000_000_000); try? await Task.sleep(nanoseconds: ns); guard !Task.isCancelled else { return }; await MainActor.run { guard let self, self.deadline == deadline else { return }; self.deadline = nil; self.onExpire?() } } }
 }

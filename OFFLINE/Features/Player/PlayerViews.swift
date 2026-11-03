@@ -37,13 +37,13 @@ struct NowPlayingView: View {
             PlaybackSlider(audioPlayer: audioPlayer)
             HStack { Text(format(audioPlayer.state.elapsedTime)); Spacer(); Text(format(audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
             HStack(spacing: availableSize.width < 360 ? 24 : 40) {
-                Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }.accessibilityLabel("Previous track")
+                Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }.disabled(!audioPlayer.state.canSkipPrevious).accessibilityLabel("Previous track")
                 Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)).frame(width: 64, height: 64) }.accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
-                Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }.accessibilityLabel("Next track")
+                Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }.disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")
             }.foregroundStyle(AppColors.textPrimary)
             HStack(spacing: AppSpacing.lg) {
                 Button { audioPlayer.queue.toggleShuffle() } label: { Image(systemName: "shuffle").foregroundStyle(audioPlayer.queue.shuffleEnabled ? AppColors.accentPrimary : AppColors.textSecondary) }.accessibilityLabel("Shuffle")
-                Button { audioPlayer.queue.cycleRepeat() } label: { Image(systemName: audioPlayer.queue.repeatMode.symbol).foregroundStyle(audioPlayer.queue.repeatMode == .off ? AppColors.textSecondary : AppColors.accentPrimary) }.accessibilityLabel("Repeat (audioPlayer.queue.repeatMode.rawValue)")
+                Button { audioPlayer.queue.cycleRepeat() } label: { Image(systemName: audioPlayer.queue.repeatMode.symbol).foregroundStyle(audioPlayer.queue.repeatMode == .off ? AppColors.textSecondary : AppColors.accentPrimary) }.accessibilityLabel("Repeat \(audioPlayer.queue.repeatMode.rawValue)")
                 Button { showingTimer = true } label: { Image(systemName: audioPlayer.sleepTimer.isActive ? "moon.fill" : "moon").foregroundStyle(audioPlayer.sleepTimer.isActive ? AppColors.accentPrimary : AppColors.textSecondary) }.accessibilityLabel("Sleep Timer")
             }
             SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
@@ -52,7 +52,7 @@ struct NowPlayingView: View {
                 Spacer()
                 Button { showingQueue = true } label: { Image(systemName: "list.bullet").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Up Next")
             }
-            if case .failed(let message) = audioPlayer.state.status { Text(message).font(.caption).foregroundStyle(AppColors.error).multilineTextAlignment(.center) }
+            if let message = audioPlayer.state.lastError { Text(message).font(.caption).foregroundStyle(AppColors.error).multilineTextAlignment(.center) }
         } else {
             EmptyState(icon: "music.note", title: "Nothing playing", message: "Import a local audio file from Library first.")
         }

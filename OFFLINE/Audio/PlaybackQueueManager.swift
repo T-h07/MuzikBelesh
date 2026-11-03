@@ -8,14 +8,17 @@ import SwiftUI
     @Published private(set) var repeatMode: RepeatMode = .all
     var onStateChanged: (() -> Void)?
     private let storage: StorageCoordinator?
-    private let navigator = PlaybackNavigationEngine()
+    private var navigator: PlaybackNavigationEngine
+    private var pendingNavigator: PlaybackNavigationEngine?
+    private var pendingQueueEntryID: String?
+    @Published private(set) var lastError: String?
     private var shuffleOrder: [String] = []
     private var shufflePosition = 0
     private var currentID: String?
     private var navigationHistory: [String] = []
     private var navigationHistoryPosition = -1
 
-    init(storage: StorageCoordinator?) { self.storage = storage; restore() }
+    init(storage: StorageCoordinator?, makeShuffle: @escaping ([String]) -> [String] = { $0.shuffled() }) { self.storage = storage; navigator = PlaybackNavigationEngine(makeShuffle: makeShuffle); restore() }
 
     func restore() {
         guard let storage else { return }
@@ -25,6 +28,7 @@ import SwiftUI
         }
         let savedResult = try? storage.playback.state()
         if let saved = savedResult ?? nil {
+            currentID = saved.currentTrackID
             shuffleEnabled = saved.shuffleEnabled; repeatMode = RepeatMode(rawValue: saved.repeatMode) ?? .all
             contextTrackIDs = decode(saved.contextTrackIDsJSON) ?? []
             shuffleOrder = decode(saved.shuffleOrderJSON) ?? []; shufflePosition = saved.shufflePosition ?? 0
@@ -39,8 +43,12 @@ import SwiftUI
     func setContext(_ ids: [String], current: String?) { contextTrackIDs = ids.filter { isAvailable($0) }; currentID = current; navigator.setContext(contextTrackIDs, currentID: current); syncFromNavigator() }
     func setCurrent(_ id: String?) { currentID = id; navigator.setCurrent(id) }
     func didStart(_ id: String, direction: NavigationDirection = .forward) {
+        if let pendingNavigator { navigator = pendingNavigator }
+        pendingNavigator = nil
+        if let pendingQueueEntryID { entries.removeAll { $0.id == pendingQueueEntryID } }
+        pendingQueueEntryID = nil
         navigator.didStart(id, direction: direction); syncFromNavigator()
-        persist()
+        normalizeAndPersist()
     }
     func addToQueue(trackID: String) { insert(trackID: trackID, at: entries.count, origin: .addToQueue) }
     func playNext(trackID: String) { insert(trackID: trackID, at: 0, origin: .playNext) }
@@ -51,21 +59,37 @@ import SwiftUI
     func toggleShuffle() { navigator.setShuffleEnabled(!shuffleEnabled); syncFromNavigator(); persist() }
     func cycleRepeat() { navigator.cycleRepeat(); syncFromNavigator(); persist() }
     func nextID() -> String? {
-        navigator.setExplicitQueue(entries.map(\.trackID)); guard let id = navigator.next() else { return nil }
-        if let index = entries.firstIndex(where: { $0.trackID == id }) { entries.remove(at: index); normalizeAndPersist() }
-        syncFromNavigator(); persist(); return id
+        let candidate = navigator.copy()
+        candidate.setExplicitQueue(entries.map(\.trackID))
+        pendingNavigator = candidate
+        pendingQueueEntryID = entries.first?.id
+        return candidate.next()
     }
+    func rejectCandidate(_ id: String) {
+        pendingNavigator = nil; pendingQueueEntryID = nil
+        entries.removeAll { $0.trackID == id }
+        setContext(contextTrackIDs.filter { $0 != id }, current: currentID)
+        normalizeAndPersist()
+    }
+    func cancelCandidate() { pendingNavigator = nil; pendingQueueEntryID = nil }
     func previousID() -> String? { navigator.previous() }
     func hasNext() -> Bool { navigator.hasNext(explicitQueue: entries.map(\.trackID)) }
     func hasPrevious() -> Bool { navigator.hasPrevious() }
     func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?) {
+        navigator.setCurrent(currentTrackID)
         currentID = currentTrackID
         syncFromNavigator()
         let state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, sleepTimerDurationMs: sleepTimerDuration.map { Int64($0 * 1000) }, navigationHistoryJSON: encode(navigationHistory), navigationHistoryPosition: navigationHistoryPosition, dateModified: Date())
-        try? storage?.playback.save(state)
+        do { try storage?.playback.saveSnapshot(state, queue: storedEntries) }
+        catch { lastError = "Playback state could not be saved." }
     }
     private func insert(trackID: String, at: Int, origin: QueueEntryOrigin) { guard isAvailable(trackID) else { return }; entries.insert(PlaybackQueueEntry(id: UUID().uuidString, trackID: trackID, position: at, insertedAt: Date(), origin: origin), at: min(at, entries.count)); normalizeAndPersist() }
-    private func normalizeAndPersist() { entries = entries.enumerated().map { PlaybackQueueEntry(id: $0.element.id, trackID: $0.element.trackID, position: $0.offset, insertedAt: $0.element.insertedAt, origin: $0.element.origin) }; let stored = entries.map { StoredQueueEntry(id: $0.id, trackID: $0.trackID, position: $0.position, dateAdded: $0.insertedAt, origin: $0.origin.rawValue) }; try? storage?.playback.replaceQueue(stored); onStateChanged?() }
+    private var storedEntries: [StoredQueueEntry] { entries.map { StoredQueueEntry(id: $0.id, trackID: $0.trackID, position: $0.position, dateAdded: $0.insertedAt, origin: $0.origin.rawValue) } }
+    private func normalizeAndPersist() {
+        entries = entries.enumerated().map { PlaybackQueueEntry(id: $0.element.id, trackID: $0.element.trackID, position: $0.offset, insertedAt: $0.element.insertedAt, origin: $0.element.origin) }
+        if let onStateChanged { onStateChanged() }
+        else { do { try storage?.playback.replaceQueue(storedEntries) } catch { lastError = "Queue could not be saved." } }
+    }
     private func syncFromNavigator() { contextTrackIDs = navigator.context; currentID = navigator.currentID; shuffleEnabled = navigator.shuffleEnabled; repeatMode = navigator.repeatMode; shuffleOrder = navigator.shuffleOrder; shufflePosition = navigator.shufflePosition; navigationHistory = navigator.history; navigationHistoryPosition = navigator.historyPosition }
     private func persist() { onStateChanged?() }
     private func encode(_ value: [String]) -> String? { try? String(data: JSONEncoder().encode(value), encoding: .utf8) }
