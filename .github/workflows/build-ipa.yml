@@ -27,6 +27,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: OFFLINE-unsigned-IPA
-          path: build/ipa/OFFLINE-unsigned.ipa
+          path: |
+            build/ipa/OFFLINE-unsigned.ipa
+            build/ipa/OFFLINE-build-manifest.json
           if-no-files-found: error
 

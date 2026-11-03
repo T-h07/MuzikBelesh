@@ -58,12 +58,12 @@ import SwiftUI
     func move(from offsets: IndexSet, to destination: Int) { entries.move(fromOffsets: offsets, toOffset: destination); normalizeAndPersist() }
     func toggleShuffle() { navigator.setShuffleEnabled(!shuffleEnabled); pendingNavigator?.setShuffleEnabled(navigator.shuffleEnabled); syncFromNavigator(); persist() }
     func cycleRepeat() { navigator.cycleRepeat(); pendingNavigator?.cycleRepeat(); syncFromNavigator(); persist() }
-    func nextID() -> String? {
+    func nextID(reason: PlaybackAdvanceReason = .automatic) -> String? {
         let candidate = navigator.copy()
         candidate.setExplicitQueue(entries.map(\.trackID))
         pendingNavigator = candidate
         pendingQueueEntryID = entries.first?.id
-        return candidate.next()
+        return candidate.next(reason: reason)
     }
     func rejectCandidate(_ id: String) {
         pendingNavigator = nil; pendingQueueEntryID = nil
@@ -72,8 +72,18 @@ import SwiftUI
         normalizeAndPersist()
     }
     func cancelCandidate() { pendingNavigator = nil; pendingQueueEntryID = nil }
-    func previousID() -> String? { navigator.previous() }
-    func hasNext() -> Bool { navigator.hasNext(explicitQueue: entries.map(\.trackID)) }
+    func previousID(historyOnly: Bool = false) -> String? {
+        if historyOnly && navigator.historyPosition <= 0 { return nil }
+        return navigator.previous()
+    }
+    func hasNext(reason: PlaybackAdvanceReason = .automatic) -> Bool { navigator.hasNext(reason: reason, explicitQueue: entries.map(\.trackID)) }
+    var navigationDiagnostics: [String: String] {
+        ["shuffle": String(shuffleEnabled), "repeat": repeatMode.rawValue,
+         "shufflePosition": String(navigator.shufflePosition), "cycleLength": String(navigator.shuffleOrder.count),
+         "historyPosition": String(navigator.historyPosition), "historyLength": String(navigator.history.count),
+         "automaticNext": String(hasNext()), "manualNext": String(hasNext(reason: .manual)),
+         "historyPrevious": String(hasPrevious()), "queueLength": String(entries.count)]
+    }
     func hasPrevious() -> Bool { navigator.hasPrevious() }
     func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?) {
         navigator.setCurrent(currentTrackID)

@@ -1,5 +1,7 @@
 import Foundation
 
+enum PlaybackAdvanceReason { case automatic, manual }
+
 /// Platform-independent source of truth for playback navigation.
 /// AVPlayer, SwiftUI and MediaPlayer only ask this engine for the next transition.
 final class PlaybackNavigationEngine {
@@ -47,15 +49,16 @@ final class PlaybackNavigationEngine {
     func setShuffleEnabled(_ enabled: Bool) { shuffleEnabled = enabled; if enabled { rebuildShuffle(excluding: currentID) } else { shuffleOrder = []; shufflePosition = 0 } }
     func cycleRepeat() { repeatMode = RepeatMode.allCases[(RepeatMode.allCases.firstIndex(of: repeatMode)! + 1) % RepeatMode.allCases.count] }
 
-    func next() -> String? {
+    func next(reason: PlaybackAdvanceReason = .automatic) -> String? {
         if !explicitQueue.isEmpty { return explicitQueue.removeFirst() }
         guard !context.isEmpty else { return nil }
         if historyPosition + 1 < history.count { return history[historyPosition + 1] }
         if repeatMode == .one, let currentID { return currentID }
         if shuffleEnabled {
             if shufflePosition >= shuffleOrder.count {
-                guard repeatMode == .all else { return nil }
+                guard repeatMode == .all || reason == .manual else { return nil }
                 rebuildShuffle(excluding: currentID)
+                if shuffleOrder.isEmpty, reason == .manual { shuffleOrder = context }
             }
             guard shufflePosition < shuffleOrder.count else { return nil }
             let result = shuffleOrder[shufflePosition]; shufflePosition += 1; return result
@@ -79,13 +82,13 @@ final class PlaybackNavigationEngine {
         history = Array(history.prefix(max(0, historyPosition + 1))); history.append(id); historyPosition = history.count - 1
     }
 
-    func hasNext(explicitQueue: [String]? = nil) -> Bool {
+    func hasNext(reason: PlaybackAdvanceReason = .automatic, explicitQueue: [String]? = nil) -> Bool {
         if !(explicitQueue ?? self.explicitQueue).isEmpty { return true }
         guard !context.isEmpty else { return false }
         if historyPosition + 1 < history.count { return true }
         if repeatMode == .one { return currentID != nil }
         if shuffleEnabled {
-            return shufflePosition < shuffleOrder.count || repeatMode == .all
+            return shufflePosition < shuffleOrder.count || repeatMode == .all || reason == .manual
         }
         guard let currentID, let index = context.firstIndex(of: currentID) else { return true }
         return index + 1 < context.count || repeatMode == .all

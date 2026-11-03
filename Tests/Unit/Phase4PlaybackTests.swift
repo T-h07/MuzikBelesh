@@ -2,6 +2,21 @@ import XCTest
 @testable import OFFLINE
 
 final class Phase4PlaybackTests: XCTestCase {
+    func testManualAndAutomaticShuffleBoundariesHaveMatchingCapabilities() {
+        for count in [1, 6] {
+            for mode in [RepeatMode.off, .all, .one] {
+                for reason in [PlaybackAdvanceReason.automatic, .manual] {
+                    let ids = (0..<count).map(String.init)
+                    let navigator = PlaybackNavigationEngine(makeShuffle: { $0 })
+                    navigator.restore(context: ids, currentID: ids[0], shuffleEnabled: true, repeatMode: mode, shuffleOrder: Array(ids.dropFirst()), shufflePosition: count - 1, history: [ids[0]], historyPosition: 0, explicitQueue: [])
+                    let available = navigator.hasNext(reason: reason)
+                    XCTAssertEqual(navigator.next(reason: reason) != nil, available)
+                    if mode == .off { XCTAssertEqual(available, reason == .manual) }
+                }
+            }
+        }
+    }
+
     func testNavigatorShuffleCycleIsUniqueAndStableAcrossCommandSources() {
         let navigator = PlaybackNavigationEngine(makeShuffle: { Array($0.reversed()) })
         navigator.setContext(["a", "b", "c", "d", "e"], currentID: "e")

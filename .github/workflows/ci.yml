@@ -40,5 +40,12 @@ jobs:
         run: |
           GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playback-test-results
+          path: build/TestResults.xcresult
+          if-no-files-found: ignore
 

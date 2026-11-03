@@ -5,6 +5,8 @@ struct DiagnosticsView: View {
         Text("Muzik Belesh").font(.system(size: 38, weight: .bold)).foregroundStyle(.white)
         Text("Phase 0 — Foundation & Feasibility").foregroundStyle(Color.lime)
         Divider().overlay(.gray)
+        PlaybackDiagnosticsView(service: viewModel.container.audioPlayer, diagnostics: viewModel.container.audioPlayer.diagnostics)
+        Divider().overlay(.gray)
         status("Launch", "Successful"); status("Version", "\(viewModel.container.configuration.version) (\(viewModel.container.configuration.build))")
         status("iOS", ProcessInfo.processInfo.operatingSystemVersionString); status("Bundle", viewModel.container.configuration.bundleIdentifier)
         status("Configuration", viewModel.container.configuration.buildConfiguration); status("YouTubeKit", viewModel.youtubeStatus); status("Share extension", viewModel.shareStatus)

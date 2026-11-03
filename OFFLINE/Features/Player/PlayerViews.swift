@@ -36,6 +36,10 @@ struct NowPlayingView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
             PlaybackSlider(audioPlayer: audioPlayer)
             HStack { Text(format(audioPlayer.state.elapsedTime)); Spacer(); Text(format(audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
+            if audioPlayer.state.status == .ended {
+                Text("Playback complete. Play restarts this song; Next starts a new shuffle cycle when Shuffle is on.")
+                    .font(.caption).foregroundStyle(AppColors.textSecondary)
+            }
             HStack(spacing: availableSize.width < 360 ? 24 : 40) {
                 Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }.disabled(!audioPlayer.state.canSkipPrevious).accessibilityLabel("Previous track")
                 Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 58)).frame(width: 64, height: 64) }.accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
