@@ -42,7 +42,7 @@ final class KeyboardRegionView: UIView {
         super.layoutSubviews()
         guard let window, bounds.height > 0 else { return }
         let region = keyboardLayoutGuide.layoutFrame
-        let top = bounds.maxY - region.minY > 0.5 ? convert(region, to: window).minY : nil
+        let top: CGFloat? = region.height > 0.5 && bounds.maxY - region.minY > 0.5 ? convert(region, to: window).minY : nil
         if reported {
             if top == nil && lastTop == nil { return }
             if let top, let lastTop, abs(top - lastTop) < 0.5 { return }
