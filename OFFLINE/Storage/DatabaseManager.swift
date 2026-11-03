@@ -79,6 +79,12 @@ final class DatabaseManager {
         migrator.registerMigration("v007_sleep_timer_duration") { db in
             try db.alter(table: "playback_state") { t in t.add(column: "sleepTimerDurationMs", .integer) }
         }
+        migrator.registerMigration("v008_navigation_history") { db in
+            try db.alter(table: "playback_state") { t in
+                t.add(column: "navigationHistoryJSON", .text)
+                t.add(column: "navigationHistoryPosition", .integer)
+            }
+        }
         try migrator.migrate(dbQueue)
     }
 

@@ -17,7 +17,7 @@ final class Phase2StorageTests: XCTestCase {
         XCTAssertTrue(tables.contains("tracks")); XCTAssertTrue(tables.contains("import_operations")); XCTAssertTrue(tables.contains("settings"))
         _ = try DatabaseManager.live(paths: paths)
         let migrated = try first.dbQueue.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM grdb_migrations") ?? 0 }
-        XCTAssertEqual(migrated, 7)
+        XCTAssertEqual(migrated, 8)
     }
 
     func testTrackRepositoryPersistsStableTrackAndDetectsHash() throws {

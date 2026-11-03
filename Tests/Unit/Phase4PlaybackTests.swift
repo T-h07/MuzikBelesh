@@ -52,4 +52,21 @@ final class Phase4PlaybackTests: XCTestCase {
         XCTAssertEqual(restored.sleepTimerDurationMs, 300_000)
         XCTAssertNotNil(restored.sleepTimerDeadlineMs)
     }
+
+    func testNavigationHistoryDrivesPreviousInsteadOfLibraryIndex() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MuzikBelesh-Navigation-\(UUID().uuidString)")
+        let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))
+        let now = Date()
+        for id in ["a", "b", "c"] { try storage.tracks.save(StoredTrack(id: id, title: id, artistID: nil, albumID: nil, durationMs: nil, fileRelativePath: "\(id).m4a", fileExtension: "m4a", fileSizeBytes: 0, contentSHA256: id, artworkRelativePath: nil, availability: .available, dateAdded: now, dateModified: now, originalFilename: nil, metadataSource: "test")) }
+        let manager = await MainActor.run { PlaybackQueueManager(storage: storage) }
+        let result = await MainActor.run { () -> [String?] in manager.setContext(["a", "b", "c"], current: "a"); manager.didStart("a"); manager.didStart("b"); manager.didStart("c"); let first = manager.previousID(); manager.didStart("b", direction: .previous); return [first, manager.previousID()] }
+        XCTAssertEqual(result, ["b", "a"])
+    }
+
+    func testNewPlaybackManagerDefaultsToRepeatAll() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MuzikBelesh-Repeat-\(UUID().uuidString)")
+        let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))
+        let mode = await MainActor.run { PlaybackQueueManager(storage: storage).repeatMode }
+        XCTAssertEqual(mode, .all)
+    }
 }
