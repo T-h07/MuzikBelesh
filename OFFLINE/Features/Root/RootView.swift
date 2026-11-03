@@ -9,18 +9,21 @@ struct RootView: View {
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
     @FocusState private var searchFocus: LibrarySearchField?
+    @State private var keyboardTop: CGFloat?
     var body: some View {
         GeometryReader { available in
-            // Constrain the native tab controller to the keyboard-safe proposal.
-            // Its default full-window frame leaves the tab bar behind the keyboard.
+            let origin = available.frame(in: .global).minY
+            let height = keyboardTop.map { min(available.size.height, max(0, $0 - origin)) } ?? available.size.height
             TabView(selection: $coordinator.selectedTab) {
-            TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
-            TabContent(coordinator: coordinator) { NavigationStack { SearchView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
-            TabContent(coordinator: coordinator) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
-            TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
+                TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
+                TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { SearchView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
+                TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
+                TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
             }
-            .frame(width: available.size.width, height: available.size.height)
+            .frame(width: available.size.width, height: height)
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .background { KeyboardLayoutRegion { keyboardTop = $0 }.ignoresSafeArea().allowsHitTesting(false) }
         .tint(AppColors.accentPrimary)
         .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
@@ -45,17 +48,19 @@ private struct TabContent<Content: View>: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     let coordinator: AppCoordinator
     let content: Content
+    let onPresent: () -> Void
     @State private var showingTimer = false
 
-    init(coordinator: AppCoordinator, @ViewBuilder content: () -> Content) {
+    init(coordinator: AppCoordinator, onPresent: @escaping () -> Void = { }, @ViewBuilder content: () -> Content) {
         self.coordinator = coordinator
+        self.onPresent = onPresent
         self.content = content()
     }
 
     var body: some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: AppSpacing.xs) {
-                SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
+                SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { onPresent(); showingTimer = true }
                 if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.horizontal, AppSpacing.sm) }
             }.padding(.top, AppSpacing.sm)
         }
