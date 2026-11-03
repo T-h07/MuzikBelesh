@@ -4,9 +4,10 @@ enum LibrarySearchField: Hashable { case search, library }
 
 struct RootView: View {
     @EnvironmentObject private var container: AppContainer
+    @Environment(\.scenePhase) private var scenePhase
     let coordinator: AppCoordinator
     var body: some View {
-        KeyboardSafeHost(content: RootTabsView(coordinator: coordinator)
+        KeyboardSafeHost(content: RootTabsView(scenePhase: scenePhase, coordinator: coordinator)
             .environmentObject(container)
             .environmentObject(container.audioPlayer)
             .environmentObject(container.library))
@@ -15,7 +16,7 @@ struct RootView: View {
 }
 
 private struct RootTabsView: View {
-    @Environment(\.scenePhase) private var scenePhase
+    let scenePhase: ScenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @EnvironmentObject private var library: MusicLibraryService
