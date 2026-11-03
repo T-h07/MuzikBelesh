@@ -26,7 +26,9 @@ available to the playlist song picker; neither path interpolates query text as S
 The root owns native search focus for both fields. Search/Return and the accessible
 keyboard Done control dismiss it. Scrolling results dismisses immediately. Query
 clearing, tab changes, navigation, result playback, sheets and backgrounding release
-focus. The mini-player and Sleep Timer continue to use safe-area insets. Keyboard,
+focus. The root sizes the native tab controller to the available keyboard-safe region,
+keeping the real tab bar reachable above the keyboard. The mini-player and Sleep Timer
+continue to use safe-area insets above that bar. Keyboard,
 tab and player accessibility are verified in UI tests and require physical retesting.
 
 Persistent library sorts:

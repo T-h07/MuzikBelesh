@@ -21,21 +21,29 @@ final class LibraryManagementUITests: XCTestCase {
         app?.terminate()
     }
     private func openLibrary(_ filter: String = "Songs") {
-        app.tabBars.buttons["Library"].tap()
+        let tab = app.tabBars.buttons["Library"]
+        if !tab.isSelected { tab.tap() }
         let chip = app.buttons["library-filter-" + filter.replacingOccurrences(of: " ", with: "-")]
         let filters = app.scrollViews["library-filters"]
-        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertTrue(chip.exists || chip.waitForExistence(timeout: 5))
         // XCTest can raise an error while computing isHittable for a chip beyond
         // a horizontal scroll view. Reveal the whole frame before tapping it.
-        func visible() -> Bool { !chip.frame.isEmpty && filters.frame.intersection(app.frame).contains(chip.frame) }
-        if !visible() { filters.swipeRight(); filters.swipeRight() }
-        for _ in 0..<4 { if visible() { break }; filters.swipeLeft() }
+        let viewport = filters.frame.intersection(app.frame)
+        func visible() -> Bool { let frame = chip.frame; return !frame.isEmpty && viewport.contains(frame) }
+        for _ in 0..<4 {
+            let frame = chip.frame
+            if !frame.isEmpty && viewport.contains(frame) { break }
+            if frame.minX < viewport.minX { filters.swipeRight() } else { filters.swipeLeft() }
+        }
         XCTAssertTrue(visible(), "The selected library category must be fully visible"); chip.tap()
     }
     private func change(_ field: XCUIElement, to text: String) {
-        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap()
+        XCTAssertTrue(field.exists || field.waitForExistence(timeout: 5)); field.tap()
         let existing = field.value as? String ?? ""
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count)); field.typeText(text)
+        if !existing.isEmpty && existing != field.placeholderValue {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count))
+        }
+        field.typeText(text)
     }
     private func tapVisible(_ element: XCUIElement) {
         for _ in 0..<5 { if element.isHittable { break }; app.swipeUp() }

@@ -36,7 +36,12 @@ jobs:
           DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
           test -n "$DEVICE_ID"
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
-      - name: Build and test
+      - name: Search keyboard navigation regression
+        run: |
+          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+      - name: Complete regression suite
         run: |
           GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -46,6 +51,9 @@ jobs:
         run: |
           if [[ -d build/TestResults.xcresult ]]; then
             xcrun xcresulttool export attachments --path build/TestResults.xcresult --output-path build/UITestScreenshots
+          fi
+          if [[ -d build/KeyboardResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/KeyboardResults.xcresult --output-path build/KeyboardScreenshots
           fi
       - name: Compact iPhone library layout
         run: |
@@ -68,6 +76,7 @@ jobs:
           path: |
             build/UITestScreenshots
             build/CompactScreenshots
+            build/KeyboardScreenshots
           if-no-files-found: ignore
       - name: Upload test evidence
         if: always()
@@ -77,5 +86,6 @@ jobs:
           path: |
             build/TestResults.xcresult
             build/CompactResults.xcresult
+            build/KeyboardResults.xcresult
           if-no-files-found: ignore
 

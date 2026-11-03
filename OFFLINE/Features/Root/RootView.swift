@@ -10,11 +10,16 @@ struct RootView: View {
     @ObservedObject var coordinator: AppCoordinator
     @FocusState private var searchFocus: LibrarySearchField?
     var body: some View {
-        TabView(selection: $coordinator.selectedTab) {
+        GeometryReader { available in
+            // Constrain the native tab controller to the keyboard-safe proposal.
+            // Its default full-window frame leaves the tab bar behind the keyboard.
+            TabView(selection: $coordinator.selectedTab) {
             TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
             TabContent(coordinator: coordinator) { NavigationStack { SearchView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
             TabContent(coordinator: coordinator) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
             TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
+            }
+            .frame(width: available.size.width, height: available.size.height)
         }
         .tint(AppColors.accentPrimary)
         .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }

@@ -58,3 +58,12 @@ tests and failed the new UI cases for the absent Library search field in Playlis
 the absent playlist entity result, and the missing keyboard Done control. An existing
 metadata/search UI flow also exceeded its two-minute execution allowance. It remains
 enabled and must pass with the fixes; no timeout or failure is treated as acceptance.
+
+CI 41724937547 passed 180 unit/integration tests, the new entity-search workflows,
+and the Search/Done dismissal workflow. The live-player keyboard test reproduced
+the native tab bar remaining behind the keyboard. The restart workflow reached
+all assertions at 126 seconds, exceeding its 120-second cap; helper queries/swipes
+and empty-field deletion were made more efficient without removing assertions or
+raising that cap. A focused keyboard UI gate now precedes the complete suite and
+exports its own screenshot/xcresult evidence. Compact installation/layout and keyboard
+tests still run after the complete suite passes.
