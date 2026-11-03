@@ -43,7 +43,7 @@ final class Phase4PlaybackTests: XCTestCase {
         let paths = try AppStoragePaths(root: root)
         let storage = try StorageCoordinator(paths: paths)
         let deadline = Date().addingTimeInterval(300)
-        let snapshot = StoredPlaybackState(scope: "default", currentTrackID: "track", positionMs: 12_345, shuffleEnabled: true, repeatMode: RepeatMode.all.rawValue, contextTrackIDsJSON: "[\"track\"]", shuffleOrderJSON: "[\"track\"]", shufflePosition: 0, sleepTimerDeadlineMs: Int64(deadline.timeIntervalSince1970 * 1000), sleepTimerDurationMs: 300_000, dateModified: Date())
+        let snapshot = StoredPlaybackState(scope: "default", currentTrackID: nil, positionMs: 12_345, shuffleEnabled: true, repeatMode: RepeatMode.all.rawValue, contextTrackIDsJSON: "[\"track\"]", shuffleOrderJSON: "[\"track\"]", shufflePosition: 0, sleepTimerDeadlineMs: Int64(deadline.timeIntervalSince1970 * 1000), sleepTimerDurationMs: 300_000, dateModified: Date())
         try storage.playback.save(snapshot)
         let restored = try XCTUnwrap(storage.playback.state())
         XCTAssertEqual(restored.positionMs, 12_345)
