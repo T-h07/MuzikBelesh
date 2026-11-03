@@ -17,6 +17,28 @@ import XCTest
 }
 
 final class PlaybackServiceAuditTests: XCTestCase {
+    @MainActor func testReportedFirstIndexedPreviousRestartsThenUsesModeBoundary() async throws {
+        for shuffle in [false, true] {
+            let (_, player, service, root) = try fixture(duration: 20)
+            defer { try? FileManager.default.removeItem(at: root) }
+            try await service.play(trackID: "track-4") // Peso, second indexed song
+            try await service.play(trackID: "track-5") // Future, first indexed song
+            while service.queue.repeatMode != .off { service.queue.cycleRepeat() }
+            if shuffle { service.queue.toggleShuffle() }
+            XCTAssertEqual(service.queue.contextTrackIDs.first, "track-5")
+            await service.seek(to: 10)
+            await service.previous()
+            XCTAssertEqual(service.state.currentTrackID, "track-5")
+            XCTAssertEqual(service.state.elapsedTime, 0)
+            XCTAssertEqual(player.seeks.last, 0)
+            XCTAssertTrue(player.isPlaying)
+            XCTAssertEqual(service.state.canSkipPrevious, shuffle)
+            await service.previous()
+            XCTAssertEqual(service.state.currentTrackID, shuffle ? "track-4" : "track-5")
+            XCTAssertTrue(player.isPlaying)
+        }
+    }
+
     @MainActor func testReportedEndedPreviousUsesHistoryInsteadOfElapsedRestart() async throws {
         for shuffle in [false, true] {
             let (_, player, service, root) = try fixture(duration: 6)
