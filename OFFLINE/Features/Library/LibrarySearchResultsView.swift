@@ -9,6 +9,7 @@ struct LibrarySearchResultsView: View {
     private var matches: LibrarySearchResults { results.restricted(to: scope) }
     var body: some View {
         let values = matches
+        let songIDs = values.songs.map(\.id)
         LazyVStack(alignment: .leading, spacing: AppSpacing.lg) {
             if values.isEmpty {
                 EmptyState(icon: "magnifyingglass", title: emptyTitle, message: results.query.isEmpty ? "Import music or create a playlist to get started." : "Try another title, artist, album or playlist.")
@@ -17,7 +18,7 @@ struct LibrarySearchResultsView: View {
             if !values.songs.isEmpty {
                 heading(scope == .likedSongs ? "Liked Songs" : "Songs", count: values.songs.count, id: "songs")
                 ForEach(values.songs) { track in
-                    StoredTrackRow(track: track, contextTrackIDs: values.songs.map(\.id), contextKind: scope == .likedSongs ? "liked" : contextKind, onInteraction: onInteraction)
+                    StoredTrackRow(track: track, contextTrackIDs: songIDs, contextKind: scope == .likedSongs ? "liked" : contextKind, onInteraction: onInteraction)
                 }
             }
             if !values.albums.isEmpty {
