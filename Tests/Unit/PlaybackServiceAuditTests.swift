@@ -211,4 +211,17 @@ final class PlaybackServiceAuditTests: XCTestCase {
         XCTAssertEqual(service.state.currentTrackID, "track-0")
         XCTAssertTrue(player.isPlaying)
     }
+
+    @MainActor func testInterruptionCannotResumeAfterTimerExpiry() async throws {
+        let (_, player, service, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await service.play(trackID: "track-0")
+        service.sleepTimer.start(minutes: 1)
+        service.handleInterruption(Notification(name: AVAudioSession.interruptionNotification, userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue]))
+        XCTAssertEqual(service.state.status, .interrupted)
+        service.sleepTimer.checkDeadline(now: try XCTUnwrap(service.sleepTimer.deadline).addingTimeInterval(1))
+        service.handleInterruption(Notification(name: AVAudioSession.interruptionNotification, userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue, AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue]))
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(service.state.status, .paused)
+    }
 }

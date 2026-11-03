@@ -339,5 +339,24 @@ final class AudioPlayerService: ObservableObject {
         #endif
     }
     private func handleRouteChange(route: String, reason: AVAudioSession.RouteChangeReason) { state.currentOutputRoute = route; if reason == .oldDeviceUnavailable && state.isPlaying { pause() }; publishCurrent() }
-    private func handleInterruption(_ notification: Notification) { guard let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt, let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }; if type == .began { wasPlayingBeforeInterruption = state.isPlaying; userPausedDuringInterruption = false; if state.isPlaying { player.pause() }; state.status = .interrupted; publishCurrent() } else if type == .ended { let options = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0; let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume); if wasPlayingBeforeInterruption && shouldResume && !userPausedDuringInterruption && reconcileSleepTimer() { wantsPlayback = true; player.play(); synchronizeTransport() } else if state.currentTrackID != nil { state.status = .paused }; publishCurrent(); persist() } }
+    func handleInterruption(_ notification: Notification) {
+        guard let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: value) else { return }
+        if type == .began {
+            wasPlayingBeforeInterruption = wantsPlayback
+            userPausedDuringInterruption = false
+            intentRevision += 1; wantsPlayback = false; player.pause()
+            state.status = .interrupted
+        } else {
+            let value = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: value).contains(.shouldResume)
+            if wasPlayingBeforeInterruption && shouldResume && !userPausedDuringInterruption && reconcileSleepTimer() {
+                do { try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport() }
+                catch { handleTransitionFailure(error) }
+            } else if state.currentTrackID != nil {
+                wantsPlayback = false; state.status = .paused
+            }
+        }
+        updateSkipAvailability(); publishCurrent(); persist()
+    }
 }
