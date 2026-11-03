@@ -44,7 +44,8 @@ final class DuplicateDetectionTests: XCTestCase {
         let reopened = try StorageCoordinator(paths: f.paths)
         let b = try await reopened.importAudio(from: url, sourceType: "youtube", sourceIdentifier: "alias")
         XCTAssertTrue(b.duplicate); XCTAssertEqual(b.track.id, a.track.id); XCTAssertEqual(b.track.title, "User Title")
-        XCTAssertEqual(try reopened.database.dbQueue.read { try LibraryRepository.sourceTrack(type: "youtube", identifier: "alias", db: $0)?.id }, a.track.id)
+        let alias = try await reopened.database.dbQueue.read { try LibraryRepository.sourceTrack(type: "youtube", identifier: "alias", db: $0)?.id }
+        XCTAssertEqual(alias, a.track.id)
     }
     func testConcurrentImportsReturnOnePersistentWinnerWithoutOrphanCopies() async throws {
         let f = try LibraryFixture(count: 0); let url = try source(f, name: "A.wav", seed: 1)
@@ -55,7 +56,8 @@ final class DuplicateDetectionTests: XCTestCase {
         XCTAssertEqual(Set(outcomes.map { $0.track.id }).count, 1)
         XCTAssertEqual(outcomes.filter { !$0.duplicate }.count, 1)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: f.paths.music.path).count, 1)
-        XCTAssertEqual(try f.storage.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM track_sources") }, 1)
+        let sources = try await f.storage.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM track_sources") }
+        XCTAssertEqual(sources, 1)
     }
     func testConcurrentSeparateCoordinatorsStillUseDatabaseDuplicateCheck() async throws {
         let f = try LibraryFixture(count: 0); let second = try StorageCoordinator(paths: f.paths); let url = try source(f, name: "A.wav", seed: 1)

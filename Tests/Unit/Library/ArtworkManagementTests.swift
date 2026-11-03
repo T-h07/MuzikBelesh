@@ -48,7 +48,7 @@ final class ArtworkManagementTests: XCTestCase {
     }
     @MainActor func testFailedDatabaseUpdateRollsBackNewArtworkAndRetainsDraft() async throws {
         let f = try LibraryFixture(); let (_, _, library) = f.services(); let before = try f.repository.snapshot()
-        try f.storage.database.dbQueue.write { try $0.execute(sql: "CREATE TRIGGER reject_art BEFORE UPDATE ON tracks BEGIN SELECT RAISE(ABORT, 'injected'); END") }
+        try await f.storage.database.dbQueue.write { try $0.execute(sql: "CREATE TRIGGER reject_art BEFORE UPDATE ON tracks BEGIN SELECT RAISE(ABORT, 'injected'); END") }
         let draft = TrackMetadataDraft(title: "Unsaved", artist: "New", album: "New"); let data = try LibraryFixture.image()
         do { try await library.saveMetadata(trackID: f.ids[0], draft: draft, artworkData: data); XCTFail("Injected failure must propagate") } catch { }
         XCTAssertEqual(draft.title, "Unsaved"); XCTAssertFalse(data.isEmpty)

@@ -27,7 +27,7 @@ struct LibraryView: View {
                                 .accessibilityIdentifier("library-filter-" + filter.replacingOccurrences(of: " ", with: "-"))
                         }
                     }
-                }
+                }.accessibilityIdentifier("library-filters")
                 content
             }.padding(.horizontal, AppSpacing.lg).padding(.top, AppSpacing.md).padding(.bottom, 30)
         }

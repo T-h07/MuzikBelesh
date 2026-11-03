@@ -27,9 +27,18 @@ struct PlaylistDetailView: View {
                 Section {
                     if songs.isEmpty { Text("This playlist is empty. Add songs from your Library.").foregroundStyle(AppColors.textSecondary) }
                     ForEach(songs) { track in
-                        StoredTrackRow(track: track, contextTrackIDs: songs.map(\.id), contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
-                            .listRowBackground(AppColors.backgroundPrimary)
-                            .swipeActions { Button("Remove from Playlist", role: .destructive) { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } }
+                        Group {
+                            if editMode == .active {
+                                HStack {
+                                    Text(track.title).lineLimit(1); Spacer()
+                                    Button { move(track.id, delta: -1) } label: { Image(systemName: "arrow.up").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel("Move up \(track.title)").accessibilityIdentifier("move-up-" + track.id)
+                                    Button { move(track.id, delta: 1) } label: { Image(systemName: "arrow.down").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel("Move down \(track.title)").accessibilityIdentifier("move-down-" + track.id)
+                                }.accessibilityIdentifier("reorder-row-" + track.id)
+                            } else {
+                                StoredTrackRow(track: track, contextTrackIDs: songs.map(\.id), contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
+                                    .swipeActions { Button("Remove from Playlist", role: .destructive) { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } }
+                            }
+                        }.listRowBackground(AppColors.backgroundPrimary)
                     }.onMove { source, destination in
                         var order = songs.map(\.id); order.move(fromOffsets: source, toOffset: destination)
                         library.perform { try library.reorder(order, playlistID: playlistID) }
@@ -51,9 +60,15 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showingEditor) { PlaylistEditorView(playlistID: playlistID) }
         .sheet(isPresented: $showingTracks) { AddTracksToPlaylistView(playlistID: playlistID) }
         .confirmationDialog("Delete Playlist?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete Playlist", role: .destructive) { Task { do { try await library.deletePlaylist(id: playlistID, confirmed: true); dismiss() } catch { library.report(error) } } }
+            Button("Delete Playlist", role: .destructive) { Task { do { try await library.deletePlaylist(id: playlistID, confirmed: true); dismiss() } catch { library.report(error) } } }.accessibilityIdentifier("confirm-delete-playlist")
             Button("Cancel", role: .cancel) { }
         } message: { Text("This removes the playlist and its organization. Your music files, liked songs and other playlists are preserved.") }
+    }
+    private func move(_ id: String, delta: Int) {
+        var order = songs.map(\.id)
+        guard let current = order.firstIndex(of: id), order.indices.contains(current + delta) else { return }
+        order.swapAt(current, current + delta)
+        library.perform { try library.reorder(order, playlistID: playlistID) }
     }
 }
 

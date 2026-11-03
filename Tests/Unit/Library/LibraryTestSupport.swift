@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import Foundation
 import GRDB
 import ImageIO

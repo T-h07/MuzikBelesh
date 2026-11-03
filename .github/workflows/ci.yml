@@ -11,7 +11,7 @@ permissions: {contents: read}
 jobs:
   build-and-test:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +41,19 @@ jobs:
           GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+      - name: Export UI screenshots
+        if: always()
+        run: |
+          if [[ -d build/TestResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/TestResults.xcresult --output-path build/UITestScreenshots
+          fi
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-ui-screenshots
+          path: build/UITestScreenshots
+          if-no-files-found: ignore
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
