@@ -21,7 +21,16 @@ final class GRDBTrackRepository: TrackRepository {
     func all() throws -> [StoredTrack] { try db.read { try StoredTrack.order(Column("dateAdded").desc).fetchAll($0) } }
     func find(id: String) throws -> StoredTrack? { try db.read { try StoredTrack.fetchOne($0, key: id) } }
     func find(contentSHA256: String) throws -> StoredTrack? { try db.read { try StoredTrack.filter(Column("contentSHA256") == contentSHA256).fetchOne($0) } }
-    func save(_ track: StoredTrack) throws { try db.write { try track.save($0) } }
+    func save(_ value: StoredTrack) throws {
+        try db.write { db in
+            var track = value
+            track.normalizedTitle = LibraryIdentity.search(track.title)
+            let artist = try track.artistID.flatMap { try StoredArtist.fetchOne(db, key: $0)?.name } ?? ""
+            let album = try track.albumID.flatMap { try StoredAlbum.fetchOne(db, key: $0)?.title } ?? ""
+            track.searchText = LibraryIdentity.search([track.title, artist, album, track.albumArtist ?? ""].joined(separator: " "))
+            try track.save(db)
+        }
+    }
     func updateAvailability(id: String, _ availability: StoredTrackAvailability) throws { try db.write { database in try database.execute(sql: "UPDATE tracks SET availability = ?, dateModified = ? WHERE id = ?", arguments: [availability.rawValue, Date(), id]) } }
     func delete(id: String) throws { _ = try db.write { try StoredTrack.deleteOne($0, key: id) } }
 }
@@ -31,7 +40,7 @@ final class GRDBPlaylistRepository: PlaylistRepository {
     init(db: DatabaseQueue) { self.db = db }
     func all() throws -> [StoredPlaylist] { try db.read { try StoredPlaylist.order(Column("dateAdded")).fetchAll($0) } }
     func save(_ playlist: StoredPlaylist) throws { try db.write { try playlist.save($0) } }
-    func setTracks(_ trackIDs: [String], playlistID: String) throws { try db.write { db in try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlistID = ?", arguments: [playlistID]); for (position, id) in trackIDs.enumerated() { try db.execute(sql: "INSERT INTO playlist_tracks (playlistID, trackID, position, dateAdded) VALUES (?, ?, ?, ?)", arguments: [playlistID, id, position, Date()]) } } }
+    func setTracks(_ trackIDs: [String], playlistID: String) throws { try db.write { try LibraryRepository.replaceMembership(trackIDs, playlistID: playlistID, db: $0) } }
     func tracks(playlistID: String) throws -> [StoredTrack] { try db.read { try StoredTrack.fetchAll($0, sql: "SELECT tracks.* FROM tracks JOIN playlist_tracks ON playlist_tracks.trackID = tracks.id WHERE playlist_tracks.playlistID = ? ORDER BY playlist_tracks.position", arguments: [playlistID]) } }
 }
 

@@ -71,6 +71,7 @@ import SwiftUI
         setContext(contextTrackIDs.filter { $0 != id }, current: currentID)
         normalizeAndPersist()
     }
+    func removeUnavailableEntries() { cancelCandidate(); entries.removeAll { !isAvailable($0.trackID) }; normalizeAndPersist() }
     func cancelCandidate() { pendingNavigator = nil; pendingQueueEntryID = nil }
     func previousID() -> String? { navigator.previous() }
     func hasNext(reason: PlaybackAdvanceReason = .automatic) -> Bool { navigator.hasNext(reason: reason, explicitQueue: entries.map(\.trackID)) }
@@ -83,11 +84,11 @@ import SwiftUI
          "historyPrevious": String(hasPrevious()), "queueLength": String(entries.count)]
     }
     func hasPrevious() -> Bool { navigator.hasPrevious() }
-    func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?) {
+    func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?, contextKind: String? = nil, contextSourceID: String? = nil) {
         navigator.setCurrent(currentTrackID)
         currentID = currentTrackID
         syncFromNavigator()
-        let state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, sleepTimerDurationMs: sleepTimerDuration.map { Int64($0 * 1000) }, navigationHistoryJSON: encode(navigationHistory), navigationHistoryPosition: navigationHistoryPosition, dateModified: Date())
+        let state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, sleepTimerDurationMs: sleepTimerDuration.map { Int64($0 * 1000) }, navigationHistoryJSON: encode(navigationHistory), navigationHistoryPosition: navigationHistoryPosition, contextKind: contextKind, contextSourceID: contextSourceID, dateModified: Date())
         do { try storage?.playback.saveSnapshot(state, queue: storedEntries) }
         catch { lastError = "Playback state could not be saved." }
     }

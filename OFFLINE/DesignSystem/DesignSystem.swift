@@ -1,4 +1,6 @@
 import SwiftUI
+import ImageIO
+import UIKit
 import UIKit
 
 enum AppColors {
@@ -63,23 +65,48 @@ struct ArtworkView: View {
 }
 
 struct StoredArtworkView: View {
-    @EnvironmentObject private var container: AppContainer
     let track: StoredTrack
     let size: CGFloat
-    @State private var image: UIImage?
+    var body: some View { ManagedArtworkView(path: track.artworkRelativePath, fallbackID: track.id, size: size) }
+}
 
+private final class ArtworkImageCache {
+    static let shared = NSCache<NSString, UIImage>()
+}
+
+struct ManagedArtworkView: View {
+    @EnvironmentObject private var library: MusicLibraryService
+    let path: String?
+    let fallbackID: String
+    let size: CGFloat
+    @State private var image: UIImage?
     var body: some View {
         Group {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
-            else { ArtworkView(name: track.id, size: size) }
-        }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
-        .task(id: track.artworkRelativePath) {
-            guard let relativePath = track.artworkRelativePath, let storage = container.storage,
-                  let url = try? storage.paths.artworkURL(relativePath: relativePath) else { return }
-            image = await Task.detached(priority: .userInitiated) { UIImage(contentsOfFile: url.path) }.value
-        }
+            else { ArtworkView(name: fallbackID, size: size) }
+        }.frame(width: size, height: size).clipped().clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+            .task(id: "\(path ?? "none")|\(Int(size))") {
+                image = nil
+                guard let path, let storage = library.storage else { return }
+                let pixels = min(1024, max(128, Int(size * 3)))
+                let key = "\(path)|\(pixels)" as NSString
+                if let cached = ArtworkImageCache.shared.object(forKey: key) { image = cached; return }
+                let loaded = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                    let thumbnail = ManagedLibraryFiles.thumbnailName(path)
+                    let candidate = size <= 100 ? thumbnail : path
+                    let preferred = try? storage.paths.artworkURL(relativePath: candidate)
+                    let original = try? storage.paths.artworkURL(relativePath: path)
+                    guard let url = [preferred, original].compactMap({ $0 }).first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+                          let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+                          let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: pixels] as CFDictionary) else { return nil }
+                    let image = UIImage(cgImage: cgImage)
+                    ArtworkImageCache.shared.totalCostLimit = 32 * 1024 * 1024
+                    ArtworkImageCache.shared.countLimit = 200
+                    ArtworkImageCache.shared.setObject(image, forKey: key, cost: cgImage.bytesPerRow * cgImage.height)
+                    return image
+                }.value
+                if !Task.isCancelled { image = loaded }
+            }
     }
 }
 

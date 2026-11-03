@@ -1,10 +1,10 @@
 import Foundation
 import GRDB
 
-enum StoredTrackAvailability: String, Codable, DatabaseValueConvertible { case available, missing, modified }
-enum StoredDownloadState: String, Codable, DatabaseValueConvertible { case queued, interrupted, completed, cancelled, failed }
+enum StoredTrackAvailability: String, Codable, DatabaseValueConvertible, Sendable { case available, missing, modified }
+enum StoredDownloadState: String, Codable, DatabaseValueConvertible, Sendable { case queued, interrupted, completed, cancelled, failed }
 
-struct StoredArtist: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+struct StoredArtist: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable, Sendable {
     static let databaseTableName = "artists"
     var id: String
     var name: String
@@ -14,7 +14,7 @@ struct StoredArtist: Codable, FetchableRecord, PersistableRecord, Identifiable, 
     var dateModified: Date
 }
 
-struct StoredAlbum: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+struct StoredAlbum: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable, Sendable {
     static let databaseTableName = "albums"
     var id: String
     var title: String
@@ -25,7 +25,7 @@ struct StoredAlbum: Codable, FetchableRecord, PersistableRecord, Identifiable, E
     var dateModified: Date
 }
 
-struct StoredTrack: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+struct StoredTrack: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable, Sendable {
     static let databaseTableName = "tracks"
     var id: String
     var title: String
@@ -42,9 +42,12 @@ struct StoredTrack: Codable, FetchableRecord, PersistableRecord, Identifiable, E
     var dateModified: Date
     var originalFilename: String?
     var metadataSource: String
+    var albumArtist: String? = nil
+    var normalizedTitle: String = ""
+    var searchText: String = ""
 }
 
-struct StoredPlaylist: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+struct StoredPlaylist: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable, Sendable {
     static let databaseTableName = "playlists"
     var id: String
     var name: String
@@ -54,13 +57,13 @@ struct StoredPlaylist: Codable, FetchableRecord, PersistableRecord, Identifiable
     var dateModified: Date
 }
 
-struct StoredLikedTrack: Codable, FetchableRecord, PersistableRecord {
+struct StoredLikedTrack: Codable, FetchableRecord, PersistableRecord, Sendable {
     static let databaseTableName = "liked_tracks"
     var trackID: String
     var dateLiked: Date
 }
 
-struct StoredPlaybackState: Codable, FetchableRecord, PersistableRecord {
+struct StoredPlaybackState: Codable, FetchableRecord, PersistableRecord, Sendable {
     static let databaseTableName = "playback_state"
     var scope: String
     var currentTrackID: String?
@@ -74,10 +77,12 @@ struct StoredPlaybackState: Codable, FetchableRecord, PersistableRecord {
     var sleepTimerDurationMs: Int64? = nil
     var navigationHistoryJSON: String? = nil
     var navigationHistoryPosition: Int? = nil
+    var contextKind: String? = nil
+    var contextSourceID: String? = nil
     var dateModified: Date
 }
 
-struct StoredQueueEntry: Codable, FetchableRecord, PersistableRecord, Identifiable {
+struct StoredQueueEntry: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     static let databaseTableName = "playback_queue_entries"
     var id: String
     var trackID: String
@@ -86,7 +91,7 @@ struct StoredQueueEntry: Codable, FetchableRecord, PersistableRecord, Identifiab
     var origin: String = "addToQueue"
 }
 
-struct StoredHistoryEntry: Codable, FetchableRecord, PersistableRecord, Identifiable {
+struct StoredHistoryEntry: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     static let databaseTableName = "playback_history"
     var id: String
     var trackID: String
@@ -96,7 +101,7 @@ struct StoredHistoryEntry: Codable, FetchableRecord, PersistableRecord, Identifi
     var source: String?
 }
 
-struct StoredDownloadJob: Codable, FetchableRecord, PersistableRecord, Identifiable {
+struct StoredDownloadJob: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     static let databaseTableName = "download_jobs"
     var id: String
     var sourceType: String
@@ -110,7 +115,7 @@ struct StoredDownloadJob: Codable, FetchableRecord, PersistableRecord, Identifia
     var dateModified: Date
 }
 
-struct StoredSetting: Codable, FetchableRecord, PersistableRecord {
+struct StoredSetting: Codable, FetchableRecord, PersistableRecord, Sendable {
     static let databaseTableName = "settings"
     var key: String
     var value: String
@@ -118,7 +123,7 @@ struct StoredSetting: Codable, FetchableRecord, PersistableRecord {
     var dateModified: Date
 }
 
-struct StoredTrackSource: Codable, FetchableRecord, PersistableRecord, Identifiable {
+struct StoredTrackSource: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     static let databaseTableName = "track_sources"
     var id: String
     var trackID: String
@@ -128,7 +133,7 @@ struct StoredTrackSource: Codable, FetchableRecord, PersistableRecord, Identifia
     var dateRecorded: Date
 }
 
-struct StoredImportOperation: Codable, FetchableRecord, PersistableRecord, Identifiable {
+struct StoredImportOperation: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     static let databaseTableName = "import_operations"
     var id: String
     var sourceFilename: String

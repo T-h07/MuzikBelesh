@@ -1,24 +1,55 @@
 import SwiftUI
 
 struct HomeView: View {
-    @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var library: MusicLibraryService
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
-    var body: some View { ScrollView { VStack(alignment: .leading, spacing: AppSpacing.section) {
-        HStack { Text("Muzik Belesh").font(.system(size: 28, weight: .bold)).foregroundStyle(AppColors.textPrimary); Spacer(); Button { coordinator.sheet = .settings } label: { Image(systemName: "gearshape").font(.title3).foregroundStyle(AppColors.textPrimary) }.accessibilityLabel("Settings") }
-        if let track = currentTrack { VStack(alignment: .leading, spacing: AppSpacing.md) { Text("CONTINUE LISTENING").font(.caption.weight(.semibold)).tracking(1).foregroundStyle(AppColors.accentPrimary); HStack(spacing: AppSpacing.lg) { StoredArtworkView(track: track, size: 112); VStack(alignment: .leading, spacing: AppSpacing.sm) { Text(track.title).font(.title3.weight(.bold)).foregroundStyle(AppColors.textPrimary).lineLimit(2); Text(track.originalFilename ?? "Local Music").foregroundStyle(AppColors.textSecondary).lineLimit(1); Button { coordinator.showingNowPlaying = true } label: { Label("Open player", systemImage: "play.fill").font(.caption).foregroundStyle(.black).padding(.horizontal, 12).padding(.vertical, 9).background(AppColors.accentPrimary).clipShape(Capsule()) } } }.padding(AppSpacing.lg).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.card)) } } else { EmptyState(icon: "music.note", title: "Your library is ready", message: "Import local audio to start listening.", actionTitle: "Import Audio") { coordinator.selectedTab = .library } }
-        SectionHeader(title: "Quick shortcuts")
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: AppSpacing.md)], spacing: AppSpacing.md) { shortcut("Liked Songs", "heart.fill", .library); shortcut("Playlists", "rectangle.stack.fill", .library); shortcut("Downloaded", "arrow.down.circle.fill", .downloads); shortcut("All Music", "music.note.list", .library) }
-        SectionHeader(title: "Demo Recently Played")
-        if container.music.recentlyPlayedIDs.isEmpty { EmptyState(icon: "clock", title: "Nothing played yet", message: "Choose a track to start your session.") } else { ForEach(container.music.recentlyPlayedIDs.compactMap { container.music.track($0) }) { TrackRow(track: $0) } }
-        SectionHeader(title: "Demo Collection")
-        ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: AppSpacing.lg) { ForEach(container.music.albums) { AlbumCard(album: $0) }; ForEach(container.music.playlists) { PlaylistCard(playlist: $0) } } }
-    }.padding(.horizontal, AppSpacing.lg).padding(.top, AppSpacing.md).padding(.bottom, 100) }.navigationBarHidden(true).screenBackground() }
-    private var currentTrack: StoredTrack? {
-        guard let storage = container.storage else { return nil }
-        if let id = audioPlayer.state.currentTrackID { return try? storage.tracks.find(id: id) }
-        return storage.library.first
+    private var currentTrack: StoredTrack? { library.track(audioPlayer.state.currentTrackID) ?? library.snapshot.tracks.first }
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: AppSpacing.section) {
+                HStack {
+                    Text("Muzik Belesh").font(.system(size: 28, weight: .bold)).foregroundStyle(AppColors.textPrimary)
+                    Spacer(); Button { coordinator.sheet = .settings } label: { Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44) }.accessibilityLabel("Settings")
+                }
+                if let track = currentTrack {
+                    VStack(alignment: .leading, spacing: AppSpacing.md) {
+                        Text("CONTINUE LISTENING").font(.caption.weight(.semibold)).foregroundStyle(AppColors.accentPrimary)
+                        HStack(spacing: AppSpacing.md) {
+                            StoredArtworkView(track: track, size: 100)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(track.title).font(.headline).foregroundStyle(AppColors.textPrimary).lineLimit(2)
+                                Text(library.artistName(track.artistID)).font(.subheadline).foregroundStyle(AppColors.textSecondary).lineLimit(1)
+                                Button("Open Player") {
+                                    Task {
+                                        if audioPlayer.state.currentTrackID == nil { await library.play(track.id, ids: library.snapshot.tracks.map(\.id), kind: "library") }
+                                        coordinator.showingNowPlaying = true
+                                    }
+                                }.buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black)
+                            }
+                        }
+                    }.cardSurface()
+                } else { EmptyState(icon: "music.note", title: "Your library is ready", message: "Import local audio to start listening.", actionTitle: "Import Audio") { coordinator.selectedTab = .library } }
+                SectionHeader(title: "Quick shortcuts")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: AppSpacing.md)], spacing: AppSpacing.md) {
+                    shortcut("Liked Songs", "heart.fill", "Liked Songs")
+                    shortcut("Playlists", "rectangle.stack.fill", "Playlists")
+                    shortcut("Albums", "square.stack", "Albums")
+                    shortcut("All Music", "music.note.list", "Songs")
+                }
+                SectionHeader(title: "Recently Played")
+                if library.snapshot.recentIDs.isEmpty { Text("Play a local song to see it here.").foregroundStyle(AppColors.textSecondary) }
+                ForEach(library.tracks(library.snapshot.recentIDs)) { StoredTrackRow(track: $0, contextTrackIDs: library.snapshot.recentIDs, contextKind: "recent") }
+                SectionHeader(title: "Your Playlists")
+                ForEach(library.snapshot.playlists.prefix(5)) { playlist in
+                    NavigationLink { PlaylistDetailView(playlistID: playlist.id) } label: { PlaylistLibraryRow(playlist: playlist) }
+                }
+            }.padding(.horizontal, AppSpacing.lg).padding(.top, AppSpacing.md).padding(.bottom, 30)
+        }.navigationBarHidden(true).screenBackground()
     }
-    private func shortcut(_ title: String, _ icon: String, _ tab: RootTab) -> some View { Button { coordinator.selectedTab = tab } label: { HStack(spacing: AppSpacing.sm) { Image(systemName: icon).foregroundStyle(AppColors.accentPrimary); Text(title).font(.subheadline.weight(.medium)).foregroundStyle(AppColors.textPrimary).lineLimit(1).minimumScaleFactor(0.85); Spacer(minLength: AppSpacing.xs); Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppColors.textTertiary) }.padding(.horizontal, AppSpacing.md).frame(minHeight: 52).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium)) } }
+    private func shortcut(_ title: String, _ icon: String, _ filter: String) -> some View {
+        Button { coordinator.libraryFilter = filter; coordinator.selectedTab = .library } label: {
+            HStack { Image(systemName: icon).foregroundStyle(AppColors.accentPrimary); Text(title).font(.subheadline).lineLimit(1); Spacer(); Image(systemName: "chevron.right").font(.caption) }.padding(AppSpacing.md).frame(minHeight: 52).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+        }.foregroundStyle(AppColors.textPrimary)
+    }
 }
-

@@ -4,6 +4,8 @@ enum SearchMode: String, CaseIterable { case youtube = "YouTube", library = "You
 
 struct SearchView: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var library: MusicLibraryService
+    @State private var localResults: [StoredTrack] = []
     @ObservedObject var coordinator: AppCoordinator
     @State private var mode: SearchMode = .youtube
     var body: some View {
@@ -15,6 +17,13 @@ struct SearchView: View {
             }.padding(.horizontal, AppSpacing.xl).padding(.vertical, AppSpacing.lg)
             ScrollView { resultsContent.padding(.horizontal, AppSpacing.xl).padding(.bottom, 100) }
         }.navigationBarHidden(true).screenBackground()
+        .task(id: "\(coordinator.searchQuery)|\(library.revision)") {
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+                let value = try await library.search(coordinator.searchQuery)
+                guard !Task.isCancelled else { return }; localResults = value
+            } catch is CancellationError { } catch { if !Task.isCancelled { library.report(error) } }
+        }
     }
     @ViewBuilder private var resultsContent: some View { if mode == .youtube { youtubeResults } else { libraryResults } }
     @ViewBuilder private var youtubeResults: some View {
@@ -25,8 +34,12 @@ struct SearchView: View {
         }.padding(.top, AppSpacing.md)
     }
     @ViewBuilder private var libraryResults: some View {
-        let results = (container.storage?.library ?? []).filter { coordinator.searchQuery.isEmpty || $0.title.localizedCaseInsensitiveContains(coordinator.searchQuery) }
-        VStack(alignment: .leading, spacing: AppSpacing.md) { if results.isEmpty { EmptyState(icon: "music.note", title: "No library matches", message: "Search your imported local music.") } else { ForEach(results) { StoredTrackRow(track: $0) } } }.padding(.top, AppSpacing.md)
+        let results = coordinator.searchQuery.isEmpty ? library.snapshot.tracks : localResults
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            LibrarySortMenu()
+            if results.isEmpty { EmptyState(icon: "music.note", title: "No library matches", message: "Search your imported music by title, artist or album.") }
+            else { ForEach(results) { StoredTrackRow(track: $0, contextTrackIDs: results.map(\.id), contextKind: "search") } }
+        }.padding(.top, AppSpacing.md)
     }
 }
 

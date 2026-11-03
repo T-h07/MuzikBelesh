@@ -4,7 +4,7 @@ import GRDB
 final class DatabaseManager {
     let dbQueue: DatabaseQueue
 
-    init(url: URL) throws {
+    init(url: URL, migrationTarget: String? = nil) throws {
         dbQueue = try DatabaseQueue(path: url.path)
         try dbQueue.write { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
@@ -85,7 +85,9 @@ final class DatabaseManager {
                 t.add(column: "navigationHistoryPosition", .integer)
             }
         }
-        try migrator.migrate(dbQueue)
+        LibraryMigration.register(in: &migrator)
+        if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
+        else { try migrator.migrate(dbQueue) }
     }
 
     static func live(paths: AppStoragePaths) throws -> DatabaseManager { try DatabaseManager(url: paths.database) }

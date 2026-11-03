@@ -4,6 +4,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
+    @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
@@ -13,8 +14,12 @@ struct RootView: View {
             TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
         .tint(AppColors.accentPrimary)
-        .onChange(of: scenePhase) { _, phase in if phase == .active { audioPlayer.reconcileLifecycle() } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } } }
         .preferredColorScheme(.dark)
+        .alert("Library", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
+            Button("OK") { library.error = nil }
+            Button("Retry Recovery") { Task { await library.reconcileFiles() } }
+        } message: { Text(library.error ?? "") }
         .sheet(item: $coordinator.sheet) { sheet in
             switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
         }
@@ -95,10 +100,11 @@ struct SearchBar: View {
 struct MiniPlayer: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
+    @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
-    private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+    private var track: StoredTrack? { library.track(audioPlayer.state.currentTrackID) }
     var body: some View { if let track { HStack(spacing: AppSpacing.xs) {
-        Button { coordinator.showingNowPlaying = true } label: { HStack(spacing: AppSpacing.sm) { StoredArtworkView(track: track, size: 44); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) } }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Open Now Playing")
+        Button { coordinator.showingNowPlaying = true } label: { HStack(spacing: AppSpacing.sm) { StoredArtworkView(track: track, size: 44); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(library.artistName(track.artistID)).font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) } }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Open Now Playing")
         Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipPrevious && audioPlayer.state.elapsedTime <= 3).accessibilityLabel("Previous track")
         Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
         Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")
