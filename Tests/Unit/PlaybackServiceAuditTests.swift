@@ -15,6 +15,62 @@ import XCTest
 }
 
 final class PlaybackServiceAuditTests: XCTestCase {
+    @MainActor func testReportedEndedPreviousUsesHistoryInsteadOfElapsedRestart() async throws {
+        for shuffle in [false, true] {
+            let (_, player, service, root) = try fixture()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try await service.play(trackID: "track-1")
+            if shuffle { service.queue.toggleShuffle() }
+            try await service.play(trackID: "track-0")
+            service.queue.cycleRepeat(); service.queue.cycleRepeat()
+            if shuffle { service.queue.toggleShuffle() } // exhaust the indexed context deterministically
+            await service.seek(to: 2)
+            await service.completedItem(generation: service.activeItemGeneration)
+            XCTAssertEqual(service.state.status, .ended)
+            await service.previous()
+            XCTAssertEqual(service.state.currentTrackID, "track-1")
+            XCTAssertTrue(player.isPlaying)
+        }
+    }
+
+    @MainActor func testReportedManualNextRecoversExhaustedShuffleOff() async throws {
+        let (_, player, service, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await service.play(trackID: "track-0")
+        service.queue.toggleShuffle()
+        service.queue.cycleRepeat(); service.queue.cycleRepeat()
+        for _ in 0..<6 { await service.completedItem(generation: service.activeItemGeneration) }
+        XCTAssertEqual(service.state.status, .ended)
+        XCTAssertNotEqual(service.state.currentTrackID, "track-0", "Cycle ends away from final indexed song")
+        XCTAssertTrue(service.state.canSkipNext)
+        let endedID = service.state.currentTrackID
+        await service.next()
+        XCTAssertNotEqual(service.state.currentTrackID, endedID)
+        XCTAssertTrue(player.isPlaying)
+    }
+
+    @MainActor func testReportedCurrentItemNotificationCannotBeRejectedByTimeComparison() async throws {
+        let (storage, _, _, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let transport = NativePlaybackPlayer()
+        let service = AudioPlayerService(storage: storage, player: transport, registerRemoteCommands: false)
+        try await service.play(trackID: "track-1")
+        service.pause()
+        await service.seek(to: 2.5)
+        try await service.play()
+        let generation = service.activeItemGeneration
+        // Inject the authoritative notification with a lagging transport clock, as can
+        // occur across a seek/decoder boundary. This tests notification acceptance,
+        // independently of the real natural-completion integration tests below.
+        NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: transport.player.currentItem)
+        for _ in 0..<100 {
+            if service.activeItemGeneration != generation { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertNotEqual(service.activeItemGeneration, generation)
+        service.stop()
+    }
+
     @MainActor private func fixture() throws -> (StorageCoordinator, FakePlaybackPlayer, AudioPlayerService, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))
