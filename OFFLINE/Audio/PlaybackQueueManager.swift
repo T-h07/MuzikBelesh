@@ -56,8 +56,8 @@ import SwiftUI
     func remove(id: String) { entries.removeAll { $0.id == id }; normalizeAndPersist() }
     func clear() { entries.removeAll(); normalizeAndPersist() }
     func move(from offsets: IndexSet, to destination: Int) { entries.move(fromOffsets: offsets, toOffset: destination); normalizeAndPersist() }
-    func toggleShuffle() { navigator.setShuffleEnabled(!shuffleEnabled); syncFromNavigator(); persist() }
-    func cycleRepeat() { navigator.cycleRepeat(); syncFromNavigator(); persist() }
+    func toggleShuffle() { navigator.setShuffleEnabled(!shuffleEnabled); pendingNavigator?.setShuffleEnabled(navigator.shuffleEnabled); syncFromNavigator(); persist() }
+    func cycleRepeat() { navigator.cycleRepeat(); pendingNavigator?.cycleRepeat(); syncFromNavigator(); persist() }
     func nextID() -> String? {
         let candidate = navigator.copy()
         candidate.setExplicitQueue(entries.map(\.trackID))

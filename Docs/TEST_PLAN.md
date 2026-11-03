@@ -11,3 +11,8 @@ Expected result is a passing simulator build/test job, a structurally valid unsi
 # Phase 4 verification
 
 CI covers queue-entry identity, ordering, repeat modes, timer validation, database migration, AVPlayer integration, and the existing UI regression suite. Physical iPhone testing remains necessary for locked-device background timer behavior; simulator success is not evidence for that gate.
+
+The application audit adds recorded failing-before navigator regressions, fake-player
+tests of the real service, native AVPlayer seek checks, a deterministic 240-operation
+six-track stress scenario, and filesystem safety tests. See APPLICATION_AUDIT.md for
+evidence limits, deferred scenarios and the physical acceptance matrix.

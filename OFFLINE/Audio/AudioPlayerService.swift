@@ -13,6 +13,7 @@ final class AudioPlayerService: ObservableObject {
     private var completedGeneration: Int?
     private var transportObserver: NSKeyValueObservation?
     private var wantsPlayback = false
+    private var lastSavedPosition: TimeInterval = 0
     private let session = AudioSessionManager()
     private let nowPlaying = NowPlayingInfoCoordinator()
     private let remoteCommands = RemoteCommandCoordinator()
@@ -50,6 +51,8 @@ final class AudioPlayerService: ObservableObject {
             savedDuration = saved.sleepTimerDurationMs.map { TimeInterval($0) / 1000 }
         } else { savedDeadline = nil; savedDuration = nil }
         sleepTimer = SleepTimerService(deadline: savedDeadline, duration: savedDuration)
+        state.currentTrackID = restoration?.currentTrackID
+        state.elapsedTime = TimeInterval(restoration?.positionMs ?? 0) / 1000
         queue.onStateChanged = { [weak self] in self?.updateSkipAvailability(); self?.persist() }
         sleepTimer.onExpire = { [weak self] in self?.expireSleepTimer() }
         sleepTimer.onChange = { [weak self] in
@@ -192,7 +195,9 @@ final class AudioPlayerService: ObservableObject {
 
     func refreshContext() {
         let currentID = state.currentTrackID
-        let tracks = (try? storage?.tracks.all()) ?? []
+        let tracks: [StoredTrack]
+        do { tracks = try storage?.tracks.all() ?? [] }
+        catch { state.lastError = "The playback library could not be read."; return }
         var ids: [String] = []
         for track in tracks where track.availability == .available && !ids.contains(track.id) { ids.append(track.id) }
         context = PlaybackContext(trackIDs: ids, currentIndex: nil)
@@ -269,6 +274,7 @@ final class AudioPlayerService: ObservableObject {
                 guard let self, generation == self.itemGeneration, !self.state.isSeeking, time.seconds.isFinite else { return }
                 self.state.elapsedTime = max(0, time.seconds)
                 self.updateSkipAvailability(); self.publishCurrent()
+                if abs(self.state.elapsedTime - self.lastSavedPosition) >= 5 { self.lastSavedPosition = self.state.elapsedTime; self.persist() }
             }
         }
     }

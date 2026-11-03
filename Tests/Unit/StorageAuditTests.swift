@@ -37,4 +37,16 @@ final class StorageAuditTests: XCTestCase {
         catch { XCTAssertEqual(try storage.tracks.all().count, 0) }
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: paths.music.path).isEmpty)
     }
+
+    func testPlaybackSnapshotAndQueueRollbackTogetherOnForeignKeyFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))
+        var snapshot = StoredPlaybackState(scope: "default", currentTrackID: nil, positionMs: 42, shuffleEnabled: false, repeatMode: "all", dateModified: Date())
+        try storage.playback.save(snapshot)
+        snapshot.positionMs = 100
+        XCTAssertThrowsError(try storage.playback.saveSnapshot(snapshot, queue: [StoredQueueEntry(id: "bad", trackID: "absent", position: 0, dateAdded: Date())]))
+        XCTAssertEqual(try storage.playback.state()?.positionMs, 42)
+        XCTAssertTrue(try storage.playback.queue().isEmpty)
+    }
 }

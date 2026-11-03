@@ -6,3 +6,11 @@ The service exposes typed idle/loading/ready/playing/paused/interrupted/ended/fa
 # Advanced playback integration
 
 Queue transitions, repeat behavior, history events, restoration, and Sleep Timer expiration all route through the Phase 3 `AudioPlayerService`. Timer expiration pauses the authoritative AVPlayer and preserves Up Next.
+
+Phase 4 audit: active navigation is authoritative in PlaybackNavigationEngine.
+Play/Next/Previous/seek/completion/restoration share a FIFO gate. Pause/Stop/timer
+expiry invalidate suspended transitions. Actual AVPlayer timeControlStatus drives
+playing/loading state. Endpoint seeking advances in Repeat All while playing,
+restarts in Repeat One, and returns to a recoverable paused origin otherwise.
+Native seeking checks the completion result; stale item/time callbacks are guarded.
+The earlier non-wrapping/Phase 4-future description above is historical Phase 3 scope.
