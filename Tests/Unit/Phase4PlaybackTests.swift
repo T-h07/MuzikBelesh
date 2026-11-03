@@ -54,6 +54,37 @@ final class Phase4PlaybackTests: XCTestCase {
         XCTAssertEqual(navigator.shufflePosition, 1)
         XCTAssertEqual(navigator.next(), "c")
     }
+
+    func testShuffleNavigationWorksFromBothIndexedBoundaries() {
+        let first = PlaybackNavigationEngine(makeShuffle: { Array($0) })
+        first.restore(context: ["a", "b", "c", "d"], currentID: "a", shuffleEnabled: true, repeatMode: .all, shuffleOrder: ["c", "d", "b"], shufflePosition: 0, history: ["a"], historyPosition: 0, explicitQueue: [])
+        XCTAssertTrue(first.hasNext())
+        XCTAssertEqual(first.next(), "c")
+
+        let last = PlaybackNavigationEngine(makeShuffle: { Array($0) })
+        last.restore(context: ["a", "b", "c", "d"], currentID: "d", shuffleEnabled: true, repeatMode: .all, shuffleOrder: ["b", "a", "c"], shufflePosition: 0, history: ["d"], historyPosition: 0, explicitQueue: [])
+        XCTAssertTrue(last.hasNext())
+        XCTAssertEqual(last.next(), "b")
+    }
+
+    func testRepeatOffStillAllowsRemainingShuffleTracks() {
+        let navigator = PlaybackNavigationEngine(makeShuffle: { Array($0) })
+        navigator.restore(context: ["a", "b", "c"], currentID: "a", shuffleEnabled: true, repeatMode: .off, shuffleOrder: ["c", "b"], shufflePosition: 0, history: ["a"], historyPosition: 0, explicitQueue: [])
+        XCTAssertTrue(navigator.hasNext())
+        XCTAssertEqual(navigator.next(), "c")
+        XCTAssertTrue(navigator.hasNext())
+        XCTAssertEqual(navigator.next(), "b")
+        XCTAssertFalse(navigator.hasNext())
+    }
+
+    func testExhaustedShuffleCycleRegeneratesForRepeatAll() {
+        let navigator = PlaybackNavigationEngine(makeShuffle: { Array($0) })
+        navigator.restore(context: ["a", "b", "c"], currentID: "c", shuffleEnabled: true, repeatMode: .all, shuffleOrder: ["a", "b"], shufflePosition: 2, history: ["c", "a", "b"], historyPosition: 2, explicitQueue: [])
+        XCTAssertTrue(navigator.hasNext())
+        let next = navigator.next()
+        XCTAssertNotNil(next)
+        XCTAssertNotEqual(next, "b")
+    }
     func testRepeatCyclesOffAllOne() {
         XCTAssertEqual(RepeatMode.allCases, [.off, .all, .one])
     }
