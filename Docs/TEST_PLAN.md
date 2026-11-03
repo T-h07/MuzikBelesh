@@ -8,3 +8,6 @@ Phase 0 manual checks completed on November 2, 2026: SideStore installation, dia
 
 Expected result is a passing simulator build/test job, a structurally valid unsigned IPA, and truthful device evidence. A successful compile is not evidence that YouTube extraction or SideStore signing works.
 
+# Phase 4 verification
+
+CI covers queue-entry identity, ordering, repeat modes, timer validation, database migration, AVPlayer integration, and the existing UI regression suite. Physical iPhone testing remains necessary for locked-device background timer behavior; simulator success is not evidence for that gate.

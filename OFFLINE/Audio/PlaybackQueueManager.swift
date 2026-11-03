@@ -6,6 +6,7 @@ import SwiftUI
     @Published private(set) var contextTrackIDs: [String] = []
     @Published private(set) var shuffleEnabled = false
     @Published private(set) var repeatMode: RepeatMode = .off
+    var onStateChanged: (() -> Void)?
     private let storage: StorageCoordinator?
     private var shuffleOrder: [String] = []
     private var shufflePosition = 0
@@ -63,7 +64,7 @@ import SwiftUI
     private func insert(trackID: String, at: Int, origin: QueueEntryOrigin) { guard isAvailable(trackID) else { return }; entries.insert(PlaybackQueueEntry(id: UUID().uuidString, trackID: trackID, position: at, insertedAt: Date(), origin: origin), at: min(at, entries.count)); normalizeAndPersist() }
     private func normalizeAndPersist() { entries = entries.enumerated().map { PlaybackQueueEntry(id: $0.element.id, trackID: $0.element.trackID, position: $0.offset, insertedAt: $0.element.insertedAt, origin: $0.element.origin) }; let stored = entries.map { StoredQueueEntry(id: $0.id, trackID: $0.trackID, position: $0.position, dateAdded: $0.insertedAt, origin: $0.origin.rawValue) }; try? storage?.playback.replaceQueue(stored) }
     private func rebuildShuffle(excluding: String?) { shuffleOrder = contextTrackIDs.filter { $0 != excluding }.shuffled(); if let last = shuffleOrder.last, let first = shuffleOrder.first, last == first, shuffleOrder.count > 1 { shuffleOrder.swapAt(0, 1) }; shufflePosition = 0 }
-    private func persist() { persistState(currentTrackID: currentID, positionMs: 0, sleepDeadline: nil) }
+    private func persist() { persistState(currentTrackID: currentID, positionMs: 0, sleepDeadline: nil); onStateChanged?() }
     private func encode(_ value: [String]) -> String? { try? String(data: JSONEncoder().encode(value), encoding: .utf8) }
     private func decode(_ value: String?) -> [String]? { guard let value, let data = value.data(using: .utf8) else { return nil }; return try? JSONDecoder().decode([String].self, from: data) }
     private func reconcile() { entries = entries.filter { isAvailable($0.trackID) }; normalizeAndPersist() }

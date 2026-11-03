@@ -33,12 +33,14 @@ final class AudioPlayerService: ObservableObject {
         persistence = PlaybackPersistenceCoordinator(storage: storage)
         queue = PlaybackQueueManager(storage: storage)
         history = PlaybackHistoryService(storage: storage)
+        queue.onStateChanged = { [weak self] in self?.persist() }
         let savedDeadline: Date?
         if let storage, let saved = (try? storage.playback.state()) ?? nil, let milliseconds = saved.sleepTimerDeadlineMs {
             savedDeadline = Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1000)
         } else { savedDeadline = nil }
         sleepTimer = SleepTimerService(deadline: savedDeadline)
         sleepTimer.onExpire = { [weak self] in self?.expireSleepTimer() }
+        sleepTimer.onChange = { [weak self] in self?.persist() }
         sleepTimer.reconcile { [weak self] in self?.expireSleepTimer() }
         routeMonitor.onRouteChanged = { [weak self] route, reason in
             Task { @MainActor in self?.handleRouteChange(route: route, reason: reason) }

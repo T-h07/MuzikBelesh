@@ -13,3 +13,6 @@ The installed bundle identifier included a SideStore-generated suffix; this is e
 
 The Phase 3 final unsigned IPA is accepted for in-place SideStore testing by developer-reported iPhone 13 Pro Max validation. Preserve the existing bundle identity and app container so imported music and SQLite data remain available. iOS may cache app icons after updates; verify the icon after installation.
 
+# Phase 4 IPA note
+
+The unsigned IPA workflow remains unchanged for SideStore. The Phase 4 package must retain `Assets.car`, the app icon resources, and `PlugIns/OFFLINEShareExtension.appex`; timer and queue state are application data and are not packaged into the IPA.
