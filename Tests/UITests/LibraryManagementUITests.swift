@@ -66,6 +66,20 @@ final class LibraryManagementUITests: XCTestCase {
     }
     private func actions(_ id: String) { tapVisible(app.buttons["track-actions-" + id]) }
 
+    private func dragVisibleResultsAbovePlayer() {
+        let results = app.scrollViews["local-search-results"]
+        let frame = results.frame
+        // Scroll-view AX bounds extend behind its safe-area accessories. The
+        // default swipe starts on the player there, so use the measured visible
+        // results region, not fixed screen coordinates or the covered footer.
+        let bottom = min(frame.maxY, app.buttons["sleep-timer-indicator"].frame.minY)
+        let height = bottom - frame.minY
+        XCTAssertGreaterThan(height, 44)
+        let origin = results.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+        origin.withOffset(CGVector(dx: 0, dy: height * 0.8)).press(forDuration: 0.05,
+            thenDragTo: origin.withOffset(CGVector(dx: 0, dy: height * 0.2)))
+    }
+
     func testSearchSubmitDismissesKeyboardAndCanReopen() {
         app.tabBars.buttons["Search"].tap()
         let field = app.textFields["search-field"]
@@ -118,7 +132,7 @@ final class LibraryManagementUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Open Now Playing"].isHittable)
         app.tabBars.buttons["Search"].tap(); field.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        app.scrollViews["local-search-results"].swipeUp(); absent(app.keyboards.firstMatch)
+        dragVisibleResultsAbovePlayer(); absent(app.keyboards.firstMatch)
         field.tap(); app.buttons["Clear search"].tap(); absent(app.keyboards.firstMatch)
         change(field, to: "Fixture\n")
         tapVisible(app.staticTexts["Fixture B"].firstMatch)
