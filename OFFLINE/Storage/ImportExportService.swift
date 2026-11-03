@@ -96,7 +96,7 @@ final class StorageCoordinator: ObservableObject {
                 try db.execute(sql: "UPDATE import_operations SET state = 'committed', dateUpdated = ? WHERE id = ?", arguments: [now, operationID])
             }
             try? FileManager.default.removeItem(at: stagingURL)
-            reload()
+            await MainActor.run { reload() }
             return ImportResult(track: track, duplicate: false)
         } catch {
             try? FileManager.default.removeItem(at: stagingURL)

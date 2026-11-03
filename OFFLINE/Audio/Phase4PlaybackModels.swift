@@ -51,5 +51,5 @@ final class PlaybackHistoryService {
         task?.cancel(); task = nil; self.deadline = nil; onExpire?()
     }
     func reconcile(onExpire: @escaping () -> Void) { self.onExpire = onExpire; if let deadline, deadline <= Date() { self.deadline = nil; onExpire() } else { schedule() } }
-    private func schedule() { task?.cancel(); guard let deadline else { return }; task = Task { [weak self] in let ns = UInt64(max(0, deadline.timeIntervalSinceNow) * 1_000_000_000); try? await Task.sleep(nanoseconds: ns); guard !Task.isCancelled else { return }; await MainActor.run { guard let self, self.deadline == deadline else { return }; self.deadline = nil; self.onExpire?() } } }
+    private func schedule() { task?.cancel(); guard let deadline else { return }; task = Task { [weak self] in let ns = UInt64(min(7 * 24 * 60 * 60, max(0, deadline.timeIntervalSinceNow)) * 1_000_000_000); try? await Task.sleep(nanoseconds: ns); guard !Task.isCancelled else { return }; await MainActor.run { guard let self, self.deadline == deadline else { return }; if deadline > Date() { self.schedule() } else { self.deadline = nil; self.onExpire?() } } } }
 }

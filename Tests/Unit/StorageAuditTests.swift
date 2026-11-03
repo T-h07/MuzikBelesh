@@ -1,4 +1,5 @@
 import XCTest
+import GRDB
 @testable import OFFLINE
 
 final class StorageAuditTests: XCTestCase {
@@ -48,5 +49,22 @@ final class StorageAuditTests: XCTestCase {
         XCTAssertThrowsError(try storage.playback.saveSnapshot(snapshot, queue: [StoredQueueEntry(id: "bad", trackID: "absent", position: 0, dateAdded: Date())]))
         XCTAssertEqual(try storage.playback.state()?.positionMs, 42)
         XCTAssertTrue(try storage.playback.queue().isEmpty)
+    }
+
+    func testInterruptedImportRecoveryOnlyRemovesJournalOwnedFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppStoragePaths(root: root)
+        let storage = try StorageCoordinator(paths: paths)
+        let id = UUID().uuidString
+        let abandoned = try paths.musicURL(relativePath: "\(id).wav")
+        let unrelated = try paths.musicURL(relativePath: "preserved.wav")
+        try Data([1]).write(to: abandoned); try Data([2]).write(to: unrelated)
+        try storage.database.dbQueue.write { db in
+            try StoredImportOperation(id: id, sourceFilename: "test.wav", stagingRelativePath: "\(id).wav", state: "staging", errorMessage: nil, dateStarted: Date(), dateUpdated: Date()).save(db)
+        }
+        _ = try StorageCoordinator(paths: paths)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: abandoned.path))
+        XCTAssertEqual(try Data(contentsOf: unrelated), Data([2]))
     }
 }

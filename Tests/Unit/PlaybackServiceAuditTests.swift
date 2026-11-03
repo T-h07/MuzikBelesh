@@ -81,6 +81,7 @@ final class PlaybackServiceAuditTests: XCTestCase {
         let deadline = try XCTUnwrap(service.sleepTimer.deadline)
         player.duringSeek = { service.sleepTimer.checkDeadline(now: deadline.addingTimeInterval(1)) }
         await service.seek(to: 3)
+        player.duringSeek = nil
         await service.completedItem(generation: service.activeItemGeneration)
         await service.next()
         XCTAssertFalse(player.isPlaying)
@@ -177,6 +178,7 @@ final class PlaybackServiceAuditTests: XCTestCase {
         try await service.play(trackID: "track-0")
         player.duringSeek = { service.pause() }
         await service.seek(to: 1)
+        player.duringSeek = nil
         XCTAssertFalse(player.isPlaying)
         XCTAssertEqual(service.state.status, .paused)
         let count = player.seeks.count

@@ -98,9 +98,12 @@ final class AudioPlayerService: ObservableObject {
             let resolved = try resolver.resolve(trackID: trackID)
             let revision = intentRevision
             let asset = AVURLAsset(url: resolved.url)
-            let audioTracks = try await asset.loadTracks(withMediaType: .audio)
-            guard !audioTracks.isEmpty else { throw AudioPlaybackError.unsupportedAudio }
-            let duration = try await asset.load(.duration)
+            let duration: CMTime
+            do {
+                let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+                guard !audioTracks.isEmpty else { throw AudioPlaybackError.unsupportedAudio }
+                duration = try await asset.load(.duration)
+            } catch { throw AudioPlaybackError.unsupportedAudio }
             guard duration.seconds.isFinite, duration.seconds > 0 else { throw AudioPlaybackError.unsupportedAudio }
             guard revision == intentRevision, reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Playback transition was cancelled.") }
             try session.configure()
@@ -147,7 +150,7 @@ final class AudioPlayerService: ObservableObject {
     func enqueueRemote(command: String, operation: @escaping () async -> Void) {
         Task { @MainActor [weak self] in
             #if DEBUG
-            NSLog("Muzik Belesh remote command=%@ current=%@ shuffle=%@ repeat=%@ service=%ld", command, self?.state.currentTrackID ?? "none", self?.queue.shuffleEnabled.description ?? "false", self?.queue.repeatMode.rawValue ?? "off", self.map { ObjectIdentifier($0).hashValue } ?? 0)
+            self?.debugTransition(action: "remote-\(command)", detail: "service=\(self.map { ObjectIdentifier($0).hashValue } ?? 0)")
             #endif
             await operation()
         }
@@ -323,6 +326,7 @@ final class AudioPlayerService: ObservableObject {
     private func debugTransition(action: String, detail: String) {
         #if DEBUG
         NSLog("Muzik Belesh transition action=%@ detail=%@ current=%@ status=%@ time=%.2f duration=%.2f shuffle=%@ repeat=%@ next=%@ previous=%@", action, detail, state.currentTrackID ?? "none", String(describing: state.status), state.elapsedTime, state.duration, queue.shuffleEnabled.description, queue.repeatMode.rawValue, state.canSkipNext.description, state.canSkipPrevious.description)
+        NSLog("Muzik Belesh transport generation=%ld transport=%@ item=%@ session=%@ queued=%ld", itemGeneration, String(describing: nativePlayer?.timeControlStatus), String(describing: item?.status), session.isActive.description, queue.entries.count)
         #endif
     }
     private func handleRouteChange(route: String, reason: AVAudioSession.RouteChangeReason) { state.currentOutputRoute = route; if reason == .oldDeviceUnavailable && state.isPlaying { pause() }; publishCurrent() }
