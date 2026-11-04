@@ -218,7 +218,7 @@ final class LibraryManagementUITests: XCTestCase {
         dragVisibleResultsAbovePlayer(); absent(app.keyboards.firstMatch)
         field.tap(); app.buttons["Clear search"].tap(); absent(app.keyboards.firstMatch)
         change(field, to: "Fixture\n")
-        tapVisible(app.staticTexts["Fixture B"].firstMatch)
+        tapVisible(app.scrollViews["local-search-results"].staticTexts["Fixture B"].firstMatch)
         absent(app.keyboards.firstMatch)
         XCTAssertTrue(app.buttons["Open Now Playing"].isHittable)
         screenshot("Search-Keyboard-Navigation")
