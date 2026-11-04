@@ -1,0 +1,45 @@
+import Foundation
+import Combine
+import GRDB
+
+@MainActor final class YouTubePreferences: ObservableObject {
+    private let defaults: UserDefaults
+    private let key = "youtube.audioQuality"
+    @Published var quality: AudioQuality { didSet { defaults.set(quality.rawValue, forKey: key) } }
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        quality = defaults.string(forKey: key).flatMap(AudioQuality.init(rawValue:)) ?? .standard
+    }
+}
+
+enum YouTubeLibraryStatus: Equatable, Sendable { case notDownloaded, downloaded(trackID: String), fileUnavailable, unknown }
+protocol YouTubeLibraryChecking: Sendable { func status(videoID: String) async throws -> YouTubeLibraryStatus }
+
+struct YouTubeLibraryLookup: YouTubeLibraryChecking, @unchecked Sendable {
+    let database: DatabaseQueue?
+    let paths: AppStoragePaths?
+    func status(videoID: String) async throws -> YouTubeLibraryStatus {
+        guard let database, let paths else { return .unknown }
+        let track = try await database.read { db in try LibraryRepository.sourceTrack(type: "youtube", identifier: videoID, db: db) }
+        guard let track else { return .notDownloaded }
+        guard track.availability == .available, let url = try? paths.musicURL(relativePath: track.fileRelativePath), FileManager.default.fileExists(atPath: url.path) else { return .fileUnavailable }
+        return .downloaded(trackID: track.id)
+    }
+}
+
+actor CachedYouTubeMetadataProvider: YouTubeMetadataProvider {
+    private let provider: any YouTubeMetadataProvider
+    private var cache: [String: (YouTubeVideo, Date)] = [:]
+    init(provider: any YouTubeMetadataProvider) { self.provider = provider }
+    func metadata(videoID: String) async throws -> YouTubeVideo {
+        try Task.checkCancellation()
+        let now = Date()
+        cache = cache.filter { $0.value.1 > now }
+        if let hit = cache[videoID] { return hit.0 }
+        let video = try await provider.metadata(videoID: videoID)
+        try Task.checkCancellation()
+        if cache.count >= 20, let key = cache.min(by: { $0.value.1 < $1.value.1 })?.key { cache.removeValue(forKey: key) }
+        cache[videoID] = (video, Date().addingTimeInterval(30))
+        return video
+    }
+}

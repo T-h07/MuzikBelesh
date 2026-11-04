@@ -10,6 +10,10 @@ on:
         type: choice
         options: [complete, focused]
         default: complete
+      live_youtube:
+        description: Opt-in external YouTube compatibility checks (separate from deterministic gates)
+        type: boolean
+        default: false
       prebuilt_run_id:
         description: Reuse test products from a focused run of this exact commit
         type: string
@@ -50,7 +54,7 @@ jobs:
         if: inputs.prebuilt_run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: phase5-test-products
+          name: phase6-test-products
           path: build/prebuilt
           run-id: ${{ inputs.prebuilt_run_id }}
           github-token: ${{ github.token }}
@@ -78,16 +82,22 @@ jobs:
         if: inputs.verification_scope == 'focused'
         uses: actions/upload-artifact@v4
         with:
-          name: phase5-test-products
+          name: phase6-test-products
           path: |
             build/test-products.tar.gz
             build/product-source.txt
           retention-days: 7
           if-no-files-found: error
-      - name: Focused keyboard regression
+      - name: Focused Phase 6 and keyboard regressions
         if: inputs.verification_scope == 'focused'
         run: |
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -only-testing:OFFLINEUITests/YouTubeUITests -only-testing:OFFLINETests/YouTubeURLParserTests -only-testing:OFFLINETests/YouTubeProviderTests -only-testing:OFFLINETests/YouTubeSearchStateTests -only-testing:OFFLINETests/YouTubeAudioTests -only-testing:OFFLINETests/YouTubeLibraryIntegrityTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Opt-in live YouTube compatibility
+        if: inputs.live_youtube
+        continue-on-error: true
+        run: |
+          python3 Scripts/enable-youtube-live-tests.py "$TEST_RUN" build/Live.xctestrun
+          xcodebuild -xctestrun build/Live.xctestrun -destination "id=$SIMULATOR_ID" -resultBundlePath build/YouTubeLiveResults.xcresult -only-testing:OFFLINETests/YouTubeLiveTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Compact iPhone library layout
         if: inputs.verification_scope != 'focused'
         run: |
@@ -132,6 +142,7 @@ jobs:
             build/TestResults.xcresult
             build/CompactResults.xcresult
             build/KeyboardResults.xcresult
+            build/YouTubeLiveResults.xcresult
           if-no-files-found: ignore
 
       - name: Build verified unsigned device candidate

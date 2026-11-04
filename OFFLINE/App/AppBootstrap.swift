@@ -13,6 +13,12 @@ import Foundation
                 if process.arguments.contains("--reset-ui-library"), FileManager.default.fileExists(atPath: root.path) { try FileManager.default.removeItem(at: root) }
                 let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))
                 if process.arguments.contains("--reset-ui-library") { try seed(storage) }
+                if process.arguments.contains("--youtube-fixtures") {
+                    let fixtures = YouTubeUITestFixtures()
+                    guard let defaults = UserDefaults(suiteName: "YouTubeUITests-\(identifier)") else { fatalError("Isolated preferences unavailable") }
+                    if process.arguments.contains("--reset-ui-library") { defaults.removePersistentDomain(forName: "YouTubeUITests-\(identifier)") }
+                    return AppContainer(storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults)
+                }
                 return AppContainer(storage: storage)
             } catch { fatalError("Could not create the isolated UI test library") }
         }

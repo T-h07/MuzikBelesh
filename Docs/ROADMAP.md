@@ -16,11 +16,12 @@
 Phase 0-3: complete. Phase 4: **merged into develop at a58861f (PR #5), with
 physical acceptance recorded by the developer in its merge commit**.
 
-Phase 5: persistent library and playlist management is implemented on
-`feature/phase-05-library`; automated validation and the device acceptance matrix
-are tracked in its PR and PHASE_05_DEVICE_TESTING.md.
+Phase 5: merged through PR #6 at `9ba81a7fe6d0cd6420958971ac2a89bfadb68264`,
+following developer-reported build 155 category acceptance on iPhone 13 Pro Max
+(iOS 27.0.1). Individual procedures not separately attested remain documented.
 
-**Milestone B — Complete Offline Music Player: PENDING PHYSICAL ACCEPTANCE.**
-Do not mark complete until the ten-track scenario, regressions, final-head CI/IPA,
-required physical checks and integration into develop are all verified.
-Milestone C is not complete. Phase 6 has not started.
+Phase 6: **IN PROGRESS** on `feature/phase-06-youtube`. Real no-key web search,
+local-only YouTubeKit extraction and Phase 7 request preparation are being verified.
+See PHASE_06_YOUTUBE.md and PHASE_06_DEVICE_TESTING.md. Source compilation alone
+is not acceptance. No media transfer is implemented and Phase 7 has not started.
+Milestone C remains incomplete; physical Phase 6 acceptance is pending.

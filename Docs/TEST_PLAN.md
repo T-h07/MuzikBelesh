@@ -99,3 +99,11 @@ restoration have independent UI methods, retaining every field/search/relaunch
 assertion within the same 120-second per-test cap. Name searches submit before
 scrolling past matching songs; description search opens the uniquely matched album
 while the keyboard is visible. The editor uses an inline title on compact screens.
+
+# Phase 6 verification
+
+See [PHASE_06_YOUTUBE.md](PHASE_06_YOUTUBE.md) for deterministic unit/UI coverage,
+opt-in native live checks, initial public-web evidence and limitations. The focused
+CI scope now runs Phase 6 suites plus the existing keyboard/player regression.
+Test products are reused for the complete existing regression suite; physical
+acceptance remains [NOT RUN](PHASE_06_DEVICE_TESTING.md).

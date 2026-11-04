@@ -98,7 +98,7 @@ struct TrackContextMenu: View {
     @EnvironmentObject private var container: AppContainer
     let track: MockTrack
     var body: some View {
-        Button {} label: { Label("Demo track · import local audio to play", systemImage: "waveform") }.disabled(true)
+        Button {} label: { Label("Demo track Â· import local audio to play", systemImage: "waveform") }.disabled(true)
         Button { container.playback.addToQueue(track.id) } label: { Label("Add to Demo Queue", systemImage: "text.badge.plus") }
         Button { container.music.toggleLiked(track.id) } label: { Label(container.music.likedTrackIDs.contains(track.id) ? "Unlike" : "Like", systemImage: "heart") }
         Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Demo Playlist", systemImage: "text.badge.plus") }
@@ -155,9 +155,3 @@ struct ProgressRow: View {
     let job: MockDownloadJob
     var body: some View { HStack(spacing: AppSpacing.md) { ArtworkView(name: job.video.artwork, size: 58); VStack(alignment: .leading, spacing: 5) { Text(job.video.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(job.state.rawValue.capitalized).font(.caption).foregroundStyle(job.state == .failed ? AppColors.error : AppColors.textSecondary); ProgressView(value: job.progress).tint(AppColors.accentPrimary) }; Spacer(); Text("\(Int(job.progress * 100))%").font(.caption).foregroundStyle(AppColors.textSecondary) }.padding(.vertical, 6) }
 }
-
-struct YouTubeResultRow: View {
-    let video: MockVideo
-    var body: some View { HStack(spacing: AppSpacing.md) { ArtworkView(name: video.artwork, size: 112); VStack(alignment: .leading, spacing: 5) { Text(video.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(2); Text(video.channel).font(.caption).foregroundStyle(AppColors.textSecondary); Text(video.duration).font(.caption2).foregroundStyle(AppColors.textTertiary) }; Spacer() }.padding(.vertical, 5) }
-}
-

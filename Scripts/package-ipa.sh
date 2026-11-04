@@ -16,9 +16,14 @@ if [[ -n "${GITHUB_SHA:-}" ]]; then
 fi
 [[ -x "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE" ]] || { echo "Missing executable" >&2; exit 1; }
 file "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE"
+lipo -verify_arch arm64 "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE"
 [[ -f "$OUTPUT_DIR/Payload/OFFLINE.app/Assets.car" ]] || { echo "Compiled asset catalog missing" >&2; exit 1; }
 [[ "$(plutil -type UILaunchScreen "$OUTPUT_DIR/Payload/OFFLINE.app/Info.plist")" == *dictionary* ]] || { echo "Modern launch-screen configuration missing" >&2; exit 1; }
 [[ -d "$OUTPUT_DIR/Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex" ]] || { echo "Share extension missing" >&2; exit 1; }
+lipo -verify_arch arm64 "$OUTPUT_DIR/Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex/OFFLINEShareExtension"
+for BUNDLE in "$OUTPUT_DIR/Payload/OFFLINE.app" "$OUTPUT_DIR/Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex"; do
+  [[ ! -e "$BUNDLE/embedded.mobileprovision" && ! -d "$BUNDLE/_CodeSignature" ]] || { echo "Unexpected signing material" >&2; exit 1; }
+done
 python3 - "$OUTPUT_DIR/Payload/OFFLINE.app" <<'PY'
 import os, pathlib, plistlib, sys
 app = pathlib.Path(sys.argv[1])
@@ -26,6 +31,7 @@ main = plistlib.loads((app / "Info.plist").read_bytes())
 extension = plistlib.loads((app / "PlugIns/OFFLINEShareExtension.appex/Info.plist").read_bytes())
 assert main["CFBundleShortVersionString"] == extension["CFBundleShortVersionString"] == "0.1.0"
 assert main["CFBundleVersion"] == extension["CFBundleVersion"]
+assert extension["CFBundleIdentifier"] == "com.th07.muzikbelesh.share"
 if os.getenv("GITHUB_RUN_NUMBER"):
     assert main["CFBundleVersion"] == os.environ["GITHUB_RUN_NUMBER"]
 print("Verified version/build/commit:", main["CFBundleShortVersionString"], main["CFBundleVersion"], main["MBBuildCommit"])

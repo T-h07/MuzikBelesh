@@ -9,10 +9,28 @@ final class AppContainer: ObservableObject {
     let settings: MockSettingsStore
     let storage: StorageCoordinator?
     let library: MusicLibraryService
+    let youtubeSearch: YouTubeSearchService
+    let youtubeMetadata: any YouTubeMetadataProvider
+    let youtubeResolver: any YouTubeAudioResolver
+    let youtubePreparer: any YouTubeDownloadPreparing
+    let youtubeLibrary: any YouTubeLibraryChecking
+    let youtubePreferences: YouTubePreferences
+    let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
-    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe = YouTubeKitProbe(), music: MockMusicStore = MockMusicStore(), playback: MockPlaybackStore = MockPlaybackStore(), downloads: MockDownloadStore = MockDownloadStore(), settings: MockSettingsStore = MockSettingsStore(), storage: StorageCoordinator? = nil) {
-        self.configuration = configuration; self.youtubeProbe = youtubeProbe; self.music = music; self.playback = playback; self.downloads = downloads; self.settings = settings
+    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, music: MockMusicStore = MockMusicStore(), playback: MockPlaybackStore = MockPlaybackStore(), downloads: MockDownloadStore = MockDownloadStore(), settings: MockSettingsStore = MockSettingsStore(), storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard) {
+        self.configuration = configuration; self.music = music; self.playback = playback; self.downloads = downloads; self.settings = settings
         if let storage { self.storage = storage } else { self.storage = try? StorageCoordinator(paths: AppStoragePaths()) }
+        let transport = YouTubeURLSessionTransport()
+        let web = YouTubeWebProvider(transport: transport)
+        let metadata = CachedYouTubeMetadataProvider(provider: youtubeMetadataProvider ?? web)
+        let resolver = youtubeAudioResolver ?? YouTubeKitAudioResolver(metadata: metadata, transport: transport)
+        self.youtubeSearch = YouTubeSearchService(provider: youtubeSearchProvider ?? web)
+        self.youtubeMetadata = metadata
+        self.youtubeResolver = resolver
+        self.youtubePreparer = YouTubeDownloadPreparer(resolver: resolver)
+        self.youtubeLibrary = YouTubeLibraryLookup(database: self.storage?.database.dbQueue, paths: self.storage?.paths)
+        self.youtubePreferences = YouTubePreferences(defaults: youtubeDefaults)
+        self.youtubeProbe = youtubeProbe ?? YouTubeKitProbe(resolver: resolver)
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
     }
