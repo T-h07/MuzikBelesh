@@ -27,14 +27,43 @@ functional defects, but the developer now reports an oversized gray keyboard
 accessory area and choppy bottom-control movement. No iOS version was supplied
 for either report. The new album-management requirements were not present in 66.
 
-## Replacement build and additional acceptance — NOT RUN
+## Developer physical acceptance — build 155, 2026-11-04
 
-Replacement version: **0.1.0**. The exact build number, full source SHA, IPA SHA256,
-manifest and direct artifact/workflow links are recorded in
-[PR #6](https://github.com/T-h07/MuzikBelesh/pull/6), alongside the verified build
-manifest packaged with the unsigned IPA. Use that manifest and the app's embedded
-commit to identify the installed replacement. CI results cannot establish hardware
-animation quality or replace this acceptance gate.
+Device: **iPhone 13 Pro Max**. Developer-reported iOS version: **27.0.1**.
+Version/build: **0.1.0 (155)**. Accepted source SHA:
+`0cb829aa6cb5687782724200bd6c15e3e0e9c8ea`.
+IPA SHA256 (as reported by the build agent):
+`5727a92d88e4df37247e35d4cb256bbe8ac489ca5aa1be33fd7fdabe34e68e8e`.
+
+- [Focused CI — PASS](https://github.com/T-h07/MuzikBelesh/actions/runs/41830329066)
+- [Final CI — PASS](https://github.com/T-h07/MuzikBelesh/actions/runs/41832813069):
+  194 unit/integration tests, 17 UI tests and 5 compact-screen checks reported passing.
+- [Unsigned IPA and manifest](https://github.com/T-h07/MuzikBelesh/actions/runs/41832813069/artifacts/13325756988)
+
+The developer reported the following **physical-device category-level results** after
+updating in place. This is developer testimony, not hardware testing by the
+agent or proof of every granular procedure in the table below.
+
+| Reported category | Build 155 result |
+| --- | --- |
+| Album management, search and persistence | **PASS — developer reported** |
+| Keyboard layout and animation | **PASS — developer reported** |
+| In-place update integrity and playback regressions | **PASS — developer reported** |
+
+No failing behavior was reported for build 155. The full per-scenario
+acceptance table remains below as a reference; individual scenarios that were
+not expressly reported remain **NOT RUN / not individually attested**, rather
+than being inferred from these grouped results. No further device evidence is
+invented. The developer explicitly instructed **not to merge PR #6 without
+separate authorization**.
+
+## Replacement build 155 — detailed scenarios (not individually attested)
+
+Replacement version: **0.1.0 (155)**; SHA, checksum, CI and artifact links appear
+in the developer acceptance section above and in
+[PR #6](https://github.com/T-h07/MuzikBelesh/pull/6).
+CI is not a substitute for physical testing; grouped developer-reported results
+are recorded separately from detailed individual scenarios.
 
 Install the replacement **over build 66 through SideStore**. Do not uninstall,
 reset SQLite, or remove imported files to work around any failure. Record the iOS
@@ -56,6 +85,6 @@ Do not claim a frame-rate improvement from screenshots or simulator assertions.
 If a check fails, preserve the app container, record reproduction steps and export
 Settings / Diagnostics. Never invent test evidence.
 
-**PHASE 5 IMPROVEMENTS IMPLEMENTED — IPHONE ACCEPTANCE PENDING.**
-PR #6 stays open and unmerged until these additional requirements pass physical
-acceptance. Do not modify release or start Phase 6.
+**PHASE 5 BUILD 155 — DEVELOPER-REPORTED CATEGORY ACCEPTANCE PASSED; INDIVIDUAL CHECKLIST PROCEDURES NOT SEPARATELY ATTESTED.**
+PR #6 remains open and unmerged pending the developer's separate explicit merge
+authorization. Do not modify release or start Phase 6.
