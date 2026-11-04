@@ -14,3 +14,8 @@ with prebuilt products builds one verified unsigned Release candidate after test
 there is no need to also dispatch the standalone IPA workflow. Packaging checks
 arm64 for both executables, app/extension bundle IDs and version/build consistency,
 absence of embedded signing material, ZIP structure and full-SHA/hash manifest.
+
+The `runner_label` dispatch option supports `macos-15-intel` as a bounded capacity
+fallback when the default `macos-15` pool does not allocate a runner. Reuse test
+products only on the same selected runner architecture. Device builds still target
+arm64 independently of the host CPU. Runner allocation is not a source/test result.
