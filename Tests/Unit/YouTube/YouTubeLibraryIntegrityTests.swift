@@ -30,17 +30,13 @@ final class YouTubeLibraryIntegrityTests: XCTestCase {
         let context = player.queue.contextTrackIDs, shuffle = player.queue.shuffleEnabled, repeatMode = player.queue.repeatMode
         let replacements = transport.replacements, generation = player.activeItemGeneration
         let snapshot = try fixture.repository.snapshot()
-        let before = try await fixture.storage.database.dbQueue.read { db in
-            try ["playback_state", "playback_queue_entries", "playback_history", "download_jobs", "track_sources"].map { try Row.fetchAll(db, sql: "SELECT * FROM \($0) ORDER BY rowid") }
-        }
+        let before = try await fixture.storage.database.dbQueue.read(Self.stateSnapshot)
         let hash = try fixture.storage.audio.sha256(url: fixture.file(0))
         let search = YouTubeSearchService(provider: YTSearchStub([.success(YouTubeSearchPage(videos: [YTFixture.video], continuationToken: nil))]))
         _ = try await search.search(query: "song", continuationToken: nil)
         _ = try await YouTubeDownloadPreparer(resolver: YTResolverStub()).prepare(video: YTFixture.video, quality: .high)
         do { _ = try await YTResolverStub(error: .extractionFailed).resolve(video: YTFixture.video, quality: .high); XCTFail() } catch { }
-        let after = try await fixture.storage.database.dbQueue.read { db in
-            try ["playback_state", "playback_queue_entries", "playback_history", "download_jobs", "track_sources"].map { try Row.fetchAll(db, sql: "SELECT * FROM \($0) ORDER BY rowid") }
-        }
+        let after = try await fixture.storage.database.dbQueue.read(Self.stateSnapshot)
         XCTAssertEqual(before, after); XCTAssertEqual(try fixture.repository.snapshot(), snapshot)
         XCTAssertEqual(player.state.currentTrackID, current); XCTAssertEqual(player.state.elapsedTime, position)
         XCTAssertEqual(player.queue.contextTrackIDs, context); XCTAssertEqual(player.queue.shuffleEnabled, shuffle); XCTAssertEqual(player.queue.repeatMode, repeatMode)
@@ -50,4 +46,16 @@ final class YouTubeLibraryIntegrityTests: XCTestCase {
         XCTAssertEqual(library.snapshot.tracks.count, 3)
         player.stop(); player.sleepTimer.cancel()
     }
+    // GRDB Row is not Sendable. Encode every persisted field inside the read transaction.
+    private static func stateSnapshot(_ db: Database) throws -> [Data] {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        return [
+            try encoder.encode(StoredPlaybackState.order(Column("scope")).fetchAll(db)),
+            try encoder.encode(StoredQueueEntry.order(Column("id")).fetchAll(db)),
+            try encoder.encode(StoredHistoryEntry.order(Column("id")).fetchAll(db)),
+            try encoder.encode(StoredDownloadJob.order(Column("id")).fetchAll(db)),
+            try encoder.encode(StoredTrackSource.order(Column("id")).fetchAll(db))
+        ]
+    }
+
 }
