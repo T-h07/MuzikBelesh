@@ -38,12 +38,34 @@ final class LibraryManagementUITests: XCTestCase {
         XCTAssertTrue(visible(), "The selected library category must be fully visible"); chip.tap()
     }
     private func change(_ field: XCUIElement, to text: String) {
-        XCTAssertTrue(field.exists || field.waitForExistence(timeout: 5)); field.tap()
+        XCTAssertTrue(field.exists || field.waitForExistence(timeout: 5))
+        if field.identifier.hasPrefix("album-") { revealAlbumField(field) }
+        field.tap()
         let existing = field.value as? String ?? ""
         if !existing.isEmpty && existing != field.placeholderValue {
             field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count))
         }
         field.typeText(text)
+    }
+    private func revealAlbumField(_ field: XCUIElement) {
+        let bar = app.navigationBars["Edit Album"].exists ? app.navigationBars["Edit Album"] : app.navigationBars["Create Album"]
+        for _ in 0..<5 {
+            let top = bar.frame.maxY
+            let keyboard = app.keyboards.firstMatch
+            // Keyboard AX bounds omit the predictive-input strip. Leave one
+            // field-height of clearance and drag only within visible form content.
+            let bottom = keyboard.exists ? keyboard.frame.minY - field.frame.height : app.frame.maxY
+            let frame = field.frame
+            if frame.minY >= top && frame.maxY <= bottom && field.isHittable { return }
+            let height = bottom - top
+            XCTAssertGreaterThan(height, 44)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let upper = origin.withOffset(CGVector(dx: app.frame.midX, dy: top + height * 0.2))
+            let lower = origin.withOffset(CGVector(dx: app.frame.midX, dy: top + height * 0.75))
+            if frame.minY < top { upper.press(forDuration: 0.05, thenDragTo: lower) }
+            else { lower.press(forDuration: 0.05, thenDragTo: upper) }
+        }
+        XCTFail("The album field must be visible above the keyboard before editing")
     }
     private func tapVisible(_ element: XCUIElement) {
         for _ in 0..<5 { if element.isHittable { break }; app.swipeUp() }

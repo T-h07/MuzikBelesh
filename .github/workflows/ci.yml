@@ -36,16 +36,31 @@ jobs:
           DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
           test -n "$DEVICE_ID"
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+      - name: Build all test products once
+        run: |
+          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -derivedDataPath build/TestProducts build-for-testing CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
+          test -f "${TEST_RUN_FILES[0]}"
+          echo "TEST_RUN=${TEST_RUN_FILES[0]}" >> "$GITHUB_ENV"
       - name: Focused album and keyboard regressions
         run: |
-          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINETests/AlbumManagementTests -only-testing:OFFLINETests/ManagedAlbumMigrationTests -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINETests/AlbumManagementTests -only-testing:OFFLINETests/ManagedAlbumMigrationTests -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Compact iPhone library layout
+        run: |
+          COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
+          test -n "$COMPACT_ID"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumEditAndUniversalSearchPersistAfterRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Export compact screenshots
+        if: always()
+        run: |
+          if [[ -d build/CompactResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/CompactResults.xcresult --output-path build/CompactScreenshots
+          fi
       - name: Complete regression suite
         run: |
-          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Export UI screenshots
         if: always()
         run: |
@@ -54,19 +69,6 @@ jobs:
           fi
           if [[ -d build/KeyboardResults.xcresult ]]; then
             xcrun xcresulttool export attachments --path build/KeyboardResults.xcresult --output-path build/KeyboardScreenshots
-          fi
-      - name: Compact iPhone library layout
-        run: |
-          COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
-          test -n "$COMPACT_ID"
-          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumEditAndUniversalSearchPersistAfterRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
-      - name: Export compact screenshots
-        if: always()
-        run: |
-          if [[ -d build/CompactResults.xcresult ]]; then
-            xcrun xcresulttool export attachments --path build/CompactResults.xcresult --output-path build/CompactScreenshots
           fi
       - name: Upload UI screenshots
         if: always()

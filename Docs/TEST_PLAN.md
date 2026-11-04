@@ -85,3 +85,12 @@ without drift. UIKit alone owns keyboard avoidance (`safeAreaRegions = .containe
 in its child host); no accessory toolbar is installed. This removes two competing
 insets, but simulator checks do not establish physical frame rate. Hardware animation
 quality remains a required additional acceptance check in PHASE_05_DEVICE_TESTING.md.
+
+CI builds all test products once with build-for-testing, then uses the generated
+xctestrun with test-without-building for focused, compact and full runs. Each device
+still installs and executes the application and every selected assertion. The compact
+gate precedes the full suite so a reproducible small-screen failure is diagnosed
+without waiting for unrelated UI flows. Album editor UI helpers reveal covered fields
+by dragging measured visible form content before typing; keyboard AX bounds exclude
+the predictive strip, so the helper leaves a field-height of clearance. No check or
+per-test cap is removed by reusing build products or scrolling to a visible target.
