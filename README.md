@@ -19,6 +19,11 @@ Title, Artist, Album, optional Album Artist and artwork from Edit Metadata. Edit
 change application metadata only; audio bytes, hashes, managed paths and identities
 stay intact. Export returns the original encoded audio.
 
+Library → Albums supports persistent empty albums, artist/year/description/artwork,
+song assignment, custom order, Play/Shuffle and confirmed deletion. Each song has
+one primary album and can belong to any number of playlists. Untagged songs appear
+under Unassigned Songs. Deleting an album preserves its songs and ongoing playback.
+
 Library and Search find songs, albums, artists and playlists without a network request.
 All groups matches with counts; category filters keep the entered query. Search defaults
 to Your Library. Search/Done, scrolling and tab changes dismiss the keyboard. Seven

@@ -24,10 +24,13 @@ not indexed full-text or acoustic search. The existing bound-SQL track search re
 available to the playlist song picker; neither path interpolates query text as SQL.
 
 The root owns native search focus for both fields. Search/Return and the accessible
-keyboard Done control dismiss it. Scrolling results dismisses immediately. Query
+Done button beside the search field dismiss it. No keyboard accessory toolbar is
+installed. Scrolling results dismisses immediately. Query
 clearing, tab changes, navigation, result playback, sheets and backgrounding release
 focus. A native hosting container constrains the tab content's physical bounds to
-UIKit's keyboard layout guide,
+UIKit's keyboard layout guide. The child hosting controller uses `.container`
+safe-area regions, disabling duplicate SwiftUI keyboard avoidance. UIKit owns the
+single keyboard animation; focus does not recreate the root hosting controller,
 keeping the real tab bar reachable above the keyboard. The mini-player and Sleep Timer
 continue to use safe-area insets above that bar. Keyboard,
 tab and player accessibility are verified in UI tests and require physical retesting.

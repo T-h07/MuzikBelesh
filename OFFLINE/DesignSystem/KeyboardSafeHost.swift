@@ -17,6 +17,9 @@ final class KeyboardSafeHostingController<Content: View>: UIViewController {
     let hosting: UIHostingController<Content>
     init(content: Content) {
         hosting = UIHostingController(rootView: content)
+        // UIKit's guide already excludes the keyboard. SwiftUI's default .all
+        // applies a second keyboard inset to the same hierarchy while animating.
+        hosting.safeAreaRegions = .container
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { return nil }

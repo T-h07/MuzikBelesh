@@ -36,11 +36,12 @@ enum LibrarySearchEngine {
         func matches(_ text: String) -> Bool { term.isEmpty || LibraryIdentity.search(text).contains(term) }
         let artists = Dictionary(uniqueKeysWithValues: snapshot.artists.map { ($0.id, $0.name) })
         let albums = Dictionary(uniqueKeysWithValues: snapshot.albums.map { ($0.id, $0.title) })
+        let albumDetails = Dictionary(uniqueKeysWithValues: snapshot.albums.map { ($0.id, [$0.description ?? "", $0.releaseYear.map(String.init) ?? ""].joined(separator: " ")) })
         let songs = snapshot.tracks.filter {
             matches([$0.title, $0.artistID.flatMap { artists[$0] } ?? "Unknown Artist", $0.albumID.flatMap { albums[$0] } ?? "Unknown Album", $0.albumArtist ?? ""].joined(separator: " "))
         }
         return LibrarySearchResults(query: term, songs: songs,
-            albums: snapshot.albumGroups.filter { matches($0.title + " " + $0.subtitle) },
+            albums: snapshot.albumGroups.filter { matches($0.title + " " + $0.subtitle + " " + (albumDetails[$0.id] ?? "")) },
             artists: snapshot.artistGroups.filter { matches($0.title) },
             playlists: snapshot.playlists.filter { matches($0.name + " " + ($0.description ?? "")) }, likedIDs: snapshot.likedIDs)
     }

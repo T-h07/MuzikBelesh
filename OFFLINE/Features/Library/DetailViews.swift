@@ -73,26 +73,6 @@ struct PlaylistDetailView: View {
     }
 }
 
-struct AlbumDetailView: View {
-    @EnvironmentObject private var library: MusicLibraryService
-    let groupID: String
-    private var group: LibraryGroup? { library.albumGroups.first { $0.id == groupID } }
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: AppSpacing.lg) {
-                if let group {
-                    ManagedArtworkView(path: group.artworkRelativePath, fallbackID: group.id, size: 220).frame(maxWidth: .infinity)
-                    Text(group.title).font(.title.bold()).foregroundStyle(AppColors.textPrimary)
-                    Text(group.subtitle).foregroundStyle(AppColors.textSecondary)
-                    Text("\(group.count) songs • \(formatDuration(library.tracks(group.trackIDs)))").font(.caption).foregroundStyle(AppColors.textSecondary)
-                    CollectionPlaybackButtons(tracks: library.tracks(group.trackIDs), kind: "album", sourceID: groupID)
-                    ForEach(library.tracks(group.trackIDs)) { StoredTrackRow(track: $0, contextTrackIDs: group.trackIDs, contextKind: "album", contextSourceID: groupID) }
-                } else { EmptyState(icon: "square.stack", title: "No songs in this album", message: "Its songs may have been edited or removed.") }
-            }.padding(AppSpacing.lg)
-        }.navigationTitle("Album").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar).screenBackground()
-    }
-}
-
 struct ArtistDetailView: View {
     @EnvironmentObject private var library: MusicLibraryService
     let groupID: String
@@ -105,7 +85,9 @@ struct ArtistDetailView: View {
                     Text(group.title).font(.title.bold()).foregroundStyle(AppColors.textPrimary)
                     Text("\(group.count) songs").foregroundStyle(AppColors.textSecondary)
                     CollectionPlaybackButtons(tracks: library.tracks(group.trackIDs), kind: "artist", sourceID: groupID)
-                    ForEach(library.albumGroups.filter { !Set($0.trackIDs).isDisjoint(with: group.trackIDs) }) { album in
+                    ForEach(library.albumGroups.filter { album in
+                        !Set(album.trackIDs).isDisjoint(with: group.trackIDs) || library.snapshot.albums.contains { $0.id == album.id && $0.artistID == groupID }
+                    }) { album in
                         NavigationLink { AlbumDetailView(groupID: album.id) } label: { LibraryGroupRow(group: album) }
                     }
                     ForEach(library.tracks(group.trackIDs)) { StoredTrackRow(track: $0, contextTrackIDs: group.trackIDs, contextKind: "artist", contextSourceID: groupID) }
@@ -138,16 +120,23 @@ struct CollectionPlaybackButtons: View {
 struct AddTracksToPlaylistView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: MusicLibraryService
-    let playlistID: String
+    var playlistID: String? = nil
+    var albumID: String? = nil
+    var onSelection: (([String]) -> Void)? = nil
     @State private var query = ""
     @State private var results: [StoredTrack] = []
     @State private var selected: Set<String> = []
     @State private var error: String?
-    private var existing: Set<String> { Set(library.playlistTracks(playlistID).map(\.id)) }
+    private var existing: Set<String> {
+        if let playlistID { return Set(library.playlistTracks(playlistID).map(\.id)) }
+        if let albumID { return Set(library.albumGroups.first { $0.id == albumID }?.trackIDs ?? []) }
+        return []
+    }
     var body: some View {
         NavigationStack {
             List {
                 TextField("Search title, artist or album", text: $query).accessibilityIdentifier("playlist-track-search")
+                if albumID != nil || onSelection != nil { Text("Songs can have one primary album. Adding a song moves it from its previous album; playlists and audio files stay intact.").font(.caption).foregroundStyle(AppColors.textSecondary) }
                 if let error { Text(error).foregroundStyle(AppColors.error) }
                 ForEach(query.isEmpty ? library.snapshot.tracks : results) { track in
                     Button {
@@ -164,9 +153,15 @@ struct AddTracksToPlaylistView: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) { Button("Add") {
-                        do { try library.addTracks(library.snapshot.tracks.map(\.id).filter { selected.contains($0) }, playlistID: playlistID); dismiss() }
+                        do {
+                            let ids = library.snapshot.tracks.map(\.id).filter { selected.contains($0) }
+                            if let onSelection { onSelection(ids) }
+                            else if let albumID { try library.addAlbumTracks(ids, albumID: albumID) }
+                            else if let playlistID { try library.addTracks(ids, playlistID: playlistID) }
+                            dismiss()
+                        }
                         catch { self.error = MusicLibraryService.message(error) }
-                    }.disabled(selected.isEmpty).accessibilityIdentifier("playlist-confirm-add") }
+                    }.disabled(selected.isEmpty).accessibilityIdentifier(albumID != nil || onSelection != nil ? "album-confirm-add" : "playlist-confirm-add") }
                 }
                 .task(id: "\(query)|\(library.revision)") {
                     do { try await Task.sleep(for: .milliseconds(250)); let value = try await library.search(query); if !Task.isCancelled { results = value } }

@@ -67,3 +67,21 @@ and empty-field deletion were made more efficient without removing assertions or
 raising that cap. A focused keyboard UI gate now precedes the complete suite and
 exports its own screenshot/xcresult evidence. Compact installation/layout and keyboard
 tests still run after the complete suite passes.
+
+The additional album scope adds tests for empty/duplicate-name albums, all metadata
+fields, atomic primary assignments, ordering/moving/removal, safe deletion, likes
+and playlist preservation, real tagged audio import, reopen/search, JPEG/PNG cover
+replacement/removal/recovery, failed-save rollback, active playback/queue/history/
+timer preservation, and upgrade from build 66's actual v009 schema. A v008 upgrade
+still runs too. The focused gate runs album tests and the existing live-player
+keyboard test before the complete suite. UI workflows cover album creation/editing,
+song selection/reorder/removal, playback/deletion and relaunch/search. Compact tests
+also exercise the album editor. No per-test execution cap or assertion was removed.
+
+Keyboard UI tests capture open/closed screenshots and measured keyboard/tab-bar
+geometry over repeated focus transitions. They assert the accessible Done control
+is alongside the field, tabs stay above the keyboard, and closed geometry returns
+without drift. UIKit alone owns keyboard avoidance (`safeAreaRegions = .container`
+in its child host); no accessory toolbar is installed. This removes two competing
+insets, but simulator checks do not establish physical frame rate. Hardware animation
+quality remains a required additional acceptance check in PHASE_05_DEVICE_TESTING.md.

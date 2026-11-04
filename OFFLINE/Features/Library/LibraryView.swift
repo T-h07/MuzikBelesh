@@ -8,6 +8,7 @@ struct LibraryView: View {
     @FocusState.Binding var searchFocus: LibrarySearchField?
     @State private var showingImporter = false
     @State private var showingPlaylistEditor = false
+    @State private var showingAlbumEditor = false
     @State private var importMessage: String?
     @State private var query = ""
     @StateObject private var search = LibrarySearchSession()
@@ -35,6 +36,7 @@ struct LibraryView: View {
         .onDisappear { searchFocus = nil }
         .onChange(of: coordinator.libraryFilter) { _, _ in searchFocus = nil }
         .sheet(isPresented: $showingPlaylistEditor) { PlaylistEditorView() }
+        .sheet(isPresented: $showingAlbumEditor) { AlbumEditorView() }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.audio, .supportedAudio], allowsMultipleSelection: true) { result in
             Task { @MainActor in
                 do {
@@ -61,6 +63,10 @@ struct LibraryView: View {
         }
     }
     @ViewBuilder private var content: some View {
+        if coordinator.libraryFilter == "Albums" {
+            Button { searchFocus = nil; showingAlbumEditor = true } label: { Label("Create Album", systemImage: "plus.circle.fill") }
+                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-album")
+        }
         if coordinator.libraryFilter == "Playlists" {
             Button { searchFocus = nil; showingPlaylistEditor = true } label: { Label("Create Playlist", systemImage: "plus.circle.fill") }
                 .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-playlist")
@@ -123,6 +129,7 @@ struct StoredTrackRow: View {
     var contextKind: String = "library"
     var contextSourceID: String? = nil
     var playlistID: String? = nil
+    var albumID: String? = nil
     var onInteraction: () -> Void = { }
     @State private var showingEditor = false
     @State private var showingPlaylists = false
@@ -175,6 +182,7 @@ struct StoredTrackRow: View {
         Button { showingEditor = true } label: { Label("Edit Metadata", systemImage: "pencil") }
         Button { export() } label: { Label("Export Audio", systemImage: "square.and.arrow.up") }.disabled(track.availability != .available)
         if let playlistID { Button { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } label: { Label("Remove from Playlist", systemImage: "minus.circle") } }
+        if let albumID { Button { library.perform { try library.removeAlbumTrack(track.id, albumID: albumID) } } label: { Label("Remove from Album", systemImage: "minus.circle") } }
         Button(role: .destructive) { confirmingDeletion = true } label: { Label(track.availability == .missing ? "Remove Missing Entry" : "Delete Song", systemImage: "trash") }
     }
     private func play() { onInteraction(); Task { await library.play(track.id, ids: ids, kind: contextKind, sourceID: contextSourceID) } }

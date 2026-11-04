@@ -137,6 +137,7 @@ final class StorageCoordinator: ObservableObject {
                 let now = Date()
                 let validArtwork = try artworkName.flatMap { name -> String? in FileManager.default.fileExists(atPath: try paths.artworkURL(relativePath: name).path) ? name : nil }
                 var track = StoredTrack(id: operation.id, title: metadata.title, artistID: artistID, albumID: albumID, durationMs: metadata.durationMs, fileRelativePath: destination.lastPathComponent, fileExtension: ext, fileSizeBytes: (try FileManager.default.attributesOfItem(atPath: staging.path)[.size] as? NSNumber)?.int64Value ?? 0, contentSHA256: hash, artworkRelativePath: validArtwork, availability: .available, dateAdded: now, dateModified: now, originalFilename: operation.sourceFilename, metadataSource: "local_import")
+                if let albumID { track.albumPosition = (try Int.fetchOne(db, sql: "SELECT MAX(albumPosition) FROM tracks WHERE albumID = ?", arguments: [albumID]) ?? -1) + 1 }
                 track.normalizedTitle = LibraryIdentity.search(track.title)
                 track.searchText = LibraryIdentity.search([track.title, metadata.artist ?? "", metadata.album ?? ""].joined(separator: " "))
                 try track.insert(db)

@@ -13,7 +13,7 @@ final class Phase4LibraryMigrationTests: XCTestCase {
         try old.dbQueue.write { db in
             let date = Date(timeIntervalSince1970: 1_600_000_000)
             try StoredArtist(id: "legacy-artist", name: "Artíste", normalizedName: "artiste", artworkRelativePath: nil, dateAdded: date, dateModified: date).insert(db)
-            try StoredAlbum(id: "legacy-album", title: "Record", normalizedTitle: "record", artistID: "legacy-artist", artworkRelativePath: nil, dateAdded: date, dateModified: date).insert(db)
+            try db.execute(sql: "INSERT INTO albums (id,title,normalizedTitle,artistID,dateAdded,dateModified) VALUES (?,?,?,?,?,?)", arguments: ["legacy-album", "Record", "record", "legacy-artist", date, date])
             try db.execute(sql: "INSERT INTO tracks (id,title,artistID,albumID,durationMs,fileRelativePath,fileExtension,fileSizeBytes,contentSHA256,availability,dateAdded,dateModified,metadataSource) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", arguments: ["legacy", "Legacy", "legacy-artist", "legacy-album", 2050, "legacy.wav", "wav", bytes.count, hash, "available", date, date, "test"])
             try StoredPlaylist(id: "p", name: "Keep", description: "Keep", artworkRelativePath: nil, dateAdded: date, dateModified: date).insert(db)
             try db.execute(sql: "INSERT INTO playlist_tracks (playlistID,trackID,position,dateAdded) VALUES ('p','legacy',0,?)", arguments: [date])
@@ -33,7 +33,7 @@ final class Phase4LibraryMigrationTests: XCTestCase {
         XCTAssertNotNil(state.sleepTimerDeadlineMs); XCTAssertEqual(state.sleepTimerDurationMs, 300000)
         XCTAssertEqual(try Data(contentsOf: paths.musicURL(relativePath: "legacy.wav")), bytes)
         XCTAssertEqual(try reopened.database.dbQueue.read { try Row.fetchAll($0, sql: "PRAGMA foreign_key_check").count }, 0)
-        XCTAssertEqual(try reopened.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM grdb_migrations") }, 9)
+        XCTAssertEqual(try reopened.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM grdb_migrations") }, 10)
         _ = try StorageCoordinator(paths: paths)
     }
 }

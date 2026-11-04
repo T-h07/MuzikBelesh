@@ -66,6 +66,73 @@ final class LibraryManagementUITests: XCTestCase {
     }
     private func actions(_ id: String) { tapVisible(app.buttons["track-actions-" + id]) }
 
+    private func createAlbum(_ name: String) {
+        openLibrary("Albums"); app.buttons["create-album"].tap()
+        change(app.textFields["album-name"], to: name)
+        app.buttons["album-save"].tap()
+        XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 8))
+    }
+
+    func testEmptyAlbumEditAndUniversalSearchPersistAfterRelaunch() {
+        createAlbum("Empty Album")
+        app.staticTexts["Empty Album"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["This album is empty. Add songs from your Library."].waitForExistence(timeout: 5))
+        app.buttons["album-actions"].tap(); app.buttons["Edit Album"].tap()
+        change(app.textFields["album-name"], to: "Café Night")
+        change(app.textFields["album-artist"], to: "Night Artist")
+        change(app.textFields["album-year"], to: "2026")
+        change(app.descendants(matching: .any).matching(identifier: "album-description").firstMatch, to: "Evening collection")
+        screenshot("Album-Editor")
+        app.buttons["album-save"].tap()
+        XCTAssertTrue(app.staticTexts["Café Night"].waitForExistence(timeout: 8))
+        app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
+        app.tabBars.buttons["Search"].tap()
+        change(app.textFields["search-field"], to: "cafe night")
+        tapVisible(app.staticTexts["Café Night"].firstMatch)
+        absent(app.keyboards.firstMatch)
+        XCTAssertTrue(app.staticTexts["2026"].exists)
+        XCTAssertTrue(app.staticTexts["Night Artist"].exists)
+        screenshot("Empty-Album-Restored")
+    }
+
+    func testCreateAlbumWithSongsMovesPrimaryMembershipAndCanReorder() {
+        openLibrary("Albums"); app.buttons["create-album"].tap()
+        change(app.textFields["album-name"], to: "Organized")
+        app.buttons["album-choose-songs"].tap()
+        for id in ["ui-track-a", "ui-track-b", "ui-track-c"] { tapVisible(app.buttons["select-track-" + id]) }
+        app.buttons["album-confirm-add"].tap(); app.buttons["album-save"].tap()
+        XCTAssertTrue(app.staticTexts["Organized"].waitForExistence(timeout: 8))
+        app.staticTexts["Organized"].firstMatch.tap()
+        app.buttons["album-reorder"].tap()
+        tapVisible(app.buttons["album-move-up-ui-track-a"])
+        let a = app.buttons["album-move-up-ui-track-a"], b = app.buttons["album-move-up-ui-track-b"]
+        expectation(for: NSPredicate { _, _ in a.exists && b.exists && a.frame.minY < b.frame.minY }, evaluatedWith: app)
+        waitForExpectations(timeout: 5)
+        screenshot("Album-Reordering")
+        app.buttons["album-reorder"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertFalse(app.staticTexts["Fixture Album"].exists, "Moved songs must not remain in their original primary album")
+    }
+
+    func testAlbumAddRemovePlayShuffleAndDeletePreserveMusicAndPlayer() {
+        createAlbum("Playback Album")
+        app.staticTexts["Playback Album"].firstMatch.tap()
+        app.buttons["album-add-songs"].tap()
+        tapVisible(app.buttons["select-track-ui-track-a"]); tapVisible(app.buttons["select-track-ui-track-b"])
+        app.buttons["album-confirm-add"].tap()
+        tapVisible(app.buttons["collection-play"])
+        XCTAssertTrue(app.buttons["Open Now Playing"].waitForExistence(timeout: 5))
+        tapVisible(app.buttons["collection-shuffle"])
+        actions("ui-track-b"); app.buttons["Remove from Album"].tap()
+        absent(app.buttons["track-actions-ui-track-b"])
+        app.buttons["album-actions"].tap(); app.buttons["Delete Album"].tap()
+        app.buttons["confirm-delete-album"].tap()
+        XCTAssertTrue(app.buttons["Open Now Playing"].waitForExistence(timeout: 5))
+        openLibrary("Songs")
+        for id in ["ui-track-a", "ui-track-b", "ui-track-c"] { XCTAssertTrue(app.buttons["track-actions-" + id].exists) }
+        screenshot("Album-Deleted-Music-Preserved")
+    }
+
     private func dragVisibleResultsAbovePlayer() {
         let results = app.scrollViews["local-search-results"]
         let frame = results.frame
@@ -86,7 +153,23 @@ final class LibraryManagementUITests: XCTestCase {
         field.tap(); field.typeText("Fixture\n")
         absent(app.keyboards.firstMatch)
         field.tap(); XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(abs(app.buttons["keyboard-done"].frame.midY - field.frame.midY), 8, "Done belongs beside the field, not in an oversized keyboard accessory")
+        screenshot("Search-Keyboard-Open-No-Accessory")
         app.buttons["keyboard-done"].tap(); absent(app.keyboards.firstMatch)
+        let closedFrame = app.tabBars.firstMatch.frame
+        var measurements = ["closed tab bar: \(closedFrame)"]
+        for _ in 0..<2 {
+            field.tap(); XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            let tabs = app.tabBars.firstMatch
+            XCTAssertTrue(tabs.buttons["Library"].isHittable)
+            XCTAssertLessThanOrEqual(tabs.frame.maxY, app.keyboards.firstMatch.frame.minY + 1)
+            measurements.append("open tab bar: \(tabs.frame), keyboard: \(app.keyboards.firstMatch.frame)")
+            app.buttons["keyboard-done"].tap(); absent(app.keyboards.firstMatch)
+            expectation(for: NSPredicate { _, _ in abs(tabs.frame.minY - closedFrame.minY) < 1 }, evaluatedWith: app)
+            waitForExpectations(timeout: 5)
+        }
+        let geometry = XCTAttachment(string: measurements.joined(separator: "\n")); geometry.name = "Keyboard layout diagnostics"; geometry.lifetime = .keepAlways; add(geometry)
+        screenshot("Search-Keyboard-Closed")
         app.tabBars.buttons["Library"].tap()
         XCTAssertTrue(app.staticTexts["Library"].waitForExistence(timeout: 5))
     }

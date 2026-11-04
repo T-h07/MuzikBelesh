@@ -110,8 +110,11 @@ final class LibraryRepository {
         guard !title.isEmpty else { return nil }
         guard title.count <= 300 else { throw LibraryError.invalidMetadata }
         let normalized = LibraryIdentity.normalized(title)
-        if let id = try String.fetchOne(db, sql: "SELECT id FROM albums WHERE normalizedTitle = ? AND artistID IS ? ORDER BY id LIMIT 1", arguments: [normalized, artistID]) { return id }
-        let id = LibraryIdentity.id("album", [normalized, artistID ?? ""]); let now = Date()
+        // Imports can reuse an unambiguous imported parent, never silently merge
+        // into a separately managed album with the same display name.
+        let matches = try String.fetchAll(db, sql: "SELECT id FROM albums WHERE normalizedTitle = ? AND artistID IS ? AND managementSource IS NULL ORDER BY id", arguments: [normalized, artistID])
+        if matches.count == 1 { return matches[0] }
+        let id = UUID().uuidString; let now = Date()
         try StoredAlbum(id: id, title: title, normalizedTitle: normalized, artistID: artistID, artworkRelativePath: nil, dateAdded: now, dateModified: now).insert(db)
         return id
     }
@@ -122,7 +125,15 @@ final class LibraryRepository {
             let artistID = try Self.resolveArtist(draft.artist, db: db)
             let albumArtist = LibraryIdentity.display(draft.albumArtist)
             let albumArtistID = albumArtist.isEmpty ? artistID : try Self.resolveArtist(albumArtist, db: db)
-            let albumID = try Self.resolveAlbum(draft.album, artistID: albumArtistID, db: db)
+            let previousAlbum = try track.albumID.flatMap { try StoredAlbum.fetchOne(db, key: $0) }
+            let unchanged = previousAlbum.map {
+                $0.normalizedTitle == LibraryIdentity.normalized(draft.album) &&
+                ($0.artistID == albumArtistID || ($0.artistID == nil && albumArtist.isEmpty))
+            } ?? false
+            let albumID = try unchanged ? track.albumID : Self.resolveAlbum(draft.album, artistID: albumArtistID, db: db)
+            if albumID != track.albumID {
+                track.albumPosition = try albumID.map { id in (try Int.fetchOne(db, sql: "SELECT MAX(albumPosition) FROM tracks WHERE albumID = ?", arguments: [id]) ?? -1) + 1 }
+            }
             track.title = title; track.artistID = artistID; track.albumID = albumID
             track.albumArtist = albumArtist.isEmpty ? nil : albumArtist
             track.normalizedTitle = LibraryIdentity.search(title)

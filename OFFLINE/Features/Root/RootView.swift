@@ -129,15 +129,11 @@ struct SearchBar: View {
             if !text.isEmpty {
                 Button { text = ""; focus = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.textSecondary).frame(minWidth: 44, minHeight: 22) }.accessibilityLabel("Clear search")
             }
-        }.padding(.horizontal, AppSpacing.md).padding(.vertical, 11).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
-            .toolbar {
-                if focus == field {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") { focus = nil }.accessibilityIdentifier("keyboard-done")
-                    }
-                }
+            if focus == field {
+                Button("Done") { focus = nil }.frame(minHeight: 44)
+                    .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("keyboard-done")
             }
+        }.frame(minHeight: 44).padding(.horizontal, AppSpacing.md).padding(.vertical, 4).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
     }
 }
 

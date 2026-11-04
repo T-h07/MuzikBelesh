@@ -35,7 +35,7 @@ final class UniversalLibrarySearchTests: XCTestCase {
         let f = try populated()
         let value = try search("", f)
         XCTAssertEqual(value.songs.count, 4); XCTAssertEqual(value.albums.count, 3)
-        XCTAssertEqual(value.artists.count, 2); XCTAssertEqual(value.playlists.count, 1)
+        XCTAssertEqual(value.artists.count, 3); XCTAssertEqual(value.playlists.count, 1)
         XCTAssertFalse(value.isEmpty)
         XCTAssertEqual(value, try search(" \n\t", f))
         XCTAssertEqual(value.albums.map(\.id), try f.repository.snapshot().albumGroups.map(\.id))

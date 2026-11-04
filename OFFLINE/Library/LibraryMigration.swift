@@ -45,5 +45,23 @@ enum LibraryMigration {
                 try db.execute(sql: "UPDATE tracks SET normalizedTitle = ?, searchText = ? WHERE id = ?", arguments: [LibraryIdentity.search(title), LibraryIdentity.search([title, artist ?? "", album ?? ""].joined(separator: " ")), row["id"] as String])
             }
         }
+        migrator.registerMigration("v010_managed_albums") { db in
+            try db.alter(table: "albums") { t in
+                t.add(column: "releaseYear", .integer)
+                t.add(column: "description", .text)
+                t.add(column: "managementSource", .text)
+            }
+            try db.alter(table: "tracks") { $0.add(column: "albumPosition", .integer) }
+            // Preserve every parent/track identity and the previously displayed
+            // album order. Missing tags stay NULL, never a fabricated album row.
+            let albums = try String.fetchAll(db, sql: "SELECT id FROM albums")
+            for id in albums {
+                let songs = try String.fetchAll(db, sql: "SELECT id FROM tracks WHERE albumID = ? ORDER BY dateAdded, id", arguments: [id])
+                for (position, song) in songs.enumerated() {
+                    try db.execute(sql: "UPDATE tracks SET albumPosition = ? WHERE id = ?", arguments: [position, song])
+                }
+            }
+            try db.create(index: "tracks_album_order", on: "tracks", columns: ["albumID", "albumPosition", "id"])
+        }
     }
 }

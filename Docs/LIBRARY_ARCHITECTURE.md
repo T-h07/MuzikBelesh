@@ -39,9 +39,10 @@ Restoration retains ordered IDs even if the original playlist was later deleted.
 
 Each imported track may have multiple source aliases. Artist identity uses canonical
 Unicode, collapsed whitespace and case folding while preserving accents; albums
-combine normalized title with artist/album-artist identity. Unknown metadata uses
-virtual groups, not duplicated parent records. Empty parents are retained and hidden
-from track-derived groups, preserving their identity and referenced custom artwork.
+reuse an unambiguous imported title/artist parent. Managed albums use independent
+UUIDs, retain existing IDs when edited and remain visible while empty. Untagged songs
+use virtual Unassigned Songs, never a fabricated album row. See ALBUM_MANAGEMENT.md
+for additive v010 migration, ordering, primary assignment and artwork recovery.
 
 Physical device acceptance remains separate from automated success.
 

@@ -50,7 +50,8 @@ final class MetadataAndGroupingTests: XCTestCase {
         let f = try LibraryFixture(); let snapshot = try f.repository.snapshot()
         XCTAssertTrue(snapshot.artists.isEmpty); XCTAssertTrue(snapshot.albums.isEmpty)
         XCTAssertEqual(snapshot.artistGroups.count, 1); XCTAssertEqual(snapshot.artistGroups.first?.title, "Unknown Artist")
-        XCTAssertEqual(snapshot.albumGroups.count, 1); XCTAssertEqual(snapshot.albumGroups.first?.title, "Unknown Album")
+        XCTAssertEqual(snapshot.albumGroups.count, 1); XCTAssertEqual(snapshot.albumGroups.first?.title, "Unassigned Songs")
+        XCTAssertEqual(snapshot.albumGroups.first?.id, LibrarySnapshot.unassignedAlbumID)
     }
     func testEditingRelationshipsRefreshesGroupsWithoutDeletingReferencedOldParents() throws {
         let f = try LibraryFixture()

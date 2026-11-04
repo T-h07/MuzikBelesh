@@ -23,6 +23,9 @@ struct StoredAlbum: Codable, FetchableRecord, PersistableRecord, Identifiable, E
     var artworkRelativePath: String?
     var dateAdded: Date
     var dateModified: Date
+    var releaseYear: Int? = nil
+    var description: String? = nil
+    var managementSource: String? = nil
 }
 
 struct StoredTrack: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable, Sendable {
@@ -45,6 +48,7 @@ struct StoredTrack: Codable, FetchableRecord, PersistableRecord, Identifiable, E
     var albumArtist: String? = nil
     var normalizedTitle: String = ""
     var searchText: String = ""
+    var albumPosition: Int? = nil
 }
 
 struct StoredPlaylist: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable, Sendable {

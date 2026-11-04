@@ -1,85 +1,61 @@
 # Phase 5 physical iPhone acceptance
 
-## Rejected physical build 65 — developer report, 2026-11-03
+## Developer report — build 66, 2026-11-04
 
 Device: iPhone 13 Pro Max. iOS version: **NOT PROVIDED**.
-Source: `b9cd89008d9c3e8c6604eab10ae30fabc1558766`, version 0.1.0 (65).
-The PASS/FAIL results below were reported by the developer, not observed by this
-agent. Phase 5 is NOT ACCEPTED. PR #6 must remain open while E is failing.
+Source: `d359b20b0b613cf81f98bd58dd492d81a7d6d181`, version **0.1.0 (66)**.
+The developer reports that all original A–J checks passed. These are developer
+reports, not hardware tests performed by this agent.
 
-Two search defects were reported:
+| Original check | Build 66 result |
+| --- | --- |
+| A — Import | PASS — developer reported |
+| B — Playlists | PASS — developer reported |
+| C — Metadata | PASS — developer reported |
+| D — Likes | PASS — developer reported |
+| E — Search and sorting | PASS — developer reported |
+| F — Restart and persistence | PASS — developer reported |
+| G — Safe deletion | PASS — developer reported |
+| H — Offline operation | PASS — developer reported |
+| I — Phase 4 playback regressions | PASS — developer reported |
+| J — In-place update | PASS — developer reported |
 
-1. Search tab: focus the search field, open the keyboard, then attempt dismissal
-   or a tab change. The keyboard obstructs navigation and remains visible; the
-   developer had to force-close the application. No reliable submit/Done, scroll,
-   result-selection or tab-transition focus cleanup was implemented in build 65.
-2. Create a playlist, artist or album, then search for it. Search only returned
-   track rows; the Library field disappeared in the other category branches, so
-   playlists/artists/albums were not searchable as entities.
+Build 65 (`b9cd89008d9c3e8c6604eab10ae30fabc1558766`) was rejected:
+E failed because Search could trap keyboard focus and could not return album,
+artist or playlist entities. A–D/F–J were reported PASS. Build 66 corrected those
+functional defects, but the developer now reports an oversized gray keyboard
+accessory area and choppy bottom-control movement. No iOS version was supplied
+for either report. The new album-management requirements were not present in 66.
 
-Separate CI run 41700080334 passed the primary simulator tests but failed compact
-installation before layout assertions: `bundleVersion must be set in placeholder
-attributes for an app extension placeholder`. The compact command omitted the
-shared version override, and the extension lacked a valid default build number.
-This is an installation/configuration failure, not a layout assertion result.
+## Replacement build and additional acceptance — NOT RUN
 
-The next build must be installed over the existing application. Check E remains
-FAIL until physical keyboard and universal-search retests pass; passing CI cannot
-change that result. The other checks retain their reported build-65 PASS evidence
-and must be monitored for regression during the update.
+Replacement version: **0.1.0**. The exact build number, full source SHA, IPA SHA256,
+manifest and direct artifact/workflow links are recorded in
+[PR #6](https://github.com/T-h07/MuzikBelesh/pull/6), alongside the verified build
+manifest packaged with the unsigned IPA. Use that manifest and the app's embedded
+commit to identify the installed replacement. CI results cannot establish hardware
+animation quality or replace this acceptance gate.
 
-## Focused retest on the replacement build — NOT RUN
+Install the replacement **over build 66 through SideStore**. Do not uninstall,
+reset SQLite, or remove imported files to work around any failure. Record the iOS
+version, replacement version/build/embedded SHA and PASS/FAIL/NOT RUN below.
 
-1. Install over build 65 through SideStore. Record iOS version, build and embedded
-   SHA. Verify existing music, playlists, artwork, likes and custom orders remain.
-2. Open Search (Your Library selected by default). Open/type/dismiss the keyboard
-   with Search/Return and toolbar Done; repeat five times. While editing, change
-   tabs, return, clear the query, scroll results and select a song/collection. The
-   keyboard must close appropriately with no force-close, stale focus or blocked tab.
-3. Repeat with a song playing and a Sleep Timer active. Tabs, mini-player and timer
-   must stay accessible and properly placed relative to the keyboard.
-4. Search actual song titles, artists, albums/album artists, playlist names and
-   descriptions. All must show the matching nonempty groups/counts. Open each kind.
-   Verify Unicode/diacritics/case/whitespace and literal percent/underscore names.
-5. In Library, retain one query while changing All, Songs, Albums, Artists, Playlists
-   and Liked Songs. Each filter must restrict the same matches, and Liked Songs must
-   exclude unliked tracks. Create, rename and delete a dedicated playlist and edit
-   metadata; results must refresh without relaunch and obsolete names must disappear.
-6. Exercise all seven sorts without changing custom playlist order. Relaunch and
-   repeat a query against the saved collection. Repeat offline in Airplane Mode.
-
-Record E as PASS only after the physical retest succeeds. CI success by itself does
-not change build 65's FAIL result or authorize integration. PR #6 stays open.
-
-Status: **REJECTED — build 65 fails acceptance check E; fixes require physical retesting**.
-Use iPhone 13 Pro Max. Record iOS version, version/build/embedded SHA, workflow URLs,
-action order and timestamps. Use PASS / FAIL / NOT RUN / BLOCKED. No result below
-is accepted merely because simulator tests pass.
-
-Install the Phase 5 IPA in place through SideStore. Verify the app and Share extension
-retain their identities and existing imported music, history, queue and timer state.
-Do not delete the installed application to work around migration failures. The PR
-contains the exact final source, build, artifact and SHA256 manifest.
-
-| Test | Procedure | Result |
+| New check | Procedure | Result |
 | --- | --- | --- |
-| A: import | Import ten MP3/M4A files; all appear with valid metadata and play. Reimport identical bytes under another filename; no extra track/copy. | PASS — developer reported, build 65 |
-| B: playlists | Create three, rename/edit descriptions/covers, add multiple songs, share songs between playlists, remove from one only, drag reorder, play saved order. Delete a playlist; audio/likes/other playlists remain. | PASS — developer reported, build 65 |
-| C: metadata | Rename/title, artist, album and optional album artist; replace JPEG/PNG artwork; Cancel another edit. Check groups, Home, Search, mini/full player and Lock Screen update without restarting audio. | PASS — developer reported, build 65 |
-| D: likes | Like/unlike from Library, detail screens and Now Playing. Liked Songs reflects one consistent persisted state. | PASS — developer reported, build 65 |
-| E: search/sort | Search title/artist/album, Unicode and literal %/_; test all seven sorts. Custom playlist order stays intact. | FAIL — developer reported, build 65 |
-| F: restart | Force-close/relaunch. Ten songs, edits, art, playlists, membership, order, likes, sort and playback context remain. | PASS — developer reported, build 65 |
-| G: deletion | Remove membership and cancel song deletion first. Confirm permanent deletion of a dedicated test song only; verify file removal, reference cleanup and preservation of unrelated music. Delete a currently playing dedicated song; other queue entries still work. | PASS — developer reported, build 65 |
-| H: offline | Enable Airplane Mode; browse/search/organize and play imported tracks. No network is needed. | PASS — developer reported, build 65 |
-| I: regressions | Seek/natural EOF, Previous at first Library index with Shuffle Off/On, Repeat Off/All/One, explicit duplicate queue entries, Bluetooth/Lock Screen, a locked one-minute Sleep Timer. | PASS — developer reported, build 65 |
-| J: update | Existing Phase 4 database upgrades in place with all original audio and relationships. Export still produces original encoded bytes. | PASS — developer reported, build 65 |
+| Album creation | Library → Albums → Create Album. Save an empty album, then create another with artist, year, description, artwork and three songs. | NOT RUN |
+| Album editing | Rename/change artist/year/description; replace/remove artwork; add, remove and reorder songs. Relaunch and verify everything persists. | NOT RUN |
+| Primary assignment | Move a song between two albums. It appears only in its new primary album. Remove it; Unassigned Songs contains it. Playlists remain independent. | NOT RUN |
+| Imported albums and identity | Edit an imported tagged album. Create two albums with the same name; they remain separate. Previously untagged songs appear under Unassigned Songs. | NOT RUN |
+| Search and artist views | Search new/renamed albums and album artists in Search/Your Library and Library All/Albums; old names disappear. Open the album from the relevant artist. Repeat offline. | NOT RUN |
+| Album playback/deletion | Play and shuffle an album. Start a timer, queue an unrelated song, then delete the current album with confirmation. Current audio continues; songs/files/likes/playlists/history/queue/timer survive. | NOT RUN |
+| Keyboard layout | Search and Library: open keyboard, use Done beside the field, Search/Return, scroll, clear, result selection and tab changes. No gray accessory gap or blocked navigation. | NOT RUN |
+| Keyboard transitions | Open/close five times with no player, with playback, and with a Sleep Timer. Check smooth single movement, stable final positions, no repeated jumps, touch failures or stale focus. Switch search modes too. | NOT RUN |
+| Update integrity | Compare existing music, stable tracks, likes, metadata/artwork, playlists/custom orders, queue/history and timer before/after updating. Recheck Previous/Next, Shuffle/Repeat, seek/EOF, Lock Screen and background audio. | NOT RUN |
 
-While playing a playlist, reorder or delete that playlist and edit current metadata:
-current item/time must continue; the active order stays a snapshot. Start it again
-to use the new persisted order. A permanently deleted track is removed from navigation.
+Do not claim a frame-rate improvement from screenshots or simulator assertions.
+If a check fails, preserve the app container, record reproduction steps and export
+Settings / Diagnostics. Never invent test evidence.
 
-If anything fails, preserve the app container and export Settings / Diagnostics before
-relaunch; include the steps and identifiers. Do not invent device results. Critical
-data-loss or playback failures block automatic integration. Once all mandatory gates
-and required evidence pass, Phase 5's authorized automatic merge into develop can
-proceed without a separate routine approval. Never merge into release or start Phase 6.
+**PHASE 5 IMPROVEMENTS IMPLEMENTED — IPHONE ACCEPTANCE PENDING.**
+PR #6 stays open and unmerged until these additional requirements pass physical
+acceptance. Do not modify release or start Phase 6.

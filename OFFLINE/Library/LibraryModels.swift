@@ -6,11 +6,11 @@ enum LibraryError: LocalizedError, Equatable, Sendable {
     case invalidName, invalidTitle, invalidMetadata, invalidDescription, invalidOrder, notFound, confirmationRequired, invalidImage, operationFailed, deletionInProgress
     var errorDescription: String? {
         switch self {
-        case .invalidName: return "Enter a playlist name between 1 and 120 characters."
+        case .invalidName: return "Enter a collection name between 1 and 120 characters."
         case .invalidTitle: return "Enter a song title between 1 and 300 characters."
         case .invalidMetadata: return "Artist and album names must be at most 300 characters."
-        case .invalidDescription: return "Playlist descriptions must be at most 2000 characters."
-        case .invalidOrder: return "The playlist changed. Reload it and try reordering again."
+        case .invalidDescription: return "Descriptions must be at most 2000 characters."
+        case .invalidOrder: return "The collection changed. Reload it and try reordering again."
         case .notFound: return "This library item is no longer available."
         case .confirmationRequired: return "Confirm deletion before removing this item."
         case .invalidImage: return "Choose a valid image smaller than 20 MB."
@@ -111,17 +111,40 @@ struct LibrarySnapshot: Equatable, Sendable {
         return memberships.filter { $0.playlistID == id }.sorted { $0.position < $1.position }.compactMap { lookup[$0.trackID] }
     }
     var artistGroups: [LibraryGroup] {
-        Dictionary(grouping: tracks, by: { $0.artistID ?? "unknown-artist" }).map { id, songs in
-            LibraryGroup(id: id, title: artistName(songs.first?.artistID), subtitle: "\(songs.count) songs", trackIDs: songs.map(\.id), artworkRelativePath: artists.first { $0.id == id }?.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first)
+        let performers = Dictionary(grouping: tracks, by: { $0.artistID ?? "unknown-artist" })
+        let visibleAlbums = Set(albumGroups.map(\.id))
+        let albumArtists = Set(albums.filter { visibleAlbums.contains($0.id) }.compactMap(\.artistID))
+        return Set(performers.keys).union(albumArtists).map { id in
+            let albumIDs = Set(albums.filter { $0.artistID == id }.map(\.id))
+            let songs = tracks.filter { ($0.artistID ?? "unknown-artist") == id || $0.albumID.map { albumIDs.contains($0) } == true }
+            return LibraryGroup(id: id, title: artistName(id == "unknown-artist" ? nil : id), subtitle: "\(songs.count) songs", trackIDs: songs.map(\.id), artworkRelativePath: artists.first { $0.id == id }?.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first)
         }.sorted { LibraryIdentity.normalized($0.title) == LibraryIdentity.normalized($1.title) ? $0.id < $1.id : LibraryIdentity.normalized($0.title) < LibraryIdentity.normalized($1.title) }
     }
     var albumGroups: [LibraryGroup] {
-        Dictionary(grouping: tracks, by: { $0.albumID ?? "unknown-album:\($0.artistID ?? "unknown")" }).map { id, songs in
-            let record = albums.first { $0.id == id }
-            let ordered = songs.sorted { $0.dateAdded == $1.dateAdded ? $0.id < $1.id : $0.dateAdded < $1.dateAdded }
-            return LibraryGroup(id: id, title: record?.title ?? "Unknown Album", subtitle: artistName(record?.artistID ?? songs.first?.artistID), trackIDs: ordered.map(\.id), artworkRelativePath: record?.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first)
+        let membership = Dictionary(grouping: tracks.filter { $0.albumID != nil }, by: { $0.albumID! })
+        var groups = albums.compactMap { record -> LibraryGroup? in
+            let songs = membership[record.id] ?? []
+            guard !songs.isEmpty || record.managementSource == "managed" else { return nil }
+            let ordered = songs.sorted {
+                if $0.albumPosition != $1.albumPosition { return ($0.albumPosition ?? Int.max) < ($1.albumPosition ?? Int.max) }
+                return $0.dateAdded == $1.dateAdded ? $0.id < $1.id : $0.dateAdded < $1.dateAdded
+            }
+            return LibraryGroup(id: record.id, title: record.title, subtitle: artistName(record.artistID), trackIDs: ordered.map(\.id), artworkRelativePath: record.artworkRelativePath ?? ordered.compactMap(\.artworkRelativePath).first)
         }.sorted { LibraryIdentity.normalized($0.title) == LibraryIdentity.normalized($1.title) ? $0.id < $1.id : LibraryIdentity.normalized($0.title) < LibraryIdentity.normalized($1.title) }
+        let unassigned = tracks.filter { $0.albumID == nil }.sorted { $0.dateAdded == $1.dateAdded ? $0.id < $1.id : $0.dateAdded < $1.dateAdded }
+        if !unassigned.isEmpty {
+            groups.append(LibraryGroup(id: Self.unassignedAlbumID, title: "Unassigned Songs", subtitle: "No album assigned", trackIDs: unassigned.map(\.id), artworkRelativePath: nil))
+        }
+        return groups
     }
+    static let unassignedAlbumID = "unassigned-songs"
+}
+
+struct AlbumDraft: Equatable, Sendable {
+    var title: String
+    var artist: String = ""
+    var releaseYear: Int? = nil
+    var description: String = ""
 }
 
 struct TrackMetadataDraft: Equatable, Sendable {
