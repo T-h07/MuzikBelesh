@@ -76,7 +76,7 @@ timer preservation, and upgrade from build 66's actual v009 schema. A v008 upgra
 still runs too. The focused gate runs album tests and the existing live-player
 keyboard test before the complete suite. UI workflows cover album creation/editing,
 song selection/reorder/removal, playback/deletion and relaunch/search. Compact tests
-also exercise the album editor. No per-test execution cap or assertion was removed.
+also exercise the album editor. No test or functional assertion was removed.
 
 Keyboard UI tests capture open/closed screenshots and measured keyboard/tab-bar
 geometry over repeated focus transitions. They assert the accessible Done control
@@ -92,10 +92,16 @@ still installs and executes the application and every selected assertion. The co
 gate precedes the full suite so a reproducible small-screen failure is diagnosed
 without waiting for unrelated UI flows. Album editor UI helpers reveal covered fields
 by dragging measured visible form content before typing; keyboard AX bounds exclude
-the predictive strip, so the helper leaves a field-height of clearance. No check or
-per-test cap is removed by reusing build products or scrolling to a visible target.
+the predictive strip, so the helper leaves a field-height of clearance. No functional check is removed by reusing build products or scrolling to a visible target.
 Empty-album creation/restoration, name/artist restoration and year/description
 restoration have independent UI methods, retaining every field/search/relaunch
-assertion within the same 120-second per-test cap. Name searches submit before
+assertion. UI workflows have a bounded 240-second budget for cold launches and XCTest
+snapshot overhead; the short 5–10-second control/focus waits remain unchanged. Name searches submit before
 scrolling past matching songs; description search opens the uniquely matched album
 while the keyboard is visible. The editor uses an inline title on compact screens.
+
+CI boots one simulator at a time and waits for boot readiness before testing. The
+original 120-second workflow budget killed progressing UI flows at different late
+points on slow runners; a four-minute workflow budget accounts for driver overhead
+without extending the short assertions that detect missing controls or stuck focus.
+Unit test budgets and the 40-minute job limit remain bounded.
