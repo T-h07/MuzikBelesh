@@ -109,26 +109,43 @@ final class LibraryManagementUITests: XCTestCase {
         screenshot("Empty-Album-Restored")
     }
 
-    func testAlbumEditorUpdatesMetadataAndSearchAfterRelaunch() {
+    func testAlbumNameAndArtistSurviveRelaunch() {
         openLibrary("Albums")
         app.staticTexts["Fixture Album"].firstMatch.tap()
         app.buttons["album-actions"].tap(); app.buttons["Edit Album"].tap()
         change(app.textFields["album-name"], to: "Café Night")
         change(app.textFields["album-artist"], to: "Night Artist")
-        change(app.textFields["album-year"], to: "2026")
-        change(app.textFields["album-description"], to: "Evening collection")
         screenshot("Album-Editor")
         app.buttons["album-save"].tap()
         XCTAssertTrue(app.staticTexts["Café Night"].waitForExistence(timeout: 8))
         app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
         app.tabBars.buttons["Search"].tap()
-        change(app.textFields["search-field"], to: "cafe night")
+        change(app.textFields["search-field"], to: "cafe night\n")
         tapVisible(app.staticTexts["Café Night"].firstMatch)
         absent(app.keyboards.firstMatch)
-        XCTAssertTrue(app.staticTexts["2026"].exists)
         XCTAssertTrue(app.staticTexts["Night Artist"].exists)
+        screenshot("Renamed-Album-Restored")
+    }
+
+    func testAlbumYearAndDescriptionSurviveRelaunch() {
+        openLibrary("Albums")
+        app.staticTexts["Fixture Album"].firstMatch.tap()
+        app.buttons["album-actions"].tap(); app.buttons["Edit Album"].tap()
+        change(app.textFields["album-year"], to: "2026")
+        change(app.textFields["album-description"], to: "Evening collection")
+        screenshot("Album-Year-Description-Editor")
+        app.buttons["album-save"].tap()
+        XCTAssertTrue(app.staticTexts["2026"].waitForExistence(timeout: 8))
+        app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
+        app.tabBars.buttons["Search"].tap()
+        // Description uniquely matches the album, keeping it visible while the
+        // keyboard is open. Name/artist search above also matches its song rows.
+        change(app.textFields["search-field"], to: "Evening collection")
+        tapVisible(app.staticTexts["Fixture Album"].firstMatch)
+        absent(app.keyboards.firstMatch)
+        XCTAssertTrue(app.staticTexts["2026"].exists)
         XCTAssertTrue(app.staticTexts["Evening collection"].exists)
-        screenshot("Edited-Album-Restored")
+        screenshot("Album-Year-Description-Restored")
     }
 
     func testCreateAlbumWithSongsMovesPrimaryMembershipAndCanReorder() {

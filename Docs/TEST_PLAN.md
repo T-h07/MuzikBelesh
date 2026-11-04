@@ -94,6 +94,8 @@ without waiting for unrelated UI flows. Album editor UI helpers reveal covered f
 by dragging measured visible form content before typing; keyboard AX bounds exclude
 the predictive strip, so the helper leaves a field-height of clearance. No check or
 per-test cap is removed by reusing build products or scrolling to a visible target.
-Empty-album creation/restoration and imported-album editing/restoration have separate
-UI methods, retaining all field/search/relaunch assertions within the same 120-second
-per-test cap. The editor uses a standard inline navigation title on compact screens.
+Empty-album creation/restoration, name/artist restoration and year/description
+restoration have independent UI methods, retaining every field/search/relaunch
+assertion within the same 120-second per-test cap. Name searches submit before
+scrolling past matching songs; description search opens the uniquely matched album
+while the keyboard is visible. The editor uses an inline title on compact screens.
