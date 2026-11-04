@@ -113,7 +113,7 @@ actor YouTubeKitAudioResolver: YouTubeAudioResolver {
             }
         } catch { throw YouTubeError.map(error, fallback: .extractionFailed) }
     }
-    nonisolated static func option(_ stream: Stream) -> AudioStreamOption {
+    nonisolated static func option(_ stream: YouTubeKit.Stream) -> AudioStreamOption {
         let codec: String?
         switch stream.audioCodec {
         case .mp4a(let version): codec = "mp4a.\(version)"
