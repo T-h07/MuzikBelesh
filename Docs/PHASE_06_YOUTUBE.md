@@ -148,7 +148,7 @@ modifies queue/history/timer, imports files or inserts download jobs.
 
 Windows public-network checks on 2026-11-04: PSY search returned 19 video renderers;
 continuation returned HTTP 200. Watch metadata returned `OK` for
-`9bZkp7q19f0` (PSY), `HLYjoPv4QGY` (NEKO - NÃ¢â‚¬â„¢FRONT), and `aqz-KE-bpKQ`
+`9bZkp7q19f0` (PSY), `HLYjoPv4QGY` (NEKO - NÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢FRONT), and `aqz-KE-bpKQ`
 (Blender Foundation open-movie sample); `___________` returned `ERROR`. These
 checks inspect public web responses, **not native YouTubeKit execution**.
 
@@ -170,14 +170,13 @@ source-verified test products. Complete verification reuses those products and
 packages one Release IPA only after required regressions pass. Native results,
 exact source SHA, artifact and PR links are recorded in the delivery/PR evidence.
 
-Focused run [41912758748](https://github.com/T-h07/MuzikBelesh/actions/runs/41912758748)
-compiled app/extension/tests and passed 22 Phase 6 deterministic unit/integration
-checks plus all four new UI workflows. Its inherited keyboard/playback test hit
-its unchanged 120-second cap on the Intel runner while still progressing; no
-control assertion had failed before the timeout. This is not a passing gate or
-proof of a product deadlock. The final source also canonicalizes continuation
-encoding so repeated underlying tokens retain identical opaque identities.
-Final-head results belong in the PR; these counts describe that earlier run only.
+Final application/test sources at `4741ff3c159886227e38669217e763107b5b5446`:
 
-Physical acceptance is pending. See [the AÃ¢â‚¬â€œR checklist](PHASE_06_DEVICE_TESTING.md).
+- [Focused run 41915634415](https://github.com/T-h07/MuzikBelesh/actions/runs/41915634415): 23 Phase 6 unit/integration checks, four new UI workflows and the unchanged keyboard/playback regression passed on Apple Silicon.
+- [Complete run 41918150163](https://github.com/T-h07/MuzikBelesh/actions/runs/41918150163): 217 deterministic unit/integration tests and 21 UI tests passed; five opt-in live tests were skipped as designed. Five additional compact-iPhone UI executions passed. Release arm64 compilation succeeded.
+- That complete job failed only in packaging because the new `lipo -verify_arch` invocation placed the binary after the architecture list. The corrected packaging script is verified through the standalone IPA workflow; no application or test source changed after the full regression pass. The artifact manifest and PR identify the final packaging commit and build.
+- Separate opt-in live checks in the focused run passed real search/continuation and unavailable-video handling. Audio resolution for PSY, NEKO and the Blender sample failed with access/verification errors on the GitHub runner. The live step is non-gating; overall workflow success must not be read as live extraction success. Successful native stream resolution at this source remains unverified on the iPhone.
+- Earlier API-boundary compilation errors were corrected. The Intel focused attempt passed all Phase 6 tests but the inherited keyboard workflow hit its unchanged 120-second cap while progressing. It passed unchanged on Apple Silicon. No assertion or timeout was weakened.
+
+Physical acceptance is pending. See [the AÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“R checklist](PHASE_06_DEVICE_TESTING.md).
 Media handling must respect content authorization and applicable platform restrictions.

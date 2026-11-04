@@ -19,3 +19,10 @@ The `runner_label` dispatch option supports `macos-15-intel` as a bounded capaci
 fallback when the default `macos-15` pool does not allocate a runner. Reuse test
 products only on the same selected runner architecture. Device builds still target
 arm64 independently of the host CPU. Runner allocation is not a source/test result.
+
+For a packaging-only correction after passing regressions, the standalone IPA
+workflow accepts an optional positive `build_number` so its separate workflow
+counter does not regress below an already installed CI candidate. The same value
+is supplied to both targets and validated by the packager. Record both the tested
+application-source commit and the final packaging commit; confirm application,
+extension, tests and project configuration are identical before reusing evidence.
