@@ -119,6 +119,7 @@ struct AlbumEditorView: View {
                 }
                 if let error { Text(error).foregroundStyle(AppColors.error).accessibilityIdentifier("editor-error") }
             }.scrollContentBackground(.hidden).screenBackground().navigationTitle(albumID == nil ? "Create Album" : "Edit Album")
+                .navigationBarTitleDisplayMode(.inline)
                 .scrollDismissesKeyboard(.interactively)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }

@@ -51,7 +51,7 @@ jobs:
         run: |
           COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
           test -n "$COMPACT_ID"
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumEditAndUniversalSearchPersistAfterRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumEditorUpdatesMetadataAndSearchAfterRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Export compact screenshots
         if: always()
         run: |

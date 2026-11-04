@@ -49,19 +49,20 @@ final class LibraryManagementUITests: XCTestCase {
     }
     private func revealAlbumField(_ field: XCUIElement) {
         let bar = app.navigationBars["Edit Album"].exists ? app.navigationBars["Edit Album"] : app.navigationBars["Create Album"]
+        let top = bar.frame.maxY
+        let appFrame = app.frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
         for _ in 0..<5 {
-            let top = bar.frame.maxY
+            let frame = field.frame
             let keyboard = app.keyboards.firstMatch
             // Keyboard AX bounds omit the predictive-input strip. Leave one
             // field-height of clearance and drag only within visible form content.
-            let bottom = keyboard.exists ? keyboard.frame.minY - field.frame.height : app.frame.maxY
-            let frame = field.frame
+            let bottom = keyboard.exists ? keyboard.frame.minY - frame.height : appFrame.maxY
             if frame.minY >= top && frame.maxY <= bottom && field.isHittable { return }
             let height = bottom - top
             XCTAssertGreaterThan(height, 44)
-            let origin = app.coordinate(withNormalizedOffset: .zero)
-            let upper = origin.withOffset(CGVector(dx: app.frame.midX, dy: top + height * 0.2))
-            let lower = origin.withOffset(CGVector(dx: app.frame.midX, dy: top + height * 0.75))
+            let upper = origin.withOffset(CGVector(dx: appFrame.midX, dy: top + height * 0.2))
+            let lower = origin.withOffset(CGVector(dx: appFrame.midX, dy: top + height * 0.75))
             if frame.minY < top { upper.press(forDuration: 0.05, thenDragTo: lower) }
             else { lower.press(forDuration: 0.05, thenDragTo: upper) }
         }
@@ -95,15 +96,27 @@ final class LibraryManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 8))
     }
 
-    func testEmptyAlbumEditAndUniversalSearchPersistAfterRelaunch() {
+    func testEmptyAlbumCreationAndSearchPersistAfterRelaunch() {
         createAlbum("Empty Album")
         app.staticTexts["Empty Album"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["This album is empty. Add songs from your Library."].waitForExistence(timeout: 5))
+        app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
+        app.tabBars.buttons["Search"].tap()
+        change(app.textFields["search-field"], to: "empty album")
+        tapVisible(app.staticTexts["Empty Album"].firstMatch)
+        absent(app.keyboards.firstMatch)
+        XCTAssertTrue(app.staticTexts["This album is empty. Add songs from your Library."].exists)
+        screenshot("Empty-Album-Restored")
+    }
+
+    func testAlbumEditorUpdatesMetadataAndSearchAfterRelaunch() {
+        openLibrary("Albums")
+        app.staticTexts["Fixture Album"].firstMatch.tap()
         app.buttons["album-actions"].tap(); app.buttons["Edit Album"].tap()
         change(app.textFields["album-name"], to: "Café Night")
         change(app.textFields["album-artist"], to: "Night Artist")
         change(app.textFields["album-year"], to: "2026")
-        change(app.descendants(matching: .any).matching(identifier: "album-description").firstMatch, to: "Evening collection")
+        change(app.textFields["album-description"], to: "Evening collection")
         screenshot("Album-Editor")
         app.buttons["album-save"].tap()
         XCTAssertTrue(app.staticTexts["Café Night"].waitForExistence(timeout: 8))
@@ -114,7 +127,8 @@ final class LibraryManagementUITests: XCTestCase {
         absent(app.keyboards.firstMatch)
         XCTAssertTrue(app.staticTexts["2026"].exists)
         XCTAssertTrue(app.staticTexts["Night Artist"].exists)
-        screenshot("Empty-Album-Restored")
+        XCTAssertTrue(app.staticTexts["Evening collection"].exists)
+        screenshot("Edited-Album-Restored")
     }
 
     func testCreateAlbumWithSongsMovesPrimaryMembershipAndCanReorder() {
