@@ -9,7 +9,7 @@ final class YouTubeLibraryIntegrityTests: XCTestCase {
         var status = try await lookup.status(videoID: YTFixture.id); XCTAssertEqual(status, .notDownloaded)
         try fixture.repository.editMetadata(trackID: fixture.ids[0], draft: TrackMetadataDraft(title: YTFixture.video.title, artist: "", album: ""))
         status = try await lookup.status(videoID: YTFixture.id); XCTAssertEqual(status, .notDownloaded, "Titles never prove provenance")
-        try fixture.storage.database.dbQueue.write { db in
+        try await fixture.storage.database.dbQueue.write { db in
             try LibraryRepository.recordSource(trackID: fixture.ids[0], type: "file", identifier: YTFixture.id, db: db)
             try LibraryRepository.recordSource(trackID: fixture.ids[1], type: "youtube", identifier: YTFixture.id, db: db)
         }
@@ -30,7 +30,7 @@ final class YouTubeLibraryIntegrityTests: XCTestCase {
         let context = player.queue.contextTrackIDs, shuffle = player.queue.shuffleEnabled, repeatMode = player.queue.repeatMode
         let replacements = transport.replacements, generation = player.activeItemGeneration
         let snapshot = try fixture.repository.snapshot()
-        let before = try fixture.storage.database.dbQueue.read { db in
+        let before = try await fixture.storage.database.dbQueue.read { db in
             try ["playback_state", "playback_queue_entries", "playback_history", "download_jobs", "track_sources"].map { try Row.fetchAll(db, sql: "SELECT * FROM \($0) ORDER BY rowid") }
         }
         let hash = try fixture.storage.audio.sha256(url: fixture.file(0))
@@ -38,7 +38,7 @@ final class YouTubeLibraryIntegrityTests: XCTestCase {
         _ = try await search.search(query: "song", continuationToken: nil)
         _ = try await YouTubeDownloadPreparer(resolver: YTResolverStub()).prepare(video: YTFixture.video, quality: .high)
         do { _ = try await YTResolverStub(error: .extractionFailed).resolve(video: YTFixture.video, quality: .high); XCTFail() } catch { }
-        let after = try fixture.storage.database.dbQueue.read { db in
+        let after = try await fixture.storage.database.dbQueue.read { db in
             try ["playback_state", "playback_queue_entries", "playback_history", "download_jobs", "track_sources"].map { try Row.fetchAll(db, sql: "SELECT * FROM \($0) ORDER BY rowid") }
         }
         XCTAssertEqual(before, after); XCTAssertEqual(try fixture.repository.snapshot(), snapshot)

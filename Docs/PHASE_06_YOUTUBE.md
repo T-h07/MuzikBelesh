@@ -106,7 +106,8 @@ MP4/M4A codec combination (AAC/mp4a, AC-3 or E-AC-3). Prefer M4A/AAC before bitr
 Within that group: Data Saver chooses the lowest known bitrate, Standard the
 highest available bitrate at or below 128 kbps (otherwise the lowest), High the
 highest. Unknown bitrate is used only if no known bitrate exists in the chosen
-format group. Ties resolve by itag. No muxed/video-only selection, transcoding,
+format group. Ties resolve by enumeration order within one extraction; the pinned library does
+not expose the raw itag. Selection IDs are scoped to that resolution. No muxed/video-only selection, transcoding,
 FFmpeg or lossless claims. All preferences can resolve to the same rate when that
 is the only compatible option. `youtube.audioQuality` in UserDefaults persists
 independently of SQLite and existing preferences.
@@ -147,7 +148,7 @@ modifies queue/history/timer, imports files or inserts download jobs.
 
 Windows public-network checks on 2026-11-04: PSY search returned 19 video renderers;
 continuation returned HTTP 200. Watch metadata returned `OK` for
-`9bZkp7q19f0` (PSY), `HLYjoPv4QGY` (NEKO - N’FRONT), and `aqz-KE-bpKQ`
+`9bZkp7q19f0` (PSY), `HLYjoPv4QGY` (NEKO - Nâ€™FRONT), and `aqz-KE-bpKQ`
 (Blender Foundation open-movie sample); `___________` returned `ERROR`. These
 checks inspect public web responses, **not native YouTubeKit execution**.
 
@@ -169,5 +170,5 @@ source-verified test products. Complete verification reuses those products and
 packages one Release IPA only after required regressions pass. Native results,
 exact source SHA, artifact and PR links are recorded in the delivery/PR evidence.
 
-Physical acceptance is pending. See [the A–R checklist](PHASE_06_DEVICE_TESTING.md).
+Physical acceptance is pending. See [the Aâ€“R checklist](PHASE_06_DEVICE_TESTING.md).
 Media handling must respect content authorization and applicable platform restrictions.

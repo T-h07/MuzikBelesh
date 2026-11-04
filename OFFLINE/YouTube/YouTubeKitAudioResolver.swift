@@ -89,9 +89,10 @@ actor YouTubeKitAudioResolver: YouTubeAudioResolver {
                     try Task.checkCancellation()
                     let streams = try await youtube.streams
                     try Task.checkCancellation()
-                    let options = streams.map(option)
+                    let options = streams.enumerated().map { option($0.element, id: $0.offset) }
                     let selected = try AudioStreamSelector.select(options, quality: quality)
-                    guard let stream = streams.first(where: { $0.itag.itag == selected.id }) else { throw YouTubeError.extractionFailed }
+                    guard streams.indices.contains(selected.id) else { throw YouTubeError.extractionFailed }
+                    let stream = streams[selected.id]
                     // 0.4.10 has no waitUntilAvailable API: bounded HEAD only, no media bytes.
                     let expiry = try await readiness.verify(stream.url)
                     let extracted = try await youtube.metadata
@@ -113,7 +114,7 @@ actor YouTubeKitAudioResolver: YouTubeAudioResolver {
             }
         } catch { throw YouTubeError.map(error, fallback: .extractionFailed) }
     }
-    nonisolated static func option(_ stream: YouTubeKit.Stream) -> AudioStreamOption {
+    nonisolated static func option(_ stream: YouTubeKit.Stream, id: Int) -> AudioStreamOption {
         let codec: String?
         switch stream.audioCodec {
         case .mp4a(let version): codec = "mp4a.\(version)"
@@ -122,7 +123,7 @@ actor YouTubeKitAudioResolver: YouTubeAudioResolver {
         case .opus: codec = "opus"
         case .unknown, .none: codec = nil
         }
-        return AudioStreamOption(id: stream.itag.itag, container: stream.fileExtension.rawValue, codec: codec,
+        return AudioStreamOption(id: id, container: stream.fileExtension.rawValue, codec: codec,
                                  bitrate: stream.averageBitrate ?? stream.bitrate, isAudioOnly: stream.includesAudioTrack && !stream.includesVideoTrack,
                                  isNativelyPlayable: stream.isNativelyPlayable)
     }

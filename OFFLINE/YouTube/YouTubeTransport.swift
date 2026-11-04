@@ -30,6 +30,7 @@ final class YouTubeURLSessionTransport: NSObject, YouTubeTransport, URLSessionTa
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         // Never follow consent/login/foreign redirects or send a media request to the web host.
         let media = task.originalRequest?.httpMethod == "HEAD"
+        if media && request.httpMethod != "HEAD" { completionHandler(nil); return }
         let artwork = YouTubeImageURL.valid(task.originalRequest?.url) != nil
         let sameKind = artwork ? YouTubeImageURL.valid(request.url) != nil : media ? request.url?.host?.hasSuffix(".googlevideo.com") == true : request.url?.host == "www.youtube.com" || request.url?.host == "youtube.com"
         completionHandler(request.url.map(Self.permitted) == true && sameKind ? request : nil)
