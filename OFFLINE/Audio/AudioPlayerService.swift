@@ -13,6 +13,9 @@ final class AudioPlayerService: ObservableObject {
     private var intentRevision = 0
     private var timerExpired = false
     private var completedGeneration: Int?
+    private var artworkTask: Task<Void, Never>?
+    private var artworkCachePath: String?
+    private var artworkCacheData: Data?
     private var transportVerification: Task<Void, Never>?
     private var transportObserver: NSKeyValueObservation?
     private var wantsPlayback = false
@@ -32,6 +35,10 @@ final class AudioPlayerService: ObservableObject {
     private var endObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
+    private var activeContextTrackIDs: [String]?
+    private var activeContextKind: String?
+    private var activeContextSourceID: String?
+    private var deletingTrackIDs: Set<String> = []
     private var context = PlaybackContext(trackIDs: [], currentIndex: nil)
     private var wasPlayingBeforeInterruption = false
     private var userPausedDuringInterruption = false
@@ -49,6 +56,11 @@ final class AudioPlayerService: ObservableObject {
         queue = PlaybackQueueManager(storage: storage, makeShuffle: makeShuffle)
         history = PlaybackHistoryService(storage: storage)
         let restoration = persistence.restore()
+        activeContextKind = restoration?.contextKind
+        activeContextSourceID = restoration?.contextSourceID
+        if activeContextKind != nil, let data = restoration?.contextTrackIDsJSON?.data(using: .utf8) {
+            activeContextTrackIDs = try? JSONDecoder().decode([String].self, from: data)
+        }
         let savedDeadline: Date?
         let savedDuration: TimeInterval?
         if let storage, let saved = (try? storage.playback.state()) ?? nil, let milliseconds = saved.sleepTimerDeadlineMs {
@@ -83,22 +95,31 @@ final class AudioPlayerService: ObservableObject {
     }
 
     deinit {
-        transportVerification?.cancel()
+        transportVerification?.cancel(); artworkTask?.cancel()
         if let timeObserver { nativePlayer?.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
         statusObserver?.invalidate(); transportObserver?.invalidate(); remoteCommands.unregister()
     }
 
-    func play(trackID: String, direction: NavigationDirection = .forward) async throws {
+    func play(trackID: String, direction: NavigationDirection = .forward, contextTrackIDs: [String]? = nil, contextKind: String? = nil, contextSourceID: String? = nil) async throws {
         guard await beginCommand("select") else { throw AudioPlaybackError.playerFailed("Playback is busy. Try again.") }
         defer { endCommand() }
         timerExpired = false
         queue.cancelCandidate()
-        try await selectTrack(trackID, direction: direction)
+        let old = (activeContextTrackIDs, activeContextKind, activeContextSourceID)
+        activeContextTrackIDs = contextTrackIDs.map { ids in var seen = Set<String>(); return ids.filter { seen.insert($0).inserted } }
+        activeContextKind = contextTrackIDs == nil ? nil : (contextKind ?? "library")
+        activeContextSourceID = contextSourceID
+        do { try await selectTrack(trackID, direction: direction) }
+        catch {
+            (activeContextTrackIDs, activeContextKind, activeContextSourceID) = old
+            refreshContext(); persist(); throw error
+        }
     }
 
     private func selectTrack(_ trackID: String, direction: NavigationDirection = .forward, autoplay: Bool = true, recordNavigation: Bool = true) async throws {
+        guard !deletingTrackIDs.contains(trackID) else { throw LibraryError.deletionInProgress }
         guard reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Sleep Timer has expired") }
         do {
             let resolved = try resolver.resolve(trackID: trackID)
@@ -165,7 +186,7 @@ final class AudioPlayerService: ObservableObject {
     }
     func pause() { record("pause-request"); intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
     func togglePlayback() async { if wantsPlayback { pause() } else { await playFromRemote() } }
-    func stop() { record("stop-request"); intentRevision += 1; wantsPlayback = false; itemGeneration += 1; removeItemObservers(); player.pause(); player.replaceCurrentItem(with: nil); item = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
+    func stop() { record("stop-request"); intentRevision += 1; wantsPlayback = false; itemGeneration += 1; removeItemObservers(); player.pause(); player.replaceCurrentItem(with: nil); item = nil; artworkTask?.cancel(); artworkCachePath = nil; artworkCacheData = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
 
     func next() async {
         guard await beginCommand("next") else { return }
@@ -217,7 +238,12 @@ final class AudioPlayerService: ObservableObject {
         do { tracks = try storage?.tracks.all() ?? [] }
         catch { state.lastError = "The playback library could not be read."; return }
         var ids: [String] = []
-        for track in tracks where track.availability == .available && !ids.contains(track.id) { ids.append(track.id) }
+        for track in tracks where track.availability == .available && !deletingTrackIDs.contains(track.id) && !ids.contains(track.id) { ids.append(track.id) }
+        if let snapshot = activeContextTrackIDs {
+            let available = Set(ids)
+            ids = snapshot.filter { available.contains($0) }
+            activeContextTrackIDs = ids
+        }
         context = PlaybackContext(trackIDs: ids, currentIndex: nil)
         if let currentID { context = context.settingCurrent(currentID) }
         queue.setContext(ids, current: currentID)
@@ -366,7 +392,28 @@ final class AudioPlayerService: ObservableObject {
     }
 
     private func removeItemObservers() { statusObserver?.invalidate(); statusObserver = nil; if let endObserver { NotificationCenter.default.removeObserver(endObserver); self.endObserver = nil } }
-    private func updateContext(with id: String) { refreshContext(); if !context.trackIDs.contains(id) { context.trackIDs.append(id) }; context = context.settingCurrent(id); updateSkipAvailability() }
+    private func updateContext(with id: String) {
+        if var snapshot = activeContextTrackIDs, !snapshot.contains(id) {
+            let position = state.currentTrackID.flatMap { snapshot.firstIndex(of: $0) }.map { $0 + 1 } ?? snapshot.count
+            snapshot.insert(id, at: position); activeContextTrackIDs = snapshot
+        }
+        refreshContext()
+        if !context.trackIDs.contains(id) { context.trackIDs.append(id) }
+        context = context.settingCurrent(id); updateSkipAvailability()
+    }
+    func libraryDidChange() { refreshContext(); publishCurrent(); objectWillChange.send() }
+    func beginLibraryDeletion(_ id: String) async throws {
+        guard await beginCommand("library-delete") else { throw LibraryError.operationFailed }
+        defer { endCommand() }
+        deletingTrackIDs.insert(id)
+        if state.currentTrackID == id { stop() }
+        refreshContext()
+    }
+    func finishLibraryDeletion(_ id: String) {
+        deletingTrackIDs.remove(id)
+        queue.removeUnavailableEntries()
+        refreshContext(); publishCurrent(); persist()
+    }
     private func updateSkipAvailability() {
         let canRecover: Bool
         switch state.status { case .ended, .failed: canRecover = state.currentTrackID != nil; default: canRecover = false }
@@ -381,9 +428,29 @@ final class AudioPlayerService: ObservableObject {
         try await selectTrack(id, autoplay: keepPlaying, recordNavigation: false)
         updateSkipAvailability()
     }
-    private func publish(track: StoredTrack) { let artwork = track.artworkRelativePath.flatMap { try? storage?.paths.artworkURL(relativePath: $0) }.flatMap { try? Data(contentsOf: $0) }; nowPlaying.update(state: state, track: track, artist: storage?.artistName(for: track.artistID), album: storage?.albumTitle(for: track.albumID), artworkData: artwork); state.currentOutputRoute = session.outputRouteName }
+    private func publish(track selected: StoredTrack) {
+        guard state.currentTrackID == selected.id else { return }
+        // A ready callback may carry metadata captured before an editor saved.
+        let track = (try? storage?.tracks.find(id: selected.id)) ?? selected
+        if artworkCachePath != track.artworkRelativePath {
+            artworkTask?.cancel(); artworkCachePath = track.artworkRelativePath; artworkCacheData = nil
+            if let path = track.artworkRelativePath, let storage, let url = try? storage.paths.artworkURL(relativePath: path) {
+                artworkTask = Task { @MainActor [weak self] in
+                    let data = await Task.detached(priority: .userInitiated) { () -> Data? in
+                        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 20 * 1024 * 1024,
+                              let input = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+                        return try? ManagedLibraryFiles.imageData(input, pixels: 1024)
+                    }.value
+                    guard !Task.isCancelled, let self, self.artworkCachePath == path else { return }
+                    self.artworkCacheData = data; self.publishCurrent()
+                }
+            }
+        }
+        nowPlaying.update(state: state, track: track, artist: storage?.artistName(for: track.artistID), album: storage?.albumTitle(for: track.albumID), artworkData: artworkCacheData)
+        state.currentOutputRoute = session.outputRouteName
+    }
     private func publishCurrent() { guard let storage, let id = state.currentTrackID, let track = try? storage.tracks.find(id: id) else { return }; publish(track: track) }
-    private func persist() { queue.persistState(currentTrackID: state.currentTrackID, positionMs: Int64(max(0, state.elapsedTime) * 1000), sleepDeadline: sleepTimer.deadline, sleepTimerDuration: sleepTimer.durationSeconds) }
+    private func persist() { queue.persistState(currentTrackID: state.currentTrackID, positionMs: Int64(max(0, state.elapsedTime) * 1000), sleepDeadline: sleepTimer.deadline, sleepTimerDuration: sleepTimer.durationSeconds, contextKind: activeContextKind, contextSourceID: activeContextSourceID) }
     func reconcileLifecycle() { sleepTimer.checkDeadline(); updateSkipAvailability(); persist() }
     private func expireSleepTimer() { record("timer-expired"); timerExpired = true; intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; state.lastError = nil; publishCurrent(); persist() }
     private func reconcileSleepTimer() -> Bool { guard !timerExpired else { record("command-rejected", reason: "timer-expired"); return false }; guard let deadline = sleepTimer.deadline, deadline <= Date() else { return true }; sleepTimer.cancel(); expireSleepTimer(); return false }

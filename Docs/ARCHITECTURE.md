@@ -18,3 +18,15 @@ The audit adds an injectable `PlaybackPlayer` transport and a suspending FIFO co
 gate to the existing service. Queue candidates commit after asset validation and
 item selection; queue and playback snapshots are saved in one SQLite transaction.
 See [the audit register and acceptance plan](APPLICATION_AUDIT.md).
+
+
+# Phase 5 authoritative library
+
+AppContainer now supplies MusicLibraryService alongside the existing storage/audio
+services. GRDB ValueObservation projects persisted tracks, relationships, custom
+playlist order, likes, sort preference and recent listening IDs to all production
+library surfaces. Mock models remain fixtures and deferred YouTube/download demos.
+
+See LIBRARY_ARCHITECTURE.md, SAFE_LIBRARY_DELETION.md and ARTWORK_MANAGEMENT.md for
+the additive v009 schema, identity rules, file-operation journals and collection
+playback snapshots. No second database, queue or audio engine is introduced.

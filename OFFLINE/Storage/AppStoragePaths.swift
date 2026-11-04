@@ -10,6 +10,7 @@ struct AppStoragePaths {
     let imports: URL
     let exports: URL
     let thumbnails: URL
+    let deletions: URL
     let database: URL
 
     init(fileManager: FileManager = .default) throws {
@@ -23,6 +24,7 @@ struct AppStoragePaths {
         exports = caches.appendingPathComponent("Exports", isDirectory: true)
         thumbnails = caches.appendingPathComponent("Thumbnails", isDirectory: true)
         database = applicationSupport.appendingPathComponent("muzikbelesh.sqlite")
+        deletions = applicationSupport.appendingPathComponent("DeletionStaging", isDirectory: true)
         try createDirectories()
     }
 
@@ -37,11 +39,12 @@ struct AppStoragePaths {
         exports = caches.appendingPathComponent("Exports", isDirectory: true)
         thumbnails = caches.appendingPathComponent("Thumbnails", isDirectory: true)
         database = applicationSupport.appendingPathComponent("muzikbelesh.sqlite")
+        deletions = applicationSupport.appendingPathComponent("DeletionStaging", isDirectory: true)
         try createDirectories()
     }
 
     func createDirectories() throws {
-        for url in [documents, music, artwork, applicationSupport, caches, imports, exports, thumbnails] {
+        for url in [documents, music, artwork, applicationSupport, caches, imports, exports, thumbnails, deletions] {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }

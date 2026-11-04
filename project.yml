@@ -19,6 +19,8 @@ settings:
     CODE_SIGNING_ALLOWED: NO
     CODE_SIGNING_REQUIRED: NO
     CODE_SIGN_IDENTITY: ''
+    CURRENT_PROJECT_VERSION: '3'
+    MARKETING_VERSION: '0.1.0'
 targets:
   OFFLINE:
     type: application
@@ -48,7 +50,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GIT_COMMIT_SHORT: local
         BUILD_DATE: unknown
-        CURRENT_PROJECT_VERSION: '3'
       configs:
         Debug: {SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG}
         Release: {SWIFT_OPTIMIZATION_LEVEL: -O}

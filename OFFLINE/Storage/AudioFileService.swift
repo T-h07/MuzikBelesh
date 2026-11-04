@@ -22,6 +22,7 @@ final class AudioFileService {
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard !tracks.isEmpty else { throw StorageError.unsupportedAudio }
         let duration = try await asset.load(.duration)
+        guard duration.seconds.isFinite, duration.seconds > 0 else { throw StorageError.unsupportedAudio }
         let metadata = try await asset.load(.commonMetadata)
         var title: String?
         var artist: String?

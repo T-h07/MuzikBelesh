@@ -4,11 +4,12 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
+    @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
     @State private var showingQueue = false
     @State private var showingTimer = false
 
-    private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+    private var track: StoredTrack? { library.track(audioPlayer.state.currentTrackID) }
 
     var body: some View {
         NavigationStack {
@@ -34,6 +35,10 @@ struct NowPlayingView: View {
                 Text(track.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary).lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                 Text(artistAndAlbum(for: track)).font(.body).foregroundStyle(AppColors.textSecondary).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                library.perform { try library.setLiked(!library.snapshot.likedIDs.contains(track.id), trackID: track.id) }
+            } label: { Label(library.snapshot.likedIDs.contains(track.id) ? "Unlike Song" : "Like Song", systemImage: library.snapshot.likedIDs.contains(track.id) ? "heart.fill" : "heart").frame(minHeight: 44) }
+                .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("now-playing-like")
             PlaybackSlider(audioPlayer: audioPlayer)
             HStack { Text(format(audioPlayer.state.elapsedTime)); Spacer(); Text(format(audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
             if audioPlayer.state.status == .ended {
@@ -87,6 +92,7 @@ private struct PlaybackSlider: View {
 struct QueueView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
+    @EnvironmentObject private var library: MusicLibraryService
     var body: some View {
         List {
             if audioPlayer.queue.entries.isEmpty {
@@ -99,7 +105,7 @@ struct QueueView: View {
             .onMove { audioPlayer.queue.move(from: $0, to: $1) }
         }.toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Clear") { audioPlayer.queue.clear() }.disabled(audioPlayer.queue.entries.isEmpty) } }.scrollContentBackground(.hidden).background(AppColors.backgroundPrimary).navigationTitle("Up Next")
     }
-    private func track(for id: String) -> StoredTrack? { guard let storage = container.storage else { return nil }; return try? storage.tracks.find(id: id) }
+    private func track(for id: String) -> StoredTrack? { library.track(id) }
 }
 
 private struct StoredQueueRow: View {

@@ -1,20 +1,47 @@
 import SwiftUI
 
+enum LibrarySearchField: Hashable { case search, library }
+
 struct RootView: View {
+    @EnvironmentObject private var container: AppContainer
     @Environment(\.scenePhase) private var scenePhase
+    let coordinator: AppCoordinator
+    var body: some View {
+        KeyboardSafeHost(content: RootTabsView(scenePhase: scenePhase, coordinator: coordinator)
+            .environmentObject(container)
+            .environmentObject(container.audioPlayer)
+            .environmentObject(container.library))
+            .ignoresSafeArea().preferredColorScheme(.dark)
+    }
+}
+
+private struct RootTabsView: View {
+    let scenePhase: ScenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
+    @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
+    @FocusState private var searchFocus: LibrarySearchField?
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
-            TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
-            TabContent(coordinator: coordinator) { NavigationStack { SearchView(coordinator: coordinator) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
-            TabContent(coordinator: coordinator) { NavigationStack { LibraryView(coordinator: coordinator) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
-            TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
+                TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
+                TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { SearchView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
+                TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
+                TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
         .tint(AppColors.accentPrimary)
-        .onChange(of: scenePhase) { _, phase in if phase == .active { audioPlayer.reconcileLifecycle() } }
+        .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }
+        .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
+        .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
+            else { searchFocus = nil }
+        }
         .preferredColorScheme(.dark)
+        .alert("Library", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
+            Button("OK") { library.error = nil }
+            Button("Retry Recovery") { Task { await library.reconcileFiles() } }
+        } message: { Text(library.error ?? "") }
         .sheet(item: $coordinator.sheet) { sheet in
             switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
         }
@@ -26,17 +53,19 @@ private struct TabContent<Content: View>: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     let coordinator: AppCoordinator
     let content: Content
+    let onPresent: () -> Void
     @State private var showingTimer = false
 
-    init(coordinator: AppCoordinator, @ViewBuilder content: () -> Content) {
+    init(coordinator: AppCoordinator, onPresent: @escaping () -> Void = { }, @ViewBuilder content: () -> Content) {
         self.coordinator = coordinator
+        self.onPresent = onPresent
         self.content = content()
     }
 
     var body: some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: AppSpacing.xs) {
-                SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
+                SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { onPresent(); showingTimer = true }
                 if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.horizontal, AppSpacing.sm) }
             }.padding(.top, AppSpacing.sm)
         }
@@ -89,16 +118,33 @@ struct PlaylistCard: View {
 struct SearchBar: View {
     @Binding var text: String
     let placeholder: String
-    var body: some View { HStack(spacing: AppSpacing.sm) { Image(systemName: "magnifyingglass").foregroundStyle(AppColors.textSecondary); TextField(placeholder, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled().foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("search-field"); if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.textSecondary) }.accessibilityLabel("Clear search") } }.padding(.horizontal, AppSpacing.md).padding(.vertical, 11).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium)) }
+    @FocusState.Binding var focus: LibrarySearchField?
+    let field: LibrarySearchField
+    var body: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "magnifyingglass").foregroundStyle(AppColors.textSecondary)
+            TextField(placeholder, text: $text)
+                .focused($focus, equals: field).submitLabel(.search).onSubmit { focus = nil }
+                .textInputAutocapitalization(.never).autocorrectionDisabled().foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("search-field")
+            if !text.isEmpty {
+                Button { text = ""; focus = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.textSecondary).frame(minWidth: 44, minHeight: 22) }.accessibilityLabel("Clear search")
+            }
+            if focus == field {
+                Button("Done") { focus = nil }.frame(minHeight: 44)
+                    .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("keyboard-done")
+            }
+        }.frame(minHeight: 44).padding(.horizontal, AppSpacing.md).padding(.vertical, 4).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+    }
 }
 
 struct MiniPlayer: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
+    @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
-    private var track: StoredTrack? { guard let storage = container.storage, let id = audioPlayer.state.currentTrackID else { return nil }; return try? storage.tracks.find(id: id) }
+    private var track: StoredTrack? { library.track(audioPlayer.state.currentTrackID) }
     var body: some View { if let track { HStack(spacing: AppSpacing.xs) {
-        Button { coordinator.showingNowPlaying = true } label: { HStack(spacing: AppSpacing.sm) { StoredArtworkView(track: track, size: 44); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.originalFilename ?? "Local Music").font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) } }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Open Now Playing")
+        Button { coordinator.showingNowPlaying = true } label: { HStack(spacing: AppSpacing.sm) { StoredArtworkView(track: track, size: 44); VStack(alignment: .leading, spacing: 2) { Text(track.title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(library.artistName(track.artistID)).font(.caption2).foregroundStyle(AppColors.textSecondary).lineLimit(1) } }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Open Now Playing")
         Button { Task { await audioPlayer.previous() } } label: { Image(systemName: "backward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipPrevious && audioPlayer.state.elapsedTime <= 3).accessibilityLabel("Previous track")
         Button { Task { await audioPlayer.togglePlayback() } } label: { Image(systemName: audioPlayer.state.isPlaying ? "pause.fill" : "play.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).accessibilityLabel(audioPlayer.state.isPlaying ? "Pause" : "Play")
         Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")

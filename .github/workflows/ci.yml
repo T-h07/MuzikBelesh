@@ -4,14 +4,24 @@ on:
   push:
     branches: [develop, 'feature/**']
   workflow_dispatch:
+    inputs:
+      verification_scope:
+        description: Focused regression or complete final verification
+        type: choice
+        options: [complete, focused]
+        default: complete
+      prebuilt_run_id:
+        description: Reuse test products from a focused run of this exact commit
+        type: string
+        default: ''
 concurrency:
   group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
-permissions: {contents: read}
+permissions: {contents: read, actions: read}
 jobs:
   build-and-test:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,16 +46,107 @@ jobs:
           DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
           test -n "$DEVICE_ID"
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
-      - name: Build and test
+      - name: Download compiled test products
+        if: inputs.prebuilt_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: phase5-test-products
+          path: build/prebuilt
+          run-id: ${{ inputs.prebuilt_run_id }}
+          github-token: ${{ github.token }}
+      - name: Build all test products once
+        if: inputs.prebuilt_run_id == ''
         run: |
           GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -derivedDataPath build/TestProducts build-for-testing CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          git rev-parse HEAD > build/product-source.txt
+      - name: Locate and verify compiled test products
+        run: |
+          if [[ -n "${{ inputs.prebuilt_run_id }}" ]]; then
+            test "$(cat build/prebuilt/product-source.txt)" = "$(git rev-parse HEAD)"
+            mkdir -p build/TestProducts/Build
+            tar -xzf build/prebuilt/test-products.tar.gz -C build/TestProducts/Build
+          fi
+          TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
+          test -f "${TEST_RUN_FILES[0]}"
+          echo "TEST_RUN=${TEST_RUN_FILES[0]}" >> "$GITHUB_ENV"
+      - name: Retain compiled products for final verification
+        if: inputs.verification_scope == 'focused'
+        run: tar -czf build/test-products.tar.gz -C build/TestProducts/Build Products
+      - name: Upload compiled test products
+        if: inputs.verification_scope == 'focused'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase5-test-products
+          path: |
+            build/test-products.tar.gz
+            build/product-source.txt
+          retention-days: 7
+          if-no-files-found: error
+      - name: Focused keyboard regression
+        if: inputs.verification_scope == 'focused'
+        run: |
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Compact iPhone library layout
+        if: inputs.verification_scope != 'focused'
+        run: |
+          COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
+          test -n "$COMPACT_ID"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Export compact screenshots
+        if: always()
+        run: |
+          if [[ -d build/CompactResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/CompactResults.xcresult --output-path build/CompactScreenshots
+          fi
+      - name: Complete regression suite
+        if: inputs.verification_scope != 'focused'
+        run: |
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Export UI screenshots
+        if: always()
+        run: |
+          if [[ -d build/TestResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/TestResults.xcresult --output-path build/UITestScreenshots
+          fi
+          if [[ -d build/KeyboardResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/KeyboardResults.xcresult --output-path build/KeyboardScreenshots
+          fi
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-ui-screenshots
+          path: |
+            build/UITestScreenshots
+            build/CompactScreenshots
+            build/KeyboardScreenshots
+          if-no-files-found: ignore
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playback-test-results
-          path: build/TestResults.xcresult
+          path: |
+            build/TestResults.xcresult
+            build/CompactResults.xcresult
+            build/KeyboardResults.xcresult
           if-no-files-found: ignore
 
+      - name: Build verified unsigned device candidate
+        if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''
+        run: |
+          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DeviceCandidate CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" build
+          bash Scripts/package-ipa.sh build/DeviceCandidate/Build/Products/Release-iphoneos/OFFLINE.app build/ipa
+      - name: Upload verified unsigned candidate
+        if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFLINE-unsigned-IPA
+          path: |
+            build/ipa/OFFLINE-unsigned.ipa
+            build/ipa/OFFLINE-build-manifest.json
+          if-no-files-found: error

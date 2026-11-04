@@ -16,3 +16,86 @@ The application audit adds recorded failing-before navigator regressions, fake-p
 tests of the real service, native AVPlayer seek checks, a deterministic 240-operation
 six-track stress scenario, and filesystem safety tests. See APPLICATION_AUDIT.md for
 evidence limits, deferred scenarios and the physical acceptance matrix.
+
+
+# Phase 5 verification
+
+Tests/Unit/Library uses isolated UUID databases/directories and generated original
+WAV/JPEG/PNG fixtures. Coverage includes playlist validation/CRUD/membership/order,
+rollback, likes, metadata identity/bytes, artist/album/compilation grouping, artwork
+staging/reference cleanup, bound Unicode/literal search, seven deterministic sorts,
+source/hash duplicates, concurrent imports, deletion recovery and v008 upgrades.
+The ten-track SQLite/filesystem test closes/recreates its services and validates
+all files, persistent data, playback order, a live metadata edit and native startup.
+
+LibraryManagementUITests launches a DEBUG-only isolated test root with three real
+stored WAVs. Reset is explicit for the first launch; restart tests keep that same
+root. Production storage is never used by destructive UI tests. Workflows cover
+playlist CRUD, multi-add, accessible reorder controls (the same repository used by
+native drag), removal, likes, editing/cancel, search/play, confirmed deletion and
+restart persistence. Stable accessibility IDs replace absolute screen coordinates.
+UI screenshots are kept as XCTest attachments and exported to library-ui-screenshots.
+Native drag, system Photos selection and device-specific media routing remain in
+the physical checklist. The existing UI smoke and all Phase 0-4 tests remain enabled.
+
+CI retains xcresult, enforces bounded waits/test timeouts and records the selected
+simulator/toolchain. Final counts, environment, workflow and artifact URLs belong
+in the PR for the exact tested source. A compile or simulator run is not physical
+acceptance; physical outcomes are recorded separately in PHASE_05_DEVICE_TESTING.md.
+
+Build 65 was physically rejected for search/keyboard check E. Its developer-reported
+A-D/F-J results are PASS, with iOS version NOT PROVIDED; E stays FAIL pending retest.
+New failing-before UI regressions cover submit dismissal, playlist search and the
+missing Library field in playlist mode. Universal-search unit tests cover all four
+entity types, scopes/likes, Unicode/literals, live CRUD/metadata, persistence/sort
+isolation, cancelled responses and deliberately out-of-order completions. UI tests
+exercise real keyboards, Done/Search, tab changes, scroll/clear, result navigation,
+mini-player access, All/filter consistency and relaunch. The compact test must install
+the app/extension with matching nonempty versions before its assertions can run.
+
+Failing-before evidence: CI 41720899168 on d9ab131 passed all 167 unit/integration
+tests and failed the new UI cases for the absent Library search field in Playlists,
+the absent playlist entity result, and the missing keyboard Done control. An existing
+metadata/search UI flow also exceeded its two-minute execution allowance. It remains
+enabled and must pass with the fixes; no timeout or failure is treated as acceptance.
+
+CI 41724937547 passed 180 unit/integration tests, the new entity-search workflows,
+and the Search/Done dismissal workflow. The live-player keyboard test reproduced
+the native tab bar remaining behind the keyboard. The restart workflow reached
+all assertions at 126 seconds, exceeding its 120-second cap; helper queries/swipes
+and empty-field deletion were made more efficient without removing assertions or
+raising that cap. A focused keyboard UI gate now precedes the complete suite and
+exports its own screenshot/xcresult evidence. Compact installation/layout and keyboard
+tests still run after the complete suite passes.
+
+The additional album scope adds tests for empty/duplicate-name albums, all metadata
+fields, atomic primary assignments, ordering/moving/removal, safe deletion, likes
+and playlist preservation, real tagged audio import, reopen/search, JPEG/PNG cover
+replacement/removal/recovery, failed-save rollback, active playback/queue/history/
+timer preservation, and upgrade from build 66's actual v009 schema. A v008 upgrade
+still runs too. The focused gate runs album tests and the existing live-player
+keyboard test before the complete suite. UI workflows cover album creation/editing,
+song selection/reorder/removal, playback/deletion and relaunch/search. Compact tests
+also exercise the album editor. No per-test execution cap or assertion was removed.
+
+Keyboard UI tests capture open/closed screenshots and measured keyboard/tab-bar
+geometry over repeated focus transitions. They assert the accessible Done control
+is alongside the field, tabs stay above the keyboard, and closed geometry returns
+without drift. UIKit alone owns keyboard avoidance (`safeAreaRegions = .container`
+in its child host); no accessory toolbar is installed. This removes two competing
+insets, but simulator checks do not establish physical frame rate. Hardware animation
+quality remains a required additional acceptance check in PHASE_05_DEVICE_TESTING.md.
+
+CI builds all test products once with build-for-testing, then uses the generated
+xctestrun with test-without-building for focused, compact and full runs. Each device
+still installs and executes the application and every selected assertion. The compact
+gate precedes the full suite so a reproducible small-screen failure is diagnosed
+without waiting for unrelated UI flows. Album editor UI helpers reveal covered fields
+by dragging measured visible form content before typing; keyboard AX bounds exclude
+the predictive strip, so the helper leaves a field-height of clearance. No check or
+per-test cap is removed by reusing build products or scrolling to a visible target.
+Empty-album creation/restoration, name/artist restoration and year/description
+restoration have independent UI methods, retaining every field/search/relaunch
+assertion within the same 120-second per-test cap. Name searches submit before
+scrolling past matching songs; description search opens the uniquely matched album
+while the keyboard is visible. The editor uses an inline title on compact screens.

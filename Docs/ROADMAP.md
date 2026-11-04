@@ -13,5 +13,14 @@
 | 8 | iOS Share extension | `feature/phase-08-sharing` |
 | 9 | Integration, testing and v1.0 release | `feature/phase-09-release` |
 
-Phase 0 — **Complete**. Phase 1 — **Complete**. Phase 2 — **Complete**. Phase 3 — **Complete — native AVPlayer playback, local MP3/M4A importing, seeking, background audio, Lock Screen and headphone controls, responsive iPhone layout, app icon, and basic Previous/Next with automatic advancement accepted by developer-reported iPhone 13 Pro Max validation**. Phase 4 — **Implemented on `feature/phase-04-playback`**: persistent queue occurrences, Play Next/Add to Queue, editing, shuffle/repeat state, history, restoration metadata, and deadline-based Sleep Timer. Physical-device timer validation remains a required acceptance gate before merge.
+Phase 0-3: complete. Phase 4: **merged into develop at a58861f (PR #5), with
+physical acceptance recorded by the developer in its merge commit**.
 
+Phase 5: persistent library and playlist management is implemented on
+`feature/phase-05-library`; automated validation and the device acceptance matrix
+are tracked in its PR and PHASE_05_DEVICE_TESTING.md.
+
+**Milestone B — Complete Offline Music Player: PENDING PHYSICAL ACCEPTANCE.**
+Do not mark complete until the ten-track scenario, regressions, final-head CI/IPA,
+required physical checks and integration into develop are all verified.
+Milestone C is not complete. Phase 6 has not started.
