@@ -45,6 +45,16 @@ final class YouTubeProviderTests: XCTestCase {
         XCTAssertEqual(video.merging(title: "", thumbnail: URL(string: "https://attacker.example/image")).title, video.title)
         XCTAssertEqual(video.merging(title: "Extractor", thumbnail: nil).channel, video.channel)
     }
+    func testContinuationIdentityIsStableAcrossContextDecoding() async throws {
+        let html = "var ytInitialData = \(try YTFixture.json(YTFixture.initial([YTFixture.renderer()])));ytcfg.set(\(try YTFixture.json(["INNERTUBE_CONTEXT": ["client": ["clientName": "WEB", "clientVersion": "observed", "hl": "en"], "request": ["useSsl": true]]])));"
+        let repeated: [String: Any] = ["onResponseReceivedCommands": [["appendContinuationItemsAction": ["continuationItems": [YTFixture.renderer(), ["continuationItemRenderer": ["continuationEndpoint": ["continuationCommand": ["token": "next"]]]]]]]]]
+        let transport = YTTransportStub([YTTransportStub.response(html), YTTransportStub.response(try YTFixture.json(repeated))])
+        let provider = YouTubeWebProvider(transport: transport)
+        let first = try await provider.search(query: "song", continuationToken: nil)
+        let second = try await provider.search(query: "song", continuationToken: first.continuationToken)
+        XCTAssertNotNil(first.continuationToken)
+        XCTAssertEqual(first.continuationToken, second.continuationToken)
+    }
     func testHTTPAndNetworkErrorsAreSanitizedAndRedirectHostsRestricted() async throws {
         for (status, expected) in [(403, YouTubeError.accessRestricted), (429, .rateLimited), (504, .requestTimeout), (500, .searchUnavailable)] {
             let provider = YouTubeWebProvider(transport: YTTransportStub([YTTransportStub.response(status: status)]))

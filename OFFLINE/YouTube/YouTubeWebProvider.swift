@@ -39,8 +39,12 @@ struct YouTubeWebProvider: YouTubeSearchProvider, YouTubeMetadataProvider {
             }
             try Task.checkCancellation()
             let page = try YouTubeWebParser.search(object)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
             let token = try page.continuationToken.map {
-                try JSONEncoder().encode(Cursor(query: query, token: $0, context: JSONSerialization.data(withJSONObject: context))).base64EncodedString()
+                // Canonical encoding keeps a repeated server token identical after decoding
+                // context dictionaries, so the UI's consumed-token guard remains effective.
+                try encoder.encode(Cursor(query: query, token: $0, context: JSONSerialization.data(withJSONObject: context, options: .sortedKeys))).base64EncodedString()
             }
             return YouTubeSearchPage(videos: page.videos, continuationToken: token)
         } catch { throw YouTubeError.map(error, fallback: .searchUnavailable) }

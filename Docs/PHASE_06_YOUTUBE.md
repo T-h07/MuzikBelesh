@@ -148,7 +148,7 @@ modifies queue/history/timer, imports files or inserts download jobs.
 
 Windows public-network checks on 2026-11-04: PSY search returned 19 video renderers;
 continuation returned HTTP 200. Watch metadata returned `OK` for
-`9bZkp7q19f0` (PSY), `HLYjoPv4QGY` (NEKO - Nâ€™FRONT), and `aqz-KE-bpKQ`
+`9bZkp7q19f0` (PSY), `HLYjoPv4QGY` (NEKO - NÃ¢â‚¬â„¢FRONT), and `aqz-KE-bpKQ`
 (Blender Foundation open-movie sample); `___________` returned `ERROR`. These
 checks inspect public web responses, **not native YouTubeKit execution**.
 
@@ -170,5 +170,14 @@ source-verified test products. Complete verification reuses those products and
 packages one Release IPA only after required regressions pass. Native results,
 exact source SHA, artifact and PR links are recorded in the delivery/PR evidence.
 
-Physical acceptance is pending. See [the Aâ€“R checklist](PHASE_06_DEVICE_TESTING.md).
+Focused run [41912758748](https://github.com/T-h07/MuzikBelesh/actions/runs/41912758748)
+compiled app/extension/tests and passed 22 Phase 6 deterministic unit/integration
+checks plus all four new UI workflows. Its inherited keyboard/playback test hit
+its unchanged 120-second cap on the Intel runner while still progressing; no
+control assertion had failed before the timeout. This is not a passing gate or
+proof of a product deadlock. The final source also canonicalizes continuation
+encoding so repeated underlying tokens retain identical opaque identities.
+Final-head results belong in the PR; these counts describe that earlier run only.
+
+Physical acceptance is pending. See [the AÃ¢â‚¬â€œR checklist](PHASE_06_DEVICE_TESTING.md).
 Media handling must respect content authorization and applicable platform restrictions.
