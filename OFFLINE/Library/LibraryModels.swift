@@ -111,16 +111,23 @@ struct LibrarySnapshot: Equatable, Sendable {
         return memberships.filter { $0.playlistID == id }.sorted { $0.position < $1.position }.compactMap { lookup[$0.trackID] }
     }
     var artistGroups: [LibraryGroup] {
-        let performers = Dictionary(grouping: tracks, by: { $0.artistID ?? "unknown-artist" })
-        let visibleAlbums = Set(albumGroups.map(\.id))
-        let albumArtists = Set(albums.filter { visibleAlbums.contains($0.id) }.compactMap(\.artistID))
-        return Set(performers.keys).union(albumArtists).map { id in
-            let albumIDs = Set(albums.filter { $0.artistID == id }.map(\.id))
-            let songs = tracks.filter { ($0.artistID ?? "unknown-artist") == id || $0.albumID.map { albumIDs.contains($0) } == true }
-            return LibraryGroup(id: id, title: artistName(id == "unknown-artist" ? nil : id), subtitle: "\(songs.count) songs", trackIDs: songs.map(\.id), artworkRelativePath: artists.first { $0.id == id }?.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first)
+        let records = Dictionary(uniqueKeysWithValues: artists.map { ($0.id, $0) })
+        let albumArtists = Dictionary(uniqueKeysWithValues: albums.compactMap { album in album.artistID.map { (album.id, $0) } })
+        var grouped: [String: [StoredTrack]] = [:]
+        for song in tracks {
+            let performer = song.artistID ?? "unknown-artist"
+            grouped[performer, default: []].append(song)
+            if let albumID = song.albumID, let artistID = albumArtists[albumID], artistID != performer { grouped[artistID, default: []].append(song) }
+        }
+        for album in albums where album.managementSource == "managed" {
+            if let id = album.artistID, grouped[id] == nil { grouped[id] = [] }
+        }
+        return grouped.map { id, songs in
+            LibraryGroup(id: id, title: records[id]?.name ?? "Unknown Artist", subtitle: "\(songs.count) songs", trackIDs: songs.map(\.id), artworkRelativePath: records[id]?.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first)
         }.sorted { LibraryIdentity.normalized($0.title) == LibraryIdentity.normalized($1.title) ? $0.id < $1.id : LibraryIdentity.normalized($0.title) < LibraryIdentity.normalized($1.title) }
     }
     var albumGroups: [LibraryGroup] {
+        let artistNames = Dictionary(uniqueKeysWithValues: artists.map { ($0.id, $0.name) })
         let membership = Dictionary(grouping: tracks.filter { $0.albumID != nil }, by: { $0.albumID! })
         var groups = albums.compactMap { record -> LibraryGroup? in
             let songs = membership[record.id] ?? []
@@ -129,7 +136,7 @@ struct LibrarySnapshot: Equatable, Sendable {
                 if $0.albumPosition != $1.albumPosition { return ($0.albumPosition ?? Int.max) < ($1.albumPosition ?? Int.max) }
                 return $0.dateAdded == $1.dateAdded ? $0.id < $1.id : $0.dateAdded < $1.dateAdded
             }
-            return LibraryGroup(id: record.id, title: record.title, subtitle: artistName(record.artistID), trackIDs: ordered.map(\.id), artworkRelativePath: record.artworkRelativePath ?? ordered.compactMap(\.artworkRelativePath).first)
+            return LibraryGroup(id: record.id, title: record.title, subtitle: record.artistID.flatMap { artistNames[$0] } ?? "Unknown Artist", trackIDs: ordered.map(\.id), artworkRelativePath: record.artworkRelativePath ?? ordered.compactMap(\.artworkRelativePath).first)
         }.sorted { LibraryIdentity.normalized($0.title) == LibraryIdentity.normalized($1.title) ? $0.id < $1.id : LibraryIdentity.normalized($0.title) < LibraryIdentity.normalized($1.title) }
         let unassigned = tracks.filter { $0.albumID == nil }.sorted { $0.dateAdded == $1.dateAdded ? $0.id < $1.id : $0.dateAdded < $1.dateAdded }
         if !unassigned.isEmpty {

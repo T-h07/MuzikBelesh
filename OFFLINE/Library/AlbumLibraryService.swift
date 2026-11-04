@@ -19,7 +19,7 @@ extension MusicLibraryService {
                     }
                     let album = try LibraryRepository(db: db).saveAlbum(id: id, draft: draft, trackIDs: trackIDs,
                         artworkPath: artworkData == nil ? nil : operation?.stagedPath,
-                        replaceArtwork: operation != nil || removeArtwork, artworkOperation: operation?.id)
+                        replaceArtwork: operation != nil || removeArtwork, artworkOperation: operation?.id, createdID: ownerID)
                     if let operation { try? ManagedLibraryFiles.finishArtwork(operation, paths: storage.paths, db: db) }
                     return album.id
                 } catch {

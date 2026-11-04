@@ -27,7 +27,7 @@ extension LibraryRepository {
     }
 
     @discardableResult func saveAlbum(id: String? = nil, draft: AlbumDraft, trackIDs: [String]? = nil,
-                                     artworkPath: String? = nil, replaceArtwork: Bool = false, artworkOperation: String? = nil) throws -> StoredAlbum {
+                                     artworkPath: String? = nil, replaceArtwork: Bool = false, artworkOperation: String? = nil, createdID: String? = nil) throws -> StoredAlbum {
         let title = try LibraryIdentity.validatedTitle(LibraryIdentity.display(draft.title))
         let description = try LibraryIdentity.validatedDescription(draft.description)
         guard draft.releaseYear.map({ (1...9999).contains($0) }) ?? true else { throw LibraryError.invalidMetadata }
@@ -38,7 +38,7 @@ extension LibraryRepository {
                 album = current
             } else {
                 // Names are labels, not identities. Equal names are safe to keep separate.
-                album = StoredAlbum(id: UUID().uuidString, title: title, normalizedTitle: LibraryIdentity.normalized(title), artistID: nil, artworkRelativePath: nil, dateAdded: Date(), dateModified: Date())
+                album = StoredAlbum(id: createdID ?? UUID().uuidString, title: title, normalizedTitle: LibraryIdentity.normalized(title), artistID: nil, artworkRelativePath: nil, dateAdded: Date(), dateModified: Date())
             }
             album.title = title; album.normalizedTitle = LibraryIdentity.normalized(title)
             album.artistID = try Self.resolveArtist(draft.artist, db: db)
