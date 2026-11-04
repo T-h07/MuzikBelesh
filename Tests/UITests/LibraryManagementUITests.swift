@@ -5,9 +5,7 @@ final class LibraryManagementUITests: XCTestCase {
     private var identifier = ""
     override func setUpWithError() throws {
         continueAfterFailure = false
-        // Workflow budget includes cold launches and XCTest snapshot overhead.
-        // Individual control/focus expectations retain their short bounded waits.
-        executionTimeAllowance = 240
+        executionTimeAllowance = 120
         identifier = UUID().uuidString
         app = XCUIApplication()
         app.launchEnvironment["MB_UI_TEST_ID"] = identifier
