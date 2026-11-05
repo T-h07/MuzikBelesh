@@ -97,6 +97,15 @@ final class DatabaseManager {
             // Earlier placeholder rows have no queue position and retain their historical identity.
             try db.execute(sql: "CREATE UNIQUE INDEX download_youtube_identity ON download_jobs(sourceIdentifier) WHERE sourceType = 'youtube' AND position IS NOT NULL")
         }
+        migrator.registerMigration("v012_background_transfers") { db in
+            try db.alter(table: "download_jobs") { table in
+                table.add(column: "transferSession", .text)
+                table.add(column: "transferNumber", .integer)
+                table.add(column: "transferGeneration", .text)
+                table.add(column: "refreshedGeneration", .boolean)
+            }
+            try db.execute(sql: "CREATE UNIQUE INDEX download_system_task ON download_jobs(transferSession, transferNumber)")
+        }
         if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
         else { try migrator.migrate(dbQueue) }
     }

@@ -22,6 +22,17 @@ enum DownloadMedia {
         return YouTubeURLSessionTransport.permitted(url)
     }
 
+    static func validate(response: HTTPURLResponse?, bytes: Int) throws {
+        guard let response, permits(response.url) else { throw DownloadFailure.invalid }
+        if [401, 403, 410].contains(response.statusCode) { throw DownloadFailure.rejected }
+        guard bytes <= limit, response.expectedContentLength <= limit else { throw DownloadFailure.size }
+        guard response.statusCode == 200, bytes > 0,
+              ["audio/mp4", "audio/m4a", "audio/x-m4a", "application/octet-stream"].contains(response.mimeType ?? ""),
+              response.expectedContentLength < 0 || response.expectedContentLength == Int64(bytes) else {
+            throw DownloadFailure.invalid
+        }
+    }
+
     static func validate(_ file: URL) async throws {
         let info = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard info.isRegularFile == true, info.isSymbolicLink != true, let size = info.fileSize,
@@ -117,12 +128,8 @@ private final class MediaDownloadDelegate: NSObject, URLSessionDownloadDelegate,
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard result == nil else { return }
         do {
-            guard let response = downloadTask.response as? HTTPURLResponse, DownloadMedia.permits(response.url) else { throw DownloadFailure.invalid }
-            if [401, 403, 410].contains(response.statusCode) { throw DownloadFailure.rejected }
             let length = try location.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard response.statusCode == 200, ["audio/mp4", "audio/m4a", "audio/x-m4a", "application/octet-stream"].contains(response.mimeType ?? ""),
-                  length > 0, length <= DownloadMedia.limit,
-                  response.expectedContentLength < 0 || Int64(length) == response.expectedContentLength else { throw DownloadFailure.invalid }
+            try DownloadMedia.validate(response: downloadTask.response as? HTTPURLResponse, bytes: length)
             try FileManager.default.moveItem(at: location, to: destination)
             result = .success(())
         } catch { result = .failure(error as? DownloadFailure ?? .disk) }

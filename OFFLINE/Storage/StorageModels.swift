@@ -107,6 +107,10 @@ struct StoredHistoryEntry: Codable, FetchableRecord, PersistableRecord, Identifi
 
 struct StoredDownloadJob: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     static let databaseTableName = "download_jobs"
+    var transferSession: String?
+    var transferNumber: Int?
+    var transferGeneration: String?
+    var refreshedGeneration: Bool?
     var id: String
     var sourceType: String
     var sourceIdentifier: String?

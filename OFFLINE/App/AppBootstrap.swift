@@ -31,7 +31,7 @@ import Foundation
             } catch { fatalError("Could not create the isolated UI test library") }
         }
         #endif
-        return AppContainer()
+        return AppContainer(backgroundTransfers: BackgroundTransfers.shared)
     }
     #if DEBUG
     private static func seed(_ storage: StorageCoordinator) throws {
