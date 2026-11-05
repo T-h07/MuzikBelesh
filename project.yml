@@ -29,6 +29,8 @@ targets:
     sources:
       - path: OFFLINE
         excludes: [Resources/Info.plist]
+      - path: OFFLINEShareExtension/SharedURLHandler.swift
+      - path: Sharing/SharedLinkInbox.swift
     resources: [OFFLINE/Resources/Assets.xcassets]
     info:
       path: OFFLINE/Resources/Info.plist
@@ -45,6 +47,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh
+        CODE_SIGN_ENTITLEMENTS: Sharing/ShareGroups.entitlements
         TARGETED_DEVICE_FAMILY: '1'
         SUPPORTS_MACCATALYST: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -88,6 +91,7 @@ targets:
     platform: iOS
     deploymentTarget: '17.0'
     sources:
+      - path: Sharing/SharedLinkInbox.swift
       - path: OFFLINE/YouTube/YouTubeURLValidator.swift
       - path: OFFLINEShareExtension
         excludes: [Info.plist]
@@ -102,12 +106,15 @@ targets:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionAttributes:
+            NSExtensionJavaScriptPreprocessingFile: PageURL
             NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
               NSExtensionActivationSupportsWebURLWithMaxCount: 1
               NSExtensionActivationSupportsText: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.share
+        CODE_SIGN_ENTITLEMENTS: Sharing/ShareGroups.entitlements
         TARGETED_DEVICE_FAMILY: '1'
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES

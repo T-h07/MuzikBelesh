@@ -22,6 +22,8 @@ private struct RootTabsView: View {
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
+    @State private var shareRevision = 0
+    @State private var shareReadFailed = false
     @FocusState private var searchFocus: LibrarySearchField?
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
@@ -44,10 +46,46 @@ private struct RootTabsView: View {
             Button("OK") { library.error = nil }
             Button("Retry Recovery") { Task { await library.reconcileFiles() } }
         } message: { Text(library.error ?? "") }
-        .sheet(item: $coordinator.sheet) { sheet in
-            switch sheet { case .settings: SettingsView(); case .importLink: ImportLinkView(); case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
+        .task(id: "\(scenePhase)-\(shareRevision)") {
+            guard scenePhase == .active else { return }
+            do {
+                guard let share = try await coordinator.shareHandoff.next() else { return }
+                // A library editor, document picker, or nested sheet may own the presentation.
+                // Wait only while a real delivery is pending. The scene task cancels on background.
+                while coordinator.sheet != nil || coordinator.showingNowPlaying || Self.hasModal {
+                    try await Task.sleep(for: .milliseconds(350))
+                }
+                try Task.checkCancellation()
+                coordinator.sheet = .sharedLink(share)
+            } catch is CancellationError { }
+            catch SharedLinkInbox.Failure.unavailable { } // Manual import remains usable without a group.
+            catch { shareReadFailed = true }
+        }
+        .alert("Could not read the shared link inbox", isPresented: $shareReadFailed) {
+            Button("Retry") { shareRevision += 1 }
+            Button("Close", role: .cancel) { }
+        }
+        .sheet(item: $coordinator.sheet, onDismiss: { shareRevision += 1 }) { sheet in
+            switch sheet {
+            case .settings: SettingsView()
+            case .importLink: ImportLinkView()
+            case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)])
+            case .sharedLink(let share):
+                ImportLinkView(initialURL: share.url).onAppear {
+                    Task {
+                        do { try await coordinator.shareHandoff.acknowledge(share.id) }
+                        catch { shareReadFailed = true }
+                    }
+                }
+            }
         }
         .fullScreenCover(isPresented: $coordinator.showingNowPlaying) { NowPlayingView(coordinator: coordinator) }
+    }
+
+    private static var hasModal: Bool {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }
+            .contains { $0.keyWindow?.rootViewController?.presentedViewController != nil }
     }
 }
 

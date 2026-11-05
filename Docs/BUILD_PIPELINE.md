@@ -13,7 +13,9 @@ from deterministic gates and preserve a separate xcresult. The complete dispatch
 with prebuilt products builds one verified unsigned Release candidate after tests;
 there is no need to also dispatch the standalone IPA workflow. Packaging checks
 arm64 for both executables, app/extension bundle IDs and version/build consistency,
-absence of embedded signing material, ZIP structure and full-SHA/hash manifest.
+absence of embedded provisioning profiles or Apple signing identities, ZIP structure and full-SHA/hash manifest.
+
+From Phase 8, the packager adds ad-hoc Mach-O metadata with the requested App Group to both executables and reads it back before archiving. SideStore still provisions and signs each bundle for installation.
 
 The `runner_label` dispatch option supports `macos-15-intel` as a bounded capacity
 fallback when the default `macos-15` pool does not allocate a runner. Reuse test

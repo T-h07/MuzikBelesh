@@ -4,17 +4,19 @@ enum YouTubeURLValidationError: Error, Equatable { case empty, invalidScheme, un
 
 struct YouTubeURLValidator {
     static func videoID(from input: String) -> String? { try? parse(input) }
-    static func isValidID(_ value: String) -> Bool { value.range(of: #"^[A-Za-z0-9_-]{11}$"#, options: .regularExpression) != nil }
+    static func isValidID(_ value: String) -> Bool { value.utf8.count == 11 && value.range(of: #"^[A-Za-z0-9_-]{11}$"#, options: .regularExpression) != nil }
     static func parse(_ input: String) throws -> String {
+        guard input.utf8.count <= 4096 else { throw YouTubeURLValidationError.malformed }
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { throw YouTubeURLValidationError.empty }
         if isValidID(value) { return value }
-        guard let c = URLComponents(string: value) else { throw YouTubeURLValidationError.malformed }
+        guard let c = URLComponents(string: value, encodingInvalidCharacters: false) else { throw YouTubeURLValidationError.malformed }
         guard c.scheme?.lowercased() == "https" else { throw YouTubeURLValidationError.invalidScheme }
-        guard let host = c.host?.lowercased(), ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"].contains(host) else { throw YouTubeURLValidationError.untrustedHost }
+        guard let host = c.percentEncodedHost?.lowercased(), ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"].contains(host) else { throw YouTubeURLValidationError.untrustedHost }
         guard c.user == nil, c.password == nil, c.port == nil || c.port == 443 else { throw YouTubeURLValidationError.malformed }
-        // Decode once; encoded slashes may not introduce new path components.
-        guard !c.percentEncodedPath.lowercased().contains("%2f"), !c.percentEncodedPath.lowercased().contains("%5c") else { throw YouTubeURLValidationError.unsupportedPath }
+        // All supported paths and video IDs have an ASCII representation.
+        guard !c.percentEncodedPath.contains("%"), !value.contains("\\"),
+              !value.contains(where: { $0.isWhitespace || $0.isNewline }) else { throw YouTubeURLValidationError.unsupportedPath }
         let parts = c.path.split(separator: "/", omittingEmptySubsequences: false)
         let id: String
         if host == "youtu.be" {
