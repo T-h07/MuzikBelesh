@@ -33,7 +33,7 @@ struct SystemDownload {
     static let mobile = prefix + "mobile"
     weak var owner: DownloadManager?
     private var sessions: [String: URLSession] = [:]
-    private var completions: [String: [() -> Void]] = [:]
+    private var handoff = BackgroundEventHandoff()
     private var active: [String: [Int: URLSessionTask]] = [:]
     private lazy var delegate = BackgroundDelegate(owner: self)
     private let events: OperationQueue = {
@@ -67,7 +67,7 @@ struct SystemDownload {
     }
     func handleEvents(_ name: String, completion: @escaping () -> Void) {
         guard [Self.wifi, Self.mobile].contains(name) else { completion(); return }
-        completions[name, default: []].append(completion)
+        handoff.retain(completion, for: name)
         _ = session(name)
     }
     fileprivate func handle(_ task: URLSessionTask, in name: String) -> SystemDownload {
@@ -105,7 +105,18 @@ struct SystemDownload {
 
     fileprivate func removeTask(_ number: Int, in name: String) { active[name]?[number] = nil }
     fileprivate func drained(_ name: String) {
-        if let handlers = completions.removeValue(forKey: name) { handlers.forEach { $0() } }
+        let handlers = handoff.takeHandlers(for: name)
+        handlers.forEach { $0() }
+    }
+}
+
+struct BackgroundEventHandoff {
+    private var completions: [String: [() -> Void]] = [:]
+    mutating func retain(_ completion: @escaping () -> Void, for session: String) {
+        completions[session, default: []].append(completion)
+    }
+    mutating func takeHandlers(for session: String) -> [() -> Void] {
+        completions.removeValue(forKey: session) ?? []
     }
 }
 

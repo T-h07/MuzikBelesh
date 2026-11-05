@@ -251,18 +251,26 @@ extension StoredDownloadState {
         jobs[index] = job
     }
     private func stop(_ id: String, as state: StoredDownloadState) {
-        guard let job = jobs.first(where: { $0.id == id }), update(id, { $0.state = state; $0.clearSystemTask() }) else { return }
+        guard let job = jobs.first(where: { $0.id == id }) else { return }
+        let persisted = update(id, { $0.state = state; $0.clearSystemTask() })
+        // A storage failure must not leave an unrestricted transfer running after opt-out.
         if let name = job.transferSession, let number = job.transferNumber { system?.cancel(session: name, number: number) }
-        discardIncoming(job)
         workers[id]?.cancel()
+        guard persisted else { return }
+        discardIncoming(job)
         if state == .cancelled, workers[id] == nil, UUID(uuidString: id) != nil, let staging {
             try? FileManager.default.removeItem(at: staging.appendingPathComponent(id + ".m4a"))
         }
     }
-    func pause(_ job: StoredDownloadJob) { if jobs.first(where: { $0.id == job.id })?.state.stoppable == true { stop(job.id, as: .paused) } }
+    func pause(_ job: StoredDownloadJob) {
+        guard jobs.first(where: { $0.id == job.id })?.state.stoppable == true else { return }
+        stop(job.id, as: .paused)
+        schedule()
+    }
     func cancel(_ job: StoredDownloadJob) {
         guard let job = jobs.first(where: { $0.id == job.id }), job.state.stoppable || job.state == .paused || job.state == .interrupted else { return }
         stop(job.id, as: .cancelled)
+        schedule()
     }
     func retry(_ id: String, repair: Bool = false) {
         guard let job = jobs.first(where: { $0.id == id }), [.paused, .cancelled, .failed, .interrupted].contains(job.state) || (repair && job.state == .completed) else { return }
@@ -329,18 +337,14 @@ extension DownloadManager {
         guard let job = jobs.first(where: task.belongs), let generation = job.transferGeneration.flatMap(UUID.init(uuidString:)),
               task.received >= (job.received ?? 0) else { return }
         attempts[job.id] = generation
-        progress(job.id, attempt: generation, bytes: task.received, total: task.expected, now: ProcessInfo.processInfo.systemUptime)
+        let expected = task.expected > 0 ? task.expected : job.expected ?? -1
+        progress(job.id, attempt: generation, bytes: task.received, total: expected, now: ProcessInfo.processInfo.systemUptime)
     }
     func backgroundFile(_ task: SystemDownload, response: HTTPURLResponse?, location: URL) {
         guard let job = jobs.first(where: task.belongs), let destination = incoming(job) else { return }
         do {
-            guard let response, DownloadMedia.permits(response.url) else { throw DownloadFailure.invalid }
-            if [401,403,410].contains(response.statusCode) { throw DownloadFailure.rejected }
             let length = try location.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard length <= DownloadMedia.limit else { throw DownloadFailure.size }
-            guard length > 0, response.statusCode == 200,
-                  ["audio/mp4", "audio/m4a", "audio/x-m4a", "application/octet-stream"].contains(response.mimeType ?? ""),
-                  response.expectedContentLength < 0 || response.expectedContentLength == Int64(length) else { throw DownloadFailure.invalid }
+            try DownloadMedia.validate(response: response, bytes: length)
             if !FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.moveItem(at: location, to: destination)
             }
