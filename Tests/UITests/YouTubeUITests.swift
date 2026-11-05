@@ -42,6 +42,46 @@ final class YouTubeUITests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 3))
         XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
     }
+    func testLongPageClearsMiniPlayerAndLoadsNextPage() {
+        app.tabBars.buttons["Library"].tap()
+        app.buttons["library-filter-Songs"].tap()
+        app.staticTexts["Fixture A"].firstMatch.tap()
+        let player = app.buttons["Open Now Playing"]
+        XCTAssertTrue(player.waitForExistence(timeout: 5))
+        let scroll = app.scrollViews.firstMatch
+        for tab in ["Home", "Downloads", "Search"] {
+            app.tabBars.buttons[tab].tap()
+            XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+            XCTAssertLessThanOrEqual(scroll.frame.maxY, player.frame.minY, tab)
+        }
+        app.segmentedControls.buttons["YouTube"].tap()
+        let field = app.textFields["search-field"]
+        field.tap()
+        field.typeText("long page\n")
+        XCTAssertTrue(app.buttons["youtube-result-fixture0001"].waitForExistence(timeout: 5))
+        let more = app.buttons["youtube-load-more"]
+        for _ in 0..<6 {
+            if more.exists && more.isHittable && scroll.frame.contains(more.frame) { break }
+            scroll.swipeUp()
+        }
+        let last = app.buttons["youtube-result-fixture0016"]
+        XCTAssertTrue(scroll.frame.contains(last.frame))
+        XCTAssertTrue(scroll.frame.contains(more.frame))
+        XCTAssertGreaterThanOrEqual(more.frame.height, 44)
+        XCTAssertLessThanOrEqual(more.frame.maxY, player.frame.minY)
+        XCTAssertTrue(more.isHittable)
+        more.tap()
+        scroll.swipeUp()
+        let next = app.buttons["youtube-result-dQw4w9WgXcQ"]
+        XCTAssertTrue(next.waitForExistence(timeout: 5))
+        XCTAssertTrue(scroll.frame.contains(next.frame))
+        next.tap()
+        XCTAssertTrue(app.staticTexts["youtube-stream-ready"].waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(scroll.frame.maxY, player.frame.minY)
+        app.buttons["Pause"].tap()
+        XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 5))
+    }
+
     func testValidPastedLinkUsesSameDetailsAndCanReturn() {
         youtubeSearch(); app.buttons["youtube-paste-link"].tap()
         inspect("https://m.youtube.com/watch?v=9bZkp7q19f0&si=fixture&list=anything")

@@ -6,6 +6,12 @@ struct YouTubeUITestFixtures: YouTubeSearchProvider, YouTubeMetadataProvider, Yo
     static let video = YouTubeVideo(id: "9bZkp7q19f0", title: "YouTube Fixture Song", channel: "Fixture Channel", duration: 253, availability: .available)
     func search(query: String, continuationToken: String?) async throws -> YouTubeSearchPage {
         try Task.checkCancellation()
+        if query == "long page", continuationToken == nil {
+            let videos = (1...16).map { index in
+                YouTubeVideo(id: String(format: "fixture%04d", index), title: "Fixture result \(index)", channel: "Fixture Channel", duration: 210, availability: .available)
+            }
+            return YouTubeSearchPage(videos: videos, continuationToken: "fixture-next")
+        }
         let video = continuationToken == nil ? Self.video : YouTubeVideo(id: "dQw4w9WgXcQ", title: "Second Fixture Song", channel: "Fixture Channel", duration: 210, availability: .available)
         return YouTubeSearchPage(videos: [video], continuationToken: continuationToken == nil ? "fixture-next" : nil)
     }

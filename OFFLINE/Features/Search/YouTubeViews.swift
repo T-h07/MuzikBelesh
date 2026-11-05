@@ -29,7 +29,10 @@ struct YouTubeSearchResultsView: View {
                 if let error = model.pageError { Text(error.localizedDescription).font(.caption).foregroundStyle(AppColors.textSecondary) }
                 if model.loadingMore { ProgressView("Loading more…") }
                 else if model.continuation != nil {
-                    Button(model.pageError == nil ? "Load More" : "Retry Load More") { model.loadMore() }.accessibilityIdentifier("youtube-load-more")
+                    Button { model.loadMore() } label: {
+                        Text(model.pageError == nil ? "Load More" : "Retry Load More")
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }.accessibilityIdentifier("youtube-load-more")
                 }
             }
         }.padding(.top, AppSpacing.md)

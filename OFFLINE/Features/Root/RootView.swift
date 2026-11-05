@@ -63,11 +63,13 @@ private struct TabContent<Content: View>: View {
     }
 
     var body: some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
+        // Give every navigation destination a viewport ending above the playback controls.
+        VStack(spacing: 0) {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
             VStack(spacing: AppSpacing.xs) {
                 SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { onPresent(); showingTimer = true }
                 if audioPlayer.state.currentTrackID != nil { MiniPlayer(coordinator: coordinator).padding(.horizontal, AppSpacing.sm) }
-            }.padding(.top, AppSpacing.sm)
+            }.padding(.top, AppSpacing.sm).fixedSize(horizontal: false, vertical: true)
         }
         .sheet(isPresented: $showingTimer) { SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
     }
