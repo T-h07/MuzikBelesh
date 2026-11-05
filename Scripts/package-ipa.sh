@@ -16,9 +16,14 @@ if [[ -n "${GITHUB_SHA:-}" ]]; then
 fi
 [[ -x "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE" ]] || { echo "Missing executable" >&2; exit 1; }
 file "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE"
+lipo "$OUTPUT_DIR/Payload/OFFLINE.app/OFFLINE" -verify_arch arm64
 [[ -f "$OUTPUT_DIR/Payload/OFFLINE.app/Assets.car" ]] || { echo "Compiled asset catalog missing" >&2; exit 1; }
 [[ "$(plutil -type UILaunchScreen "$OUTPUT_DIR/Payload/OFFLINE.app/Info.plist")" == *dictionary* ]] || { echo "Modern launch-screen configuration missing" >&2; exit 1; }
 [[ -d "$OUTPUT_DIR/Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex" ]] || { echo "Share extension missing" >&2; exit 1; }
+lipo "$OUTPUT_DIR/Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex/OFFLINEShareExtension" -verify_arch arm64
+for BUNDLE in "$OUTPUT_DIR/Payload/OFFLINE.app" "$OUTPUT_DIR/Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex"; do
+  [[ ! -e "$BUNDLE/embedded.mobileprovision" && ! -d "$BUNDLE/_CodeSignature" ]] || { echo "Unexpected signing material" >&2; exit 1; }
+done
 python3 - "$OUTPUT_DIR/Payload/OFFLINE.app" <<'PY'
 import os, pathlib, plistlib, sys
 app = pathlib.Path(sys.argv[1])
@@ -26,8 +31,10 @@ main = plistlib.loads((app / "Info.plist").read_bytes())
 extension = plistlib.loads((app / "PlugIns/OFFLINEShareExtension.appex/Info.plist").read_bytes())
 assert main["CFBundleShortVersionString"] == extension["CFBundleShortVersionString"] == "0.1.0"
 assert main["CFBundleVersion"] == extension["CFBundleVersion"]
-if os.getenv("GITHUB_RUN_NUMBER"):
-    assert main["CFBundleVersion"] == os.environ["GITHUB_RUN_NUMBER"]
+assert extension["CFBundleIdentifier"] == "com.th07.muzikbelesh.share"
+expected_build = os.getenv("BUILD_NUMBER") or os.getenv("GITHUB_RUN_NUMBER")
+if expected_build:
+    assert main["CFBundleVersion"] == expected_build
 print("Verified version/build/commit:", main["CFBundleShortVersionString"], main["CFBundleVersion"], main["MBBuildCommit"])
 PY
 (cd "$OUTPUT_DIR" && ditto -c -k --sequesterRsrc --keepParent Payload OFFLINE-unsigned.ipa)

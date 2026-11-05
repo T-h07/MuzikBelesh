@@ -30,3 +30,13 @@ library surfaces. Mock models remain fixtures and deferred YouTube/download demo
 See LIBRARY_ARCHITECTURE.md, SAFE_LIBRARY_DELETION.md and ARTWORK_MANAGEMENT.md for
 the additive v009 schema, identity rules, file-operation journals and collection
 playback snapshots. No second database, queue or audio engine is introduced.
+
+# Phase 6 YouTube integration
+
+AppContainer owns protocol-injected YouTube search, metadata, local extraction,
+preferences, thumbnails and download preparation. Search and paste links share one
+observable details screen. Diagnostics reuses the same production resolver. The
+library's existing track_sources provenance supports downloaded detection without
+migration. No YouTube service creates a player or mutates playback/storage.
+See [PHASE_06_YOUTUBE.md](PHASE_06_YOUTUBE.md) for provider limitations, concurrency,
+cache/URL rules, local-only configuration and the transient Phase 7 contract.

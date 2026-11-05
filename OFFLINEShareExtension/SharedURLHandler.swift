@@ -1,8 +1,7 @@
 import Foundation
 struct SharedURLHandler {
     static func youtubeURL(from value: URL) -> URL? {
-        guard let host = value.host?.lowercased(), host == "youtube.com" || host.hasSuffix(".youtube.com") || host == "youtu.be", value.scheme?.lowercased() == "https" else { return nil }
-        return value
+        guard let id = YouTubeURLValidator.videoID(from: value.absoluteString) else { return nil }
+        return URL(string: "https://www.youtube.com/watch?v=\(id)")
     }
 }
-

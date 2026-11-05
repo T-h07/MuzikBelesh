@@ -5,11 +5,20 @@ on:
     branches: [develop, 'feature/**']
   workflow_dispatch:
     inputs:
+      runner_label:
+        description: Standard runner pool (Intel is a bounded capacity fallback)
+        type: choice
+        options: [macos-15, macos-15-intel]
+        default: macos-15
       verification_scope:
         description: Focused regression or complete final verification
         type: choice
         options: [complete, focused]
         default: complete
+      live_youtube:
+        description: Opt-in external YouTube compatibility checks (separate from deterministic gates)
+        type: boolean
+        default: false
       prebuilt_run_id:
         description: Reuse test products from a focused run of this exact commit
         type: string
@@ -20,7 +29,7 @@ concurrency:
 permissions: {contents: read, actions: read}
 jobs:
   build-and-test:
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner_label || 'macos-15' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -43,14 +52,15 @@ jobs:
         run: xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
       - name: Select simulator
         run: |
-          DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
+          DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone .*Pro Max \(/ {print $2; exit}')
           test -n "$DEVICE_ID"
+          xcrun simctl list devices available | grep "$DEVICE_ID"
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
       - name: Download compiled test products
         if: inputs.prebuilt_run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: phase5-test-products
+          name: phase6-test-products
           path: build/prebuilt
           run-id: ${{ inputs.prebuilt_run_id }}
           github-token: ${{ github.token }}
@@ -78,16 +88,22 @@ jobs:
         if: inputs.verification_scope == 'focused'
         uses: actions/upload-artifact@v4
         with:
-          name: phase5-test-products
+          name: phase6-test-products
           path: |
             build/test-products.tar.gz
             build/product-source.txt
           retention-days: 7
           if-no-files-found: error
-      - name: Focused keyboard regression
+      - name: Focused Phase 6 and keyboard regressions
         if: inputs.verification_scope == 'focused'
         run: |
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -only-testing:OFFLINEUITests/YouTubeUITests -only-testing:OFFLINETests/YouTubeURLParserTests -only-testing:OFFLINETests/YouTubeProviderTests -only-testing:OFFLINETests/YouTubeSearchStateTests -only-testing:OFFLINETests/YouTubeAudioTests -only-testing:OFFLINETests/YouTubeLibraryIntegrityTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Opt-in live YouTube compatibility
+        if: inputs.live_youtube
+        continue-on-error: true
+        run: |
+          python3 Scripts/enable-youtube-live-tests.py "$TEST_RUN" build/Live.xctestrun
+          xcodebuild -xctestrun build/Live.xctestrun -destination "id=$SIMULATOR_ID" -resultBundlePath build/YouTubeLiveResults.xcresult -only-testing:OFFLINETests/YouTubeLiveTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Compact iPhone library layout
         if: inputs.verification_scope != 'focused'
         run: |
@@ -132,6 +148,7 @@ jobs:
             build/TestResults.xcresult
             build/CompactResults.xcresult
             build/KeyboardResults.xcresult
+            build/YouTubeLiveResults.xcresult
           if-no-files-found: ignore
 
       - name: Build verified unsigned device candidate
