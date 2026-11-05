@@ -39,15 +39,15 @@ final class StorageCoordinator: ObservableObject {
     func albumTitle(for id: String?) -> String? { guard let id else { return nil }; return try? database.dbQueue.read { try String.fetchOne($0, sql: "SELECT title FROM albums WHERE id = ?", arguments: [id]) } }
 
     @discardableResult
-    func importAudio(from source: URL, sourceType: String? = nil, sourceIdentifier: String? = nil) async throws -> ImportResult {
-        try await mutations.withLock { try await self.performImport(from: source, sourceType: sourceType, sourceIdentifier: sourceIdentifier) }
+    func importAudio(from source: URL, sourceType: String? = nil, sourceIdentifier: String? = nil, video: YouTubeVideo? = nil, artwork: Data? = nil) async throws -> ImportResult {
+        try await mutations.withLock { try await self.performImport(from: source, sourceType: sourceType, sourceIdentifier: sourceIdentifier, video: video, artwork: artwork) }
     }
 
     private func beginImport(_ operation: StoredImportOperation) throws { try database.dbQueue.write { try operation.insert($0) } }
     private func finishImportJournal(_ id: String, state: String) {
         try? database.dbQueue.write { try $0.execute(sql: "UPDATE import_operations SET state = ?, dateUpdated = ? WHERE id = ?", arguments: [state, Date(), id]) }
     }
-    private func performImport(from source: URL, sourceType: String?, sourceIdentifier: String?) async throws -> ImportResult {
+    private func performImport(from source: URL, sourceType: String?, sourceIdentifier: String?, video: YouTubeVideo?, artwork: Data?) async throws -> ImportResult {
         guard source.startAccessingSecurityScopedResource() || source.isFileURL else { throw StorageError.invalidPath }
         defer { source.stopAccessingSecurityScopedResource() }
         guard SupportedAudioFormat.isSupported(source) else { throw StorageError.unsupportedAudio }
@@ -60,6 +60,11 @@ final class StorageCoordinator: ObservableObject {
             try Task.checkCancellation()
             try audio.copyStreaming(from: source, to: staging)
             var metadata = try await audio.validate(staging)
+            if let video {
+                metadata.title = video.title
+                metadata.artist = metadata.artist ?? video.channel
+                metadata.artworkData = metadata.artworkData ?? artwork
+            }
             if metadata.title == id { metadata.title = source.deletingPathExtension().lastPathComponent }
             try Task.checkCancellation()
             let result = try commitImport(operation: operation, staging: staging, metadata: metadata, sourceType: sourceType, sourceIdentifier: sourceIdentifier)
@@ -136,7 +141,7 @@ final class StorageCoordinator: ObservableObject {
                 let albumID = try LibraryRepository.resolveAlbum(metadata.album ?? "", artistID: artistID, db: db)
                 let now = Date()
                 let validArtwork = try artworkName.flatMap { name -> String? in FileManager.default.fileExists(atPath: try paths.artworkURL(relativePath: name).path) ? name : nil }
-                var track = StoredTrack(id: operation.id, title: metadata.title, artistID: artistID, albumID: albumID, durationMs: metadata.durationMs, fileRelativePath: destination.lastPathComponent, fileExtension: ext, fileSizeBytes: (try FileManager.default.attributesOfItem(atPath: staging.path)[.size] as? NSNumber)?.int64Value ?? 0, contentSHA256: hash, artworkRelativePath: validArtwork, availability: .available, dateAdded: now, dateModified: now, originalFilename: operation.sourceFilename, metadataSource: "local_import")
+                var track = StoredTrack(id: operation.id, title: metadata.title, artistID: artistID, albumID: albumID, durationMs: metadata.durationMs, fileRelativePath: destination.lastPathComponent, fileExtension: ext, fileSizeBytes: (try FileManager.default.attributesOfItem(atPath: staging.path)[.size] as? NSNumber)?.int64Value ?? 0, contentSHA256: hash, artworkRelativePath: validArtwork, availability: .available, dateAdded: now, dateModified: now, originalFilename: operation.sourceFilename, metadataSource: type == "youtube" ? "youtube" : "local_import")
                 if let albumID { track.albumPosition = (try Int.fetchOne(db, sql: "SELECT MAX(albumPosition) FROM tracks WHERE albumID = ?", arguments: [albumID]) ?? -1) + 1 }
                 track.normalizedTitle = LibraryIdentity.search(track.title)
                 track.searchText = LibraryIdentity.search([track.title, metadata.artist ?? "", metadata.album ?? ""].joined(separator: " "))

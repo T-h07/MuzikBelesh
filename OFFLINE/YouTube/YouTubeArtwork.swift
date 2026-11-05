@@ -5,6 +5,10 @@ actor YouTubeArtworkLoader {
     private let transport: any YouTubeTransport
     private var cache: [URL: (UIImage, Date)] = [:]
     init(transport: any YouTubeTransport = YouTubeURLSessionTransport()) { self.transport = transport }
+    func downloadData(for url: URL?) async -> Data? {
+        guard let url, let image = try? await image(for: url) else { return nil }
+        return image.jpegData(compressionQuality: 0.85)
+    }
     func image(for url: URL) async throws -> UIImage? {
         guard YouTubeImageURL.valid(url) != nil else { return nil }
         cache = cache.filter { Date().timeIntervalSince($0.value.1) < 180 }

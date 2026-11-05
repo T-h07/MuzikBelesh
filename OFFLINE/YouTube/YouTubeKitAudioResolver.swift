@@ -19,7 +19,7 @@ enum AudioStreamSelector {
         switch quality {
         case .dataSaver: return low
         case .high: return high
-        case .standard: return ordered.last(where: { ($0.bitrate ?? 0) <= 128_000 }) ?? low
+        case .standard: return ordered.min { abs(($0.bitrate ?? 0) - 128_000) < abs(($1.bitrate ?? 0) - 128_000) } ?? low
         }
     }
 }

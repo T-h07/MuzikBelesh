@@ -58,9 +58,13 @@ private struct YouTubeVideoRow: View {
 
 struct VideoDetailView: View {
     @StateObject private var model: VideoDetailsViewModel
+    @EnvironmentObject private var coordinator: AppCoordinator
+    @EnvironmentObject private var library: MusicLibraryService
+    @ObservedObject private var downloads: DownloadManager
     @ObservedObject private var preferences: YouTubePreferences
     init(video: YouTubeVideo, container: AppContainer) {
         _model = StateObject(wrappedValue: VideoDetailsViewModel(video: video, metadata: container.youtubeMetadata, resolver: container.youtubeResolver, preparer: container.youtubePreparer, library: container.youtubeLibrary))
+        downloads = container.downloads
         preferences = container.youtubePreferences
     }
     var body: some View {
@@ -75,15 +79,21 @@ struct VideoDetailView: View {
                     ForEach(AudioQuality.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.tint(AppColors.accentPrimary).disabled(model.busy).accessibilityIdentifier("youtube-quality")
                 status
-                Button { model.prepare(quality: preferences.quality) } label: {
-                    Label(model.preparing ? "Preparing Audioâ€¦" : "Download Audio", systemImage: "arrow.down.circle.fill")
-                        .frame(maxWidth: .infinity).padding().background(AppColors.accentPrimary).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
-                }.disabled(model.busy || model.stream == nil).accessibilityIdentifier("youtube-prepare")
-                if model.preparedRequest != nil {
-                    Text("Audio prepared successfully. Saving the file becomes available in Phase 7. Nothing has been downloaded.")
-                        .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("youtube-prepared")
+                if case .downloaded(let id) = model.libraryStatus {
+                    Button("Play in Library") { Task { await library.play(id, ids: [id], kind: "library") } }
+                } else if let job = downloads.job(for: model.video.id), job.state != .completed || job.trackID != nil && library.track(job.trackID)?.availability == .available {
+                    Button("View in Downloads · " + job.state.label) {
+                        coordinator.sheet = nil
+                        coordinator.selectedTab = .downloads
+                    }.accessibilityIdentifier("youtube-view-job")
+                } else {
+                    Button { downloads.enqueue(model.video, quality: preferences.quality) } label: {
+                        Label("Download Audio", systemImage: "arrow.down.circle.fill")
+                            .frame(maxWidth: .infinity).padding().background(AppColors.accentPrimary).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+                    }.disabled(model.stream == nil).accessibilityIdentifier("youtube-prepare")
                 }
-                Text("Temporary audio links are resolved on this iPhone. Only prepare media you are authorized to save.").font(.caption).foregroundStyle(AppColors.textTertiary)
+                if let issue = downloads.issue { Text(issue).foregroundStyle(AppColors.error) }
+                Text("Save only media you are authorized to download.").font(.caption).foregroundStyle(AppColors.textTertiary)
             }.padding(AppSpacing.xl)
         }.navigationTitle("Video Details").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar).screenBackground()
         .onAppear { model.load(quality: preferences.quality) }

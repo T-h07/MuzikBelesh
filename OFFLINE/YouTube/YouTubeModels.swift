@@ -30,7 +30,7 @@ struct YouTubeSearchPage: Equatable, Sendable {
     let continuationToken: String?
 }
 
-enum AudioQuality: String, CaseIterable, Sendable { case dataSaver = "Data Saver", standard = "Standard", high = "High" }
+enum AudioQuality: String, CaseIterable, Sendable { case dataSaver = "Data Saver", standard = "Balanced", high = "Best Available" }
 
 struct AudioStreamOption: Equatable, Sendable, Identifiable {
     // Identity is scoped to one extraction; upstream 0.4.10 does not expose raw itags.

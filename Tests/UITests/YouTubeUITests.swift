@@ -36,8 +36,14 @@ final class YouTubeUITests: XCTestCase {
         let prepare = app.buttons["youtube-prepare"]
         if !prepare.isHittable { app.swipeUp() }
         prepare.tap()
-        XCTAssertTrue(app.staticTexts["youtube-prepared"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["youtube-prepared"].label.contains("Nothing has been downloaded"))
+        let viewJob = app.buttons["youtube-view-job"]
+        XCTAssertTrue(viewJob.waitForExistence(timeout: 5))
+        viewJob.tap()
+        let play = app.buttons["play-download"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        play.tap()
+        XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Search"].tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(first.waitForExistence(timeout: 3))
         XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)

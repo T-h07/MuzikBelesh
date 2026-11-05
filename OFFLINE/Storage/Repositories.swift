@@ -75,5 +75,11 @@ final class GRDBDownloadJobRepository: DownloadJobRepository {
     init(db: DatabaseQueue) { self.db = db }
     func all() throws -> [StoredDownloadJob] { try db.read { try StoredDownloadJob.order(Column("dateAdded").desc).fetchAll($0) } }
     func save(_ job: StoredDownloadJob) throws { try db.write { try job.save($0) } }
-    func markInterrupted() throws { try db.write { database in try database.execute(sql: "UPDATE download_jobs SET state = 'interrupted', dateModified = ? WHERE state IN ('queued', 'interrupted')", arguments: [Date()]) } }
+    func swapPositions(_ first: StoredDownloadJob, _ second: StoredDownloadJob) throws {
+        try db.write { db in
+            try db.execute(sql: "UPDATE download_jobs SET position = ? WHERE id = ?", arguments: [second.position, first.id])
+            try db.execute(sql: "UPDATE download_jobs SET position = ? WHERE id = ?", arguments: [first.position, second.id])
+        }
+    }
+    func markInterrupted() throws { try db.write { database in try database.execute(sql: "UPDATE download_jobs SET state = 'interrupted', dateModified = ? WHERE position IS NULL AND state IN ('queued', 'interrupted')", arguments: [Date()]) } }
 }
