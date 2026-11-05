@@ -79,7 +79,7 @@ struct VideoDetailView: View {
                     ForEach(AudioQuality.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.tint(AppColors.accentPrimary).disabled(model.busy).accessibilityIdentifier("youtube-quality")
                 status
-                if case .downloaded(let id) = model.libraryStatus {
+                if case .downloaded(let id) = model.libraryStatus, library.track(id)?.availability == .available {
                     Button("Play in Library") { Task { await library.play(id, ids: [id], kind: "library") } }
                 } else if let job = downloads.job(for: model.video.id), job.state != .completed || job.trackID != nil && library.track(job.trackID)?.availability == .available {
                     Button("View in Downloads · " + job.state.label) {
@@ -101,7 +101,11 @@ struct VideoDetailView: View {
         .onDisappear { model.cancel() }
     }
     private var libraryLabel: String {
-        switch model.libraryStatus {
+        if let job = downloads.job(for: model.video.id) {
+            if job.state != .completed { return job.state.label }
+            return library.track(job.trackID)?.availability == .available ? "Downloaded" : "File unavailable"
+        }
+        return switch model.libraryStatus {
         case .downloaded: "Downloaded"
         case .notDownloaded: "Not Downloaded"
         case .fileUnavailable: "Library record found · local file unavailable"

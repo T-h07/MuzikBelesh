@@ -46,6 +46,13 @@ extension StoredDownloadState {
             guard let storage, let staging else { throw DownloadFailure.disk }
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
             jobs = try storage.downloads.all().filter { $0.position != nil }.sorted { ($0.position ?? 0) < ($1.position ?? 0) }
+            let retained = Set(jobs.filter { $0.state != .completed && $0.state != .cancelled }.map(\.id))
+            for file in try FileManager.default.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil) {
+                let id = file.deletingPathExtension().lastPathComponent
+                if file.pathExtension == "m4a", UUID(uuidString: id) != nil, !retained.contains(id) {
+                    try FileManager.default.removeItem(at: file)
+                }
+            }
             for job in jobs where [.downloading, .verifying, .importing, .resolving].contains(job.state) {
                 update(job.id) { $0.state = .queued }
             }
@@ -169,7 +176,7 @@ extension StoredDownloadState {
             complete(job.id, trackID: id, file: file)
         } catch {
             if Task.isCancelled {
-                try? FileManager.default.removeItem(at: file)
+                if jobs.first(where: { $0.id == job.id })?.state == .cancelled { try? FileManager.default.removeItem(at: file) }
                 return
             }
             update(job.id) {

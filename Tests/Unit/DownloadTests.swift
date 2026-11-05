@@ -122,6 +122,15 @@ import XCTest
         XCTAssertEqual(track.title, "YouTube Fixture Song")
         try await DownloadMedia.validate(reopened.paths.musicURL(relativePath: track.fileRelativePath))
         XCTAssertEqual(try reopened.downloads.all().first?.state, .completed)
+        var unfinished = job
+        unfinished.state = .importing
+        unfinished.trackID = nil
+        try reopened.downloads.save(unfinished)
+        let recovered = DownloadManager(storage: reopened, preferences: prefs, preparer: YouTubeDownloadPreparer(resolver: YouTubeUITestFixtures()), transfer: InvalidTransfer(reject: true), artwork: YouTubeArtworkLoader(), observeNetwork: false)
+        recovered.setPath(connected: true, wifi: true)
+        try await until { recovered.jobs.first?.state == .completed }
+        XCTAssertEqual(recovered.jobs.first?.trackID, track.id)
+        XCTAssertEqual(try reopened.tracks.all().count, 1)
     }
 }
 

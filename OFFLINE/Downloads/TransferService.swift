@@ -22,6 +22,13 @@ enum DownloadMedia {
     }
 
     static func validate(_ file: URL) async throws {
+        let info = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard info.isRegularFile == true, info.isSymbolicLink != true, let size = info.fileSize,
+              size > 0, size <= limit else { throw DownloadFailure.invalid }
+        let reader = try FileHandle(forReadingFrom: file)
+        defer { try? reader.close() }
+        let header = try reader.read(upToCount: 12)
+        guard header?.dropFirst(4).prefix(4).elementsEqual("ftyp".utf8) == true else { throw DownloadFailure.invalid }
         let asset = AVURLAsset(url: file)
         let video = try await asset.loadTracks(withMediaType: .video)
         guard video.isEmpty, try await asset.load(.isPlayable),
@@ -31,6 +38,10 @@ enum DownloadMedia {
             [kAudioFormatMPEG4AAC, kAudioFormatMPEG4AAC_HE, kAudioFormatMPEG4AAC_HE_V2,
              kAudioFormatAC3, kAudioFormatEnhancedAC3].contains(CMFormatDescriptionGetMediaSubType($0))
         }) else { throw DownloadFailure.invalid }
+        let decoder = try AVAudioFile(forReading: file)
+        guard decoder.length > 0, let buffer = AVAudioPCMBuffer(pcmFormat: decoder.processingFormat, frameCapacity: 1024) else { throw DownloadFailure.invalid }
+        try decoder.read(into: buffer)
+        guard buffer.frameLength > 0 else { throw DownloadFailure.invalid }
     }
 }
 
@@ -114,6 +125,11 @@ private final class MediaDownloadDelegate: NSObject, URLSessionDownloadDelegate,
         let completion = continuation
         continuation = nil
         lock.unlock()
-        completion?.resume(with: result ?? .failure(DownloadFailure.connection))
+        if error != nil, case .success = result {
+            try? FileManager.default.removeItem(at: destination)
+            completion?.resume(throwing: DownloadFailure.connection)
+        } else {
+            completion?.resume(with: result ?? .failure(DownloadFailure.connection))
+        }
     }
 }

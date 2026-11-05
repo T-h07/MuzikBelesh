@@ -17,8 +17,14 @@ import Foundation
                     let fixtures = YouTubeUITestFixtures()
                     guard let defaults = UserDefaults(suiteName: "YouTubeUITests-\(identifier)") else { fatalError("Isolated preferences unavailable") }
                     if process.arguments.contains("--reset-ui-library") { defaults.removePersistentDomain(forName: "YouTubeUITests-\(identifier)") }
-                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults)
-                    container.downloads.setPath(connected: true, wifi: true)
+                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults)
+                    container.downloads.setPath(connected: true, wifi: !process.arguments.contains("--download-cellular"))
+                    if process.arguments.contains("--download-queue-fixtures") {
+                        for index in 1...3 {
+                            let video = YouTubeVideo(id: String(format: "fixture%04d", index), title: "Queued fixture \(index)")
+                            container.downloads.enqueue(video, quality: .standard)
+                        }
+                    }
                     return container
                 }
                 return AppContainer(storage: storage)

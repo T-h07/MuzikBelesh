@@ -13,9 +13,10 @@ private struct YouTubeQualitySetting: View {
     @ObservedObject var preferences: YouTubePreferences
     var body: some View {
         Toggle("Wi-Fi only for audio downloads", isOn: $preferences.wifiOnly).accessibilityIdentifier("downloads-wifi")
+        Text("Simultaneous downloads")
         Picker("Simultaneous downloads", selection: $preferences.simultaneous) {
             ForEach(1...3, id: \.self) { Text(String($0)).tag($0) }
-        }.accessibilityIdentifier("downloads-limit")
+        }.pickerStyle(.segmented).accessibilityIdentifier("downloads-limit")
         Text("Quality choices may use the same stream when only one compatible format is available.").font(.caption)
         Picker("YouTube Audio Quality", selection: $preferences.quality) {
             ForEach(AudioQuality.allCases, id: \.self) { Text($0.rawValue).tag($0) }

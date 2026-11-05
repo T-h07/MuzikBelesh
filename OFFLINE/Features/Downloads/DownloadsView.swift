@@ -25,6 +25,7 @@ struct DownloadsView: View {
                         if job.state == .downloading {
                             if let expected = job.expected {
                                 ProgressView(value: job.progress)
+                                Text(job.progress.formatted(.percent.precision(.fractionLength(0))))
                                 Text(bytes(job.received ?? 0) + " / " + bytes(expected))
                             } else { ProgressView(); Text(bytes(job.received ?? 0)) }
                             if let rate = manager.rates[job.id], Date().timeIntervalSince(job.dateModified) < 5 { Text(bytes(Int64(rate)) + "/s") }
@@ -38,7 +39,7 @@ struct DownloadsView: View {
                                 Button(job.state == .paused ? "Resume" : "Retry") { manager.retry(job.id) }
                             }
                             if job.state.pending {
-                                Button { manager.move(job, by: -1) } label: { Image(systemName: "arrow.up") }.accessibilityLabel("Move earlier")
+                                Button { manager.move(job, by: -1) } label: { Image(systemName: "arrow.up") }.accessibilityLabel("Move earlier").accessibilityIdentifier("earlier-" + (job.sourceIdentifier ?? job.id))
                                 Button { manager.move(job, by: 1) } label: { Image(systemName: "arrow.down") }.accessibilityLabel("Move later")
                             }
                             if job.state == .completed, let id = job.trackID, library.track(id)?.availability == .available {

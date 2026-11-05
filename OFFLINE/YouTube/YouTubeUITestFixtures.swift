@@ -28,9 +28,15 @@ struct YouTubeUITestFixtures: YouTubeSearchProvider, YouTubeMetadataProvider, Yo
     }
 }
 
-struct FixtureAudioTransfer: AudioTransferring {
+actor FixtureAudioTransfer: AudioTransferring {
+    private var failOnce: Bool
+    init(failOnce: Bool = false) { self.failOnce = failOnce }
     func download(_ url: URL, to destination: URL, wifiOnly: Bool,
                   progress: @escaping @Sendable (Int64, Int64) -> Void) async throws {
+        if failOnce {
+            failOnce = false
+            throw DownloadFailure.invalid
+        }
         let temp = destination.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".m4a")
         defer { try? FileManager.default.removeItem(at: temp) }
         do {
