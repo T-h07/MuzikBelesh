@@ -5,6 +5,7 @@ import Foundation
 final class AudioPlayerService: ObservableObject {
     @Published private(set) var state = AudioPlaybackState()
 
+    private var libraryTimeline: Double?
     private let player: PlaybackPlayer
     private let nativePlayer: AVPlayer?
     private let commandGate = PlaybackCommandGate()
@@ -132,7 +133,7 @@ final class AudioPlayerService: ObservableObject {
             updateContext(with: trackID)
             queue.setCurrent(trackID)
             replaceItem(with: AVPlayerItem(asset: asset), trackID: trackID, track: resolved.track)
-            state.duration = duration.seconds
+            state.duration = libraryTimeline ?? duration.seconds
             wantsPlayback = autoplay
             if autoplay { player.play(); synchronizeTransport() }
             else { player.pause(); state.status = .paused }
@@ -307,9 +308,13 @@ final class AudioPlayerService: ObservableObject {
     }
 
     private func replaceItem(with newItem: AVPlayerItem, trackID: String, track: StoredTrack) {
+        // Editors can change metadataSource. The download job and staging filename survive edits.
+        let importedDownload = track.metadataSource == "youtube" || (track.metadataSource == "local_edit" &&
+            ((try? storage?.downloads.ownsFile(of: track)) == true))
+        libraryTimeline = importedDownload ? track.durationMs.flatMap { $0 > 0 ? Double($0) / 1000 : nil } : nil
         transportVerification?.cancel(); transportVerification = nil
         removeItemObservers(); itemGeneration += 1; completedGeneration = nil; let generation = itemGeneration; item = newItem; state.currentTrackID = trackID; state.status = .loading; state.elapsedTime = 0; state.duration = TimeInterval(track.durationMs ?? 0) / 1000
-        statusObserver = newItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in Task { @MainActor in guard let self, self.item === item else { return }; if item.status == .failed { self.fail("Audio could not be loaded. Try Play again.") } else if item.status == .readyToPlay { let duration = item.duration.seconds; if duration.isFinite && duration > 0 { self.state.duration = duration }; self.synchronizeTransport(); self.publish(track: track) } } }
+        statusObserver = newItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in Task { @MainActor in guard let self, self.item === item else { return }; if item.status == .failed { self.fail("Audio could not be loaded. Try Play again.") } else if item.status == .readyToPlay { let duration = item.duration.seconds; if duration.isFinite && duration > 0 { self.state.duration = self.libraryTimeline ?? duration }; self.synchronizeTransport(); self.publish(track: track) } } }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: newItem, queue: .main) { [weak self, weak newItem] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }

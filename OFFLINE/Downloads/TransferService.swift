@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import AVFoundation
 
 enum DownloadFailure: String, Error {
@@ -74,6 +75,9 @@ struct TransferService: AudioTransferring {
 private final class MediaDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let destination: URL
     let progress: @Sendable (Int64, Int64) -> Void
+    private var publication = ProgressCadence(seconds: 0.5)
+    private var callbacks = 0
+    private var callbackTime: TimeInterval = 0
     private let lock = NSLock()
     private var cancelled = false
     private var continuation: CheckedContinuation<Void, Error>?
@@ -102,10 +106,13 @@ private final class MediaDownloadDelegate: NSObject, URLSessionDownloadDelegate,
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        let start = ProcessInfo.processInfo.systemUptime
+        callbacks += 1
+        defer { callbackTime += ProcessInfo.processInfo.systemUptime - start }
         if max(totalBytesWritten, totalBytesExpectedToWrite) > DownloadMedia.limit {
             result = .failure(DownloadFailure.size)
             downloadTask.cancel()
-        } else { progress(totalBytesWritten, totalBytesExpectedToWrite) }
+        } else if publication.due(at: start) { progress(totalBytesWritten, totalBytesExpectedToWrite) }
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard result == nil else { return }
@@ -119,6 +126,13 @@ private final class MediaDownloadDelegate: NSObject, URLSessionDownloadDelegate,
             try FileManager.default.moveItem(at: location, to: destination)
             result = .success(())
         } catch { result = .failure(error as? DownloadFailure ?? .disk) }
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        guard let final = metrics.transactionMetrics.last, let start = final.responseStartDate, let end = final.responseEndDate else { return }
+        let seconds = end.timeIntervalSince(start)
+        let bytes = final.countOfResponseBodyBytesReceived
+        let throughput = seconds > 0 ? Double(bytes) / seconds : 0
+        Logger(subsystem: "com.th07.muzikbelesh", category: "Transfer").info("bodyBytes=\(bytes) bodySeconds=\(seconds) bodyBytesPerSecond=\(throughput) taskSeconds=\(metrics.taskInterval.duration) callbacks=\(self.callbacks) callbackSeconds=\(self.callbackTime)")
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         lock.lock()

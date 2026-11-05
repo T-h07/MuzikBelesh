@@ -1,4 +1,5 @@
 import Combine
+import OSLog
 import Foundation
 import Network
 
@@ -29,7 +30,8 @@ extension StoredDownloadState {
     private var connected = false
     private var wifi = false
     private var workers: [String: Task<Void, Never>] = [:]
-    private var samples: [String: (Date, Int64)] = [:]
+    private var checkpoints: [String: ProgressCadence] = [:]
+    private var samples: [String: TransferRate] = [:]
     private var attempts: [String: UUID] = [:]
     private var foreground = true
     private var storageFailed = false
@@ -129,7 +131,7 @@ extension StoredDownloadState {
         }
     }
     private func run(_ job: StoredDownloadJob) async {
-        defer { workers[job.id] = nil; rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; schedule() }
+        defer { workers[job.id] = nil; rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; schedule() }
         guard let storage, let staging, let videoID = job.sourceIdentifier, UUID(uuidString: job.id) != nil else { return }
         let file = staging.appendingPathComponent(job.id + ".m4a")
         do {
@@ -153,7 +155,8 @@ extension StoredDownloadState {
                     attempts[job.id] = generation
                     do {
                         try await transfer.download(request.stream.url, to: file, wifiOnly: preferences.wifiOnly) { bytes, total in
-                            Task { @MainActor in self.progress(sampleID, attempt: generation, bytes: bytes, total: total) }
+                            let sampledAt = ProcessInfo.processInfo.systemUptime
+                            Task { @MainActor in self.progress(sampleID, attempt: generation, bytes: bytes, total: total, now: sampledAt) }
                         }
                         break
                     } catch DownloadFailure.rejected where attempt == 0 {
@@ -164,7 +167,12 @@ extension StoredDownloadState {
                 }
             }
             try Task.checkCancellation()
-            guard update(job.id, { $0.state = .verifying }) else { return }
+            let finalBytes = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            guard update(job.id, {
+                $0.state = .verifying
+                $0.received = finalBytes.map(Int64.init)
+                if $0.expected != nil { $0.progress = 1 }
+            }) else { return }
             do { try await DownloadMedia.validate(file) } catch {
                 try? FileManager.default.removeItem(at: file)
                 throw DownloadFailure.invalid
@@ -188,17 +196,23 @@ extension StoredDownloadState {
     private func complete(_ id: String, trackID: String, file: URL) {
         if update(id, { $0.trackID = trackID; $0.finishedAt = Date(); $0.state = .completed; $0.progress = 1 }) { try? FileManager.default.removeItem(at: file) }
     }
-    private func progress(_ id: String, attempt: UUID, bytes: Int64, total: Int64) {
+    private func progress(_ id: String, attempt: UUID, bytes: Int64, total: Int64, now: TimeInterval) {
         guard attempts[id] == attempt, jobs.first(where: { $0.id == id })?.state == .downloading else { return }
-        let now = Date()
-        if let (time, previous) = samples[id] {
-            let elapsed = now.timeIntervalSince(time)
-            guard elapsed >= 1, bytes >= previous else { return }
-            let rate = Double(bytes - previous) / elapsed
-            rates[id] = (rates[id] ?? rate) * 0.6 + rate * 0.4
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        guard samples[id, default: TransferRate()].record(bytes: bytes, at: now) else { return }
+        rates[id] = samples[id]?.bytesPerSecond
+        var job = jobs[index]
+        job.received = bytes
+        job.expected = total > 0 ? total : nil
+        job.progress = total > 0 ? min(1, Double(bytes) / Double(total)) : 0
+        job.dateModified = Date()
+        if checkpoints[id, default: ProgressCadence(seconds: 8)].due(at: now) {
+            let start = ProcessInfo.processInfo.systemUptime
+            do { try storage?.downloads.save(job) } catch { failStorage(); return }
+            let ms = (ProcessInfo.processInfo.systemUptime - start) * 1000
+            Logger(subsystem: "com.th07.muzikbelesh", category: "Transfer").debug("progressCheckpointMs=\(ms)")
         }
-        samples[id] = (now, bytes)
-        update(id) { $0.received = bytes; $0.expected = total > 0 ? total : nil; $0.progress = total > 0 ? min(1, Double(bytes) / Double(total)) : 0 }
+        jobs[index] = job
     }
     private func stop(_ id: String, as state: StoredDownloadState) {
         guard update(id, { $0.state = state }) else { return }

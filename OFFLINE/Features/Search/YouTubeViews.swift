@@ -70,23 +70,30 @@ struct VideoDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                YouTubeArtwork(url: model.video.thumbnailURL).aspectRatio(16 / 9, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
-                Text(model.video.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("youtube-detail-title")
-                Text(model.video.channel ?? "Channel unavailable").foregroundStyle(AppColors.textSecondary)
-                Text(model.video.durationLabel).foregroundStyle(AppColors.textSecondary)
+                if let localTrack {
+                    StoredArtworkView(track: localTrack, size: 160)
+                } else if model.libraryStatus != .unknown {
+                    YouTubeArtwork(url: model.video.thumbnailURL).aspectRatio(16 / 9, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+                }
+                Text(localTrack?.title ?? model.video.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("youtube-detail-title")
+                Text(localTrack.map { library.artistName($0.artistID) } ?? model.video.channel ?? "Channel unavailable").foregroundStyle(AppColors.textSecondary)
+                Text(localTrack?.durationMs.map { String(format: "%d:%02d", $0 / 60000, ($0 / 1000) % 60) } ?? model.video.durationLabel).foregroundStyle(AppColors.textSecondary)
                 Text(libraryLabel).font(.subheadline).accessibilityIdentifier("youtube-library-status")
+                if localTrack == nil {
                 Picker("Audio Quality", selection: $preferences.quality) {
                     ForEach(AudioQuality.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.tint(AppColors.accentPrimary).disabled(model.busy).accessibilityIdentifier("youtube-quality")
                 status
+                }
                 if case .downloaded(let id) = model.libraryStatus, library.track(id)?.availability == .available {
                     Button("Play in Library") { Task { await library.play(id, ids: [id], kind: "library") } }
-                } else if let job = downloads.job(for: model.video.id), job.state != .completed || job.trackID != nil && library.track(job.trackID)?.availability == .available {
+                }
+                if let job = downloads.job(for: model.video.id), job.state != .completed || model.libraryStatus != .fileUnavailable && job.trackID != nil && library.track(job.trackID)?.availability == .available {
                     Button("View in Downloads · " + job.state.label) {
                         coordinator.sheet = nil
                         coordinator.selectedTab = .downloads
                     }.accessibilityIdentifier("youtube-view-job")
-                } else {
+                } else if localTrack == nil {
                     Button { downloads.enqueue(model.video, quality: preferences.quality) } label: {
                         Label("Download Audio", systemImage: "arrow.down.circle.fill")
                             .frame(maxWidth: .infinity).padding().background(AppColors.accentPrimary).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
@@ -98,9 +105,17 @@ struct VideoDetailView: View {
         }.navigationTitle("Video Details").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar).screenBackground()
         .onAppear { model.load(quality: preferences.quality) }
         .onChange(of: preferences.quality) { _, quality in model.load(quality: quality) }
+        .onChange(of: downloads.job(for: model.video.id)?.state) { _, state in
+            if state == .completed { model.load(quality: preferences.quality) }
+        }
         .onDisappear { model.cancel() }
     }
+    private var localTrack: StoredTrack? {
+        guard case .downloaded(let id) = model.libraryStatus else { return nil }
+        return library.track(id)
+    }
     private var libraryLabel: String {
+        if model.libraryStatus == .fileUnavailable { return "Local file missing or damaged" }
         if let job = downloads.job(for: model.video.id) {
             if job.state != .completed { return job.state.label }
             return library.track(job.trackID)?.availability == .available ? "Downloaded" : "File unavailable"
@@ -114,6 +129,7 @@ struct VideoDetailView: View {
     }
     @ViewBuilder private var status: some View {
         switch model.state {
+        case .local: EmptyView()
         case .idle: Text("Ready to inspect video")
         case .loadingMetadata: ProgressView("Loading metadata…")
         case .resolvingStreams: ProgressView("Resolving compatible audio…")

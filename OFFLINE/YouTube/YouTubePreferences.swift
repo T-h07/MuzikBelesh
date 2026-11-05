@@ -33,6 +33,7 @@ struct YouTubeLibraryLookup: YouTubeLibraryChecking, @unchecked Sendable {
         let track = try await database.read { db in try LibraryRepository.sourceTrack(type: "youtube", identifier: videoID, db: db) }
         guard let track else { return .notDownloaded }
         guard track.availability == .available, let url = try? paths.musicURL(relativePath: track.fileRelativePath), FileManager.default.fileExists(atPath: url.path) else { return .fileUnavailable }
+        guard (try? AudioFileService().sha256(url: url)) == track.contentSHA256 else { return .fileUnavailable }
         return .downloaded(trackID: track.id)
     }
 }

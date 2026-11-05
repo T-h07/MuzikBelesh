@@ -34,6 +34,9 @@ final class AppContainer: ObservableObject {
         self.youtubeProbe = youtubeProbe ?? YouTubeKitProbe(resolver: resolver)
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
+        if let storage = self.storage {
+            Task(priority: .utility) { try? await storage.repairYouTubeDurations() }
+        }
     }
 }
 

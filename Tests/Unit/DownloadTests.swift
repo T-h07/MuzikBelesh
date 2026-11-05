@@ -1,8 +1,60 @@
+import AVFoundation
 import GRDB
 import XCTest
 @testable import OFFLINE
 
 @MainActor final class DownloadTests: XCTestCase {
+    func testDurationCorrectionRequiresAgreementWithDecodedTimeline() {
+        let doubles = YouTubeAudioTimeline(asset: 339, track: 169.7, fileFrames: 169.71, decoded: 169.70, presentationEnd: 169.71)
+        XCTAssertEqual(doubles.correction(for: 339), 169.71)
+        XCTAssertNil(doubles.correction(for: 169.7))
+        XCTAssertNil(doubles.correction(for: 240))
+        let gap = YouTubeAudioTimeline(asset: 339, track: 339, fileFrames: 169.71, decoded: 169.70, presentationEnd: 339)
+        XCTAssertNil(gap.correction(for: 339))
+    }
+
+    func testAACWithInflatedMovieHeaderKeepsItsAudioTimeline() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("fixture.m4a")
+        try await FixtureAudioTransfer().download(file, to: file, wifiOnly: true) { _, _ in }
+        var bytes = try Data(contentsOf: file)
+        let header = try XCTUnwrap(bytes.range(of: Data("mvhd".utf8)))
+        let version = bytes[header.upperBound]
+        let index = header.upperBound + (version == 1 ? 24 : 16)
+        let width = version == 1 ? 8 : 4
+        let field = index..<(index + width)
+        var duration = bytes[field].reduce(UInt64(0)) { ($0 << 8) | UInt64($1) } * 2
+        for i in field.reversed() { bytes[i] = UInt8(truncatingIfNeeded: duration); duration >>= 8 }
+        try bytes.write(to: file)
+        let sample = try await YouTubeAudioTimeline.inspect(file, source: 15)
+        XCTAssertEqual(sample.decoded, 15, accuracy: 0.2)
+        let reported = try await AVURLAsset(url: file).load(.duration).seconds
+        XCTAssertEqual(sample.correction(for: reported) ?? reported, 15, accuracy: 0.2)
+        print("Altered movie header: asset=\(reported), track=\(sample.track), fileFramesSeconds=\(sample.fileFrames), decoded=\(sample.decoded), end=\(sample.presentationEnd)")
+    }
+    func testHighFrequencyCallbacksHaveIndependentDisplayAndCheckpointCadences() {
+        var ui = ProgressCadence(seconds: 0.5)
+        var disk = ProgressCadence(seconds: 8)
+        var published = 0, saved = 0
+        for i in 0..<60_000 {
+            let time = Double(i) / 1000
+            if ui.due(at: time) {
+                published += 1
+                if disk.due(at: time) { saved += 1 }
+            }
+        }
+        XCTAssertEqual(published, 120)
+        XCTAssertEqual(saved, 8)
+        var speed = TransferRate()
+        XCTAssertTrue(speed.record(bytes: 0, at: 0))
+        XCTAssertTrue(speed.record(bytes: 32_000, at: 1))
+        XCTAssertEqual(speed.bytesPerSecond, 32_000)
+        XCTAssertFalse(speed.record(bytes: 1, at: 2))
+        XCTAssertTrue(speed.record(bytes: 96_000, at: 3))
+        XCTAssertEqual(speed.bytesPerSecond, 32_000)
+    }
     func testQueuePolicyOrderAndRecovery() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -122,6 +174,36 @@ import XCTest
         XCTAssertEqual(track.title, "YouTube Fixture Song")
         try await DownloadMedia.validate(reopened.paths.musicURL(relativePath: track.fileRelativePath))
         XCTAssertEqual(try reopened.downloads.all().first?.state, .completed)
+        let actual = try XCTUnwrap(track.durationMs)
+        XCTAssertEqual(Double(actual) / 1000, 15, accuracy: 0.2)
+        let url = try reopened.paths.musicURL(relativePath: track.fileRelativePath)
+        XCTAssertEqual(job.received, track.fileSizeBytes)
+        let lookup = YouTubeLibraryLookup(database: reopened.database.dbQueue, paths: reopened.paths)
+        let metadata = YTMetadataStub(), resolver = YTResolverStub(error: .networkUnavailable)
+        let model = VideoDetailsViewModel(video: YouTubeUITestFixtures.video, metadata: metadata, resolver: resolver, preparer: YouTubeDownloadPreparer(resolver: resolver), library: lookup)
+        model.load(quality: .standard)
+        await model.waitForRequest()
+        XCTAssertEqual(model.state, .local)
+        let resolverCalls = await resolver.calls, metadataCalls = await metadata.calls
+        XCTAssertEqual(resolverCalls, 0)
+        XCTAssertEqual(metadataCalls, 0)
+        var doubled = track
+        doubled.durationMs = actual * 2
+        doubled.title = "An edited title"
+        doubled.metadataSource = "local_edit"
+        try reopened.tracks.save(doubled)
+        try await reopened.repairYouTubeDurations()
+        try await reopened.repairYouTubeDurations()
+        let repaired = try XCTUnwrap(reopened.tracks.find(id: track.id))
+        XCTAssertEqual(Double(try XCTUnwrap(repaired.durationMs)) / 1000, 15, accuracy: 0.2)
+        doubled.durationMs = repaired.durationMs
+        XCTAssertEqual(repaired, doubled)
+        XCTAssertEqual(try reopened.audio.sha256(url: url), track.contentSHA256)
+        let player = AudioPlayerService(storage: reopened)
+        try await player.play(trackID: track.id)
+        XCTAssertEqual(player.state.duration, Double(repaired.durationMs!) / 1000, accuracy: 0.001)
+        print("Fixture playback UI seconds=\(player.state.duration) asset seconds=\(try await AVURLAsset(url: url).load(.duration).seconds) stored ms=\(repaired.durationMs!)")
+        player.stop()
         var unfinished = job
         unfinished.state = .importing
         unfinished.trackID = nil

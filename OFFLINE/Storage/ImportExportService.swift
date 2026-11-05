@@ -61,6 +61,10 @@ final class StorageCoordinator: ObservableObject {
             try audio.copyStreaming(from: source, to: staging)
             var metadata = try await audio.validate(staging)
             if let video {
+                if let ms = metadata.durationMs, let timeline = try? await YouTubeAudioTimeline.inspect(staging, source: video.duration),
+                   let corrected = timeline.correction(for: Double(ms) / 1000) {
+                    metadata.durationMs = Int64((corrected * 1000).rounded())
+                }
                 metadata.title = video.title
                 metadata.artist = metadata.artist ?? video.channel
                 metadata.artworkData = metadata.artworkData ?? artwork
