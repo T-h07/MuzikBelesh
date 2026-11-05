@@ -34,6 +34,28 @@ import XCTest
         XCTAssertEqual(sample.correction(for: reported) ?? reported, 15, accuracy: 0.2)
         print("Altered movie header: asset=\(reported), track=\(sample.track), fileFramesSeconds=\(sample.fileFrames), decoded=\(sample.decoded), end=\(sample.presentationEnd)")
     }
+    func testFragmentedAACIndexAndPlayerEndpoint() async throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fragmented-tone", withExtension: "m4a"))
+        let timeline = try await YouTubeAudioTimeline.inspect(url)
+        let indexed = try XCTUnwrap(timeline.indexedSeconds)
+        XCTAssertEqual(indexed, 115712.0 / 44100, accuracy: 0.001)
+        let reported = try await AVURLAsset(url: url).load(.duration).seconds
+        XCTAssertEqual(timeline.correction(for: reported) ?? reported, indexed, accuracy: 0.04)
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        defer { player.pause() }
+        for _ in 0..<200 where item.status == .unknown { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(item.status, .readyToPlay)
+        let itemSeconds = item.duration.seconds
+        item.forwardPlaybackEndTime = CMTime(seconds: indexed, preferredTimescale: 44100)
+        let ended = expectation(forNotification: .AVPlayerItemDidPlayToEndTime, object: item)
+        player.play()
+        await fulfillment(of: [ended], timeout: 10)
+        let eof = player.currentTime().seconds
+        XCTAssertEqual(eof, indexed, accuracy: 0.15)
+        print("Fragmented AAC: source=\(indexed), AVURLAsset=\(reported), track=\(timeline.track), fileFramesSeconds=\(timeline.fileFrames), AVPlayerItem=\(itemSeconds), native EOF=\(eof)")
+    }
+
     func testHighFrequencyCallbacksHaveIndependentDisplayAndCheckpointCadences() {
         var ui = ProgressCadence(seconds: 0.5)
         var disk = ProgressCadence(seconds: 8)
@@ -192,6 +214,7 @@ import XCTest
         doubled.title = "An edited title"
         doubled.metadataSource = "local_edit"
         try reopened.tracks.save(doubled)
+        doubled = try XCTUnwrap(reopened.tracks.find(id: track.id))
         try await reopened.repairYouTubeDurations()
         try await reopened.repairYouTubeDurations()
         let repaired = try XCTUnwrap(reopened.tracks.find(id: track.id))

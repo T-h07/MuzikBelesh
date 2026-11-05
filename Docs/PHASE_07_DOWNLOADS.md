@@ -27,3 +27,11 @@ Best Available prefers compatible M4A/AAC and then highest known bitrate. Balanc
 ## Verification
 
 DownloadTests exercise real SQLite, preference migration, queue controls, media URL policy and fixture import. Release builds contain only production transport. UI-test fixtures generate AAC audio in isolated storage. The separate opt-in open-movie check resolves and transfers media and reads PCM from the local file. Check the PR for run outcomes. Device acceptance is tracked in PHASE_07_DEVICE_TESTING.md.
+
+### Investigation of the two build 175 files
+
+Read-only inspection and full AAC decoding on Windows found two zero-based fragmented MP4 timelines. The 3,070,951-byte file contains 8,170 AAC packets at 44,100 Hz across 19 fragments (189.707029 seconds). The 2,747,397-byte file contains 7,309 across 17 fragments (169.714649 seconds). The movie and media headers, segment indexes, packet counts and decoded presentation endpoints agree. Neither hardware file was uploaded to CI. The native test uses a generated tone with populated duration headers, an empty initial sample table and indexed movie fragments. It reports AVFoundation clocks and tests the actual end notification.
+
+The upgrade audit checks download ownership, YouTube provenance and the file digest before correcting an approximately doubled stored duration. Local-file imports are excluded. It updates only durationMs and records the inspected digest separately to avoid repeated scans. The player uses the validated local endpoint for display, seeking, restoration and AVPlayerItem.forwardPlaybackEndTime. There is no file rewrite.
+
+Build 175 already limited progress saves to about once per second per transfer, but dispatched every delegate callback to the main actor. The hotfix coalesces callbacks before the actor hop, samples speed on a monotonic clock, checkpoints at eight-second intervals and obtains the final byte count from the staged file. Task metrics log response-body bytes, elapsed seconds and callback and checkpoint costs without media URLs. A controlled 60-second cadence test simulates 60,000 callbacks. Device delivery speed must be measured on the same network and server to establish any throughput improvement.
