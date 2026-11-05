@@ -40,3 +40,7 @@ library's existing track_sources provenance supports downloaded detection withou
 migration. No YouTube service creates a player or mutates playback/storage.
 See [PHASE_06_YOUTUBE.md](PHASE_06_YOUTUBE.md) for provider limitations, concurrency,
 cache/URL rules, local-only configuration and the transient Phase 7 contract.
+
+## Phase 7 downloads
+
+AppContainer shares one DownloadManager across Video Details and Downloads. It coordinates the GRDB repository, local resolver, URLSession download delegate and existing managed library import. See PHASE_07_DOWNLOADS.md.

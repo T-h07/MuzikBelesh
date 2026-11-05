@@ -30,6 +30,8 @@ extension StoredDownloadState {
     private var wifi = false
     private var workers: [String: Task<Void, Never>] = [:]
     private var samples: [String: (Date, Int64)] = [:]
+    private var attempts: [String: UUID] = [:]
+    private var foreground = true
     private var storageFailed = false
     private var staging: URL? { storage?.paths.applicationSupport.appendingPathComponent("DownloadStaging", isDirectory: true) }
 
@@ -62,10 +64,21 @@ extension StoredDownloadState {
     }
     deinit { monitor.cancel() }
     func setPath(connected: Bool, wifi: Bool) {
+        let regainedConnection = connected && (!self.connected || (wifi && !self.wifi))
         self.connected = connected
         self.wifi = wifi
         if !connected || (preferences.wifiOnly && !wifi) { policyChanged(strict: true) }
+        if regainedConnection {
+            for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
+        }
         schedule()
+    }
+    func setForeground(_ active: Bool) {
+        foreground = active
+        if active {
+            for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
+            schedule()
+        } else { policyChanged(strict: true) }
     }
     private func policyChanged(strict: Bool) {
         guard strict else { return }
@@ -97,18 +110,19 @@ extension StoredDownloadState {
         do { try storage.downloads.save(job); jobs.append(job); schedule() } catch { failStorage() }
     }
     private func schedule() {
-        guard !storageFailed else { return }
+        guard !storageFailed, foreground else { return }
         let waiting = preferences.wifiOnly && !wifi
         for job in jobs where job.state.pending {
-            let desired: StoredDownloadState = waiting ? .waitingForWiFi : .queued
+            let staged = UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
+            let desired: StoredDownloadState = waiting && !staged ? .waitingForWiFi : .queued
             if job.state != desired { update(job.id) { $0.state = desired } }
-            guard !waiting, connected, workers.count < preferences.simultaneous, workers[job.id] == nil else { continue }
+            guard staged || (!waiting && connected), workers.count < preferences.simultaneous, workers[job.id] == nil else { continue }
             guard update(job.id, { $0.state = .resolving; $0.startedAt = Date(); $0.received = 0; $0.expected = nil; $0.progress = 0 }) else { return }
             workers[job.id] = Task { await run(job) }
         }
     }
     private func run(_ job: StoredDownloadJob) async {
-        defer { workers[job.id] = nil; rates[job.id] = nil; samples[job.id] = nil; schedule() }
+        defer { workers[job.id] = nil; rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; schedule() }
         guard let storage, let staging, let videoID = job.sourceIdentifier, UUID(uuidString: job.id) != nil else { return }
         let file = staging.appendingPathComponent(job.id + ".m4a")
         do {
@@ -128,9 +142,11 @@ extension StoredDownloadState {
                     video = request.metadata
                     guard update(job.id, { $0.state = .downloading; $0.received = 0; $0.expected = nil; $0.progress = 0 }) else { return }
                     let sampleID = job.id
+                    let generation = UUID()
+                    attempts[job.id] = generation
                     do {
                         try await transfer.download(request.stream.url, to: file, wifiOnly: preferences.wifiOnly) { bytes, total in
-                            Task { @MainActor in self.progress(sampleID, bytes: bytes, total: total) }
+                            Task { @MainActor in self.progress(sampleID, attempt: generation, bytes: bytes, total: total) }
                         }
                         break
                     } catch DownloadFailure.rejected where attempt == 0 {
@@ -147,7 +163,7 @@ extension StoredDownloadState {
                 throw DownloadFailure.invalid
             }
             let image = await artwork.downloadData(for: video.thumbnailURL)
-            guard update(job.id, { $0.state = .importing }) else { return }
+            guard update(job.id, { $0.state = .importing; if video.thumbnailURL != nil && image == nil { $0.errorMessage = "Artwork unavailable offline." } }) else { return }
             let result = try await storage.importAudio(from: file, sourceType: "youtube", sourceIdentifier: videoID, video: video, artwork: image)
             guard case .downloaded(let id) = try await lookup.status(videoID: videoID), id == result.track.id else { throw DownloadFailure.disk }
             complete(job.id, trackID: id, file: file)
@@ -165,8 +181,8 @@ extension StoredDownloadState {
     private func complete(_ id: String, trackID: String, file: URL) {
         if update(id, { $0.trackID = trackID; $0.finishedAt = Date(); $0.state = .completed; $0.progress = 1 }) { try? FileManager.default.removeItem(at: file) }
     }
-    private func progress(_ id: String, bytes: Int64, total: Int64) {
-        guard jobs.first(where: { $0.id == id })?.state == .downloading else { return }
+    private func progress(_ id: String, attempt: UUID, bytes: Int64, total: Int64) {
+        guard attempts[id] == attempt, jobs.first(where: { $0.id == id })?.state == .downloading else { return }
         let now = Date()
         if let (time, previous) = samples[id] {
             let elapsed = now.timeIntervalSince(time)
@@ -181,9 +197,9 @@ extension StoredDownloadState {
         guard update(id, { $0.state = state }) else { return }
         workers[id]?.cancel()
     }
-    func pause(_ job: StoredDownloadJob) { if job.state.stoppable { stop(job.id, as: .paused) } }
+    func pause(_ job: StoredDownloadJob) { if jobs.first(where: { $0.id == job.id })?.state.stoppable == true { stop(job.id, as: .paused) } }
     func cancel(_ job: StoredDownloadJob) {
-        guard job.state.stoppable || job.state == .paused || job.state == .interrupted else { return }
+        guard let job = jobs.first(where: { $0.id == job.id }), job.state.stoppable || job.state == .paused || job.state == .interrupted else { return }
         stop(job.id, as: .cancelled)
     }
     func retry(_ id: String, repair: Bool = false) {

@@ -82,7 +82,7 @@ struct VideoDetailView: View {
                 if case .downloaded(let id) = model.libraryStatus {
                     Button("Play in Library") { Task { await library.play(id, ids: [id], kind: "library") } }
                 } else if let job = downloads.job(for: model.video.id), job.state != .completed || job.trackID != nil && library.track(job.trackID)?.availability == .available {
-                    Button("View in Downloads · " + job.state.label) {
+                    Button("View in Downloads Â· " + job.state.label) {
                         coordinator.sheet = nil
                         coordinator.selectedTab = .downloads
                     }.accessibilityIdentifier("youtube-view-job")

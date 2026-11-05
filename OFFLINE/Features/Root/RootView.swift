@@ -35,6 +35,7 @@ private struct RootTabsView: View {
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
         .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .inactive { container.downloads.setForeground(phase == .active) }
             if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
             else { searchFocus = nil }
         }
