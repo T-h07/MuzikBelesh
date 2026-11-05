@@ -2,6 +2,7 @@ import Combine
 import OSLog
 import Foundation
 import Network
+import UIKit
 
 extension StoredDownloadState {
     var pending: Bool { self == .queued || self == .waitingForWiFi }
@@ -24,11 +25,13 @@ extension StoredDownloadState {
     private let preferences: YouTubePreferences
     private let preparer: any YouTubeDownloadPreparing
     private let transfer: any AudioTransferring
+    private let system: (any SystemDownloading)?
+    private var reconciling = false
     private let artwork: YouTubeArtworkLoader
     private let monitor = NWPathMonitor()
     private var subscriptions = Set<AnyCancellable>()
     private var connected = false
-    private var wifi = false
+    @Published private var wifi = false
     private var workers: [String: Task<Void, Never>] = [:]
     private var checkpoints: [String: ProgressCadence] = [:]
     private var samples: [String: TransferRate] = [:]
@@ -38,7 +41,10 @@ extension StoredDownloadState {
     private var staging: URL? { storage?.paths.applicationSupport.appendingPathComponent("DownloadStaging", isDirectory: true) }
 
     init(storage: StorageCoordinator?, preferences: YouTubePreferences, preparer: any YouTubeDownloadPreparing,
-         transfer: any AudioTransferring, artwork: YouTubeArtworkLoader, observeNetwork: Bool = true) {
+         transfer: any AudioTransferring, artwork: YouTubeArtworkLoader, observeNetwork: Bool = true,
+         system: (any SystemDownloading)? = nil) {
+        self.system = system
+        if system != nil { foreground = UIApplication.shared.applicationState != .background }
         self.storage = storage
         self.preferences = preferences
         self.preparer = preparer
@@ -49,16 +55,24 @@ extension StoredDownloadState {
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
             jobs = try storage.downloads.all().filter { $0.position != nil }.sorted { ($0.position ?? 0) < ($1.position ?? 0) }
             let retained = Set(jobs.filter { $0.state != .completed && $0.state != .cancelled }.map(\.id))
+            let generations = Set(jobs.compactMap(\.transferGeneration))
             for file in try FileManager.default.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil) {
                 let id = file.deletingPathExtension().lastPathComponent
                 if file.pathExtension == "m4a", UUID(uuidString: id) != nil, !retained.contains(id) {
                     try FileManager.default.removeItem(at: file)
                 }
+                if file.pathExtension == "incoming", UUID(uuidString: id) != nil, !generations.contains(id) {
+                    try FileManager.default.removeItem(at: file)
+                }
             }
-            for job in jobs where [.downloading, .verifying, .importing, .resolving].contains(job.state) {
+            for job in jobs where [.downloading, .verifying, .importing, .resolving].contains(job.state) && job.transferGeneration == nil {
                 update(job.id) { $0.state = .queued }
             }
         } catch { failStorage() }
+        if let system {
+            system.owner = self
+            reconcileSystem()
+        }
         if observeNetwork {
             monitor.pathUpdateHandler = { [weak self] path in
                 Task { @MainActor in self?.setPath(connected: path.status == .satisfied, wifi: path.usesInterfaceType(.wifi)) }
@@ -76,7 +90,7 @@ extension StoredDownloadState {
         let regainedConnection = connected && (!self.connected || (wifi && !self.wifi))
         self.connected = connected
         self.wifi = wifi
-        if !connected || (preferences.wifiOnly && !wifi) { policyChanged(strict: true) }
+        if system == nil && (!connected || (preferences.wifiOnly && !wifi)) { policyChanged(strict: true) }
         if regainedConnection {
             for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
         }
@@ -85,15 +99,24 @@ extension StoredDownloadState {
     func setForeground(_ active: Bool) {
         foreground = active
         if active {
+            rates.removeAll(); samples.removeAll()
+            reconcileSystem()
             for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
             schedule()
-        } else { policyChanged(strict: true) }
+        }
     }
     private func policyChanged(strict: Bool) {
         guard strict else { return }
         for job in jobs where job.state == .downloading || job.state == .resolving {
+            if job.transferSession == BackgroundTransfers.wifi { continue }
             stop(job.id, as: .queued)
         }
+    }
+    func stateLabel(for job: StoredDownloadJob) -> String {
+        if job.state == .downloading, job.transferSession == BackgroundTransfers.wifi, !wifi {
+            return "Waiting for Wi-Fi"
+        }
+        return job.state.label
     }
     func job(for videoID: String) -> StoredDownloadJob? { jobs.first { $0.sourceIdentifier == videoID } }
     private func failStorage() { storageFailed = true; issue = "Download storage is unavailable. Reopen the app to retry." }
@@ -119,14 +142,15 @@ extension StoredDownloadState {
         do { try storage.downloads.save(job); jobs.append(job); schedule() } catch { failStorage() }
     }
     private func schedule() {
-        guard !storageFailed, foreground else { return }
+        guard !storageFailed, foreground, !reconciling else { return }
         let waiting = preferences.wifiOnly && !wifi
         for job in jobs where job.state.pending {
             let staged = UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
             let desired: StoredDownloadState = waiting && !staged ? .waitingForWiFi : .queued
             if job.state != desired { update(job.id) { $0.state = desired } }
-            guard staged || (!waiting && connected), workers.count < preferences.simultaneous, workers[job.id] == nil else { continue }
-            guard update(job.id, { $0.state = .resolving; $0.startedAt = Date(); $0.received = 0; $0.expected = nil; $0.progress = 0 }) else { return }
+            let slots = workers.count + jobs.filter { $0.transferGeneration != nil && workers[$0.id] == nil }.count
+            guard staged || (!waiting && connected), slots < preferences.simultaneous, workers[job.id] == nil else { continue }
+            guard update(job.id, { $0.state = staged ? .verifying : .resolving }) else { return }
             workers[job.id] = Task { await run(job) }
         }
     }
@@ -149,7 +173,19 @@ extension StoredDownloadState {
                     let request = try await preparer.prepare(video: video, quality: quality)
                     try Task.checkCancellation()
                     video = request.metadata
-                    guard update(job.id, { $0.state = .downloading; $0.received = 0; $0.expected = nil; $0.progress = 0 }) else { return }
+                    if let system {
+                        let generation = UUID().uuidString
+                        let task = try system.create(url: request.stream.url, job: job.id, generation: generation, strict: preferences.wifiOnly)
+                        guard update(job.id, {
+                            $0.state = .downloading; $0.received = 0; $0.expected = nil; $0.progress = 0
+                            $0.startedAt = Date(); $0.transferNumber = task.number; $0.transferSession = task.session
+                            $0.transferGeneration = generation; $0.title = video.title; $0.channel = video.channel
+                            $0.thumbnail = YouTubeImageURL.valid(video.thumbnailURL)?.absoluteString
+                        }) else { task.cancel(); return }
+                        task.resumeIfSuspended()
+                        return
+                    }
+                    guard update(job.id, { $0.state = .downloading; $0.startedAt = Date(); $0.received = 0; $0.expected = nil; $0.progress = 0 }) else { return }
                     let sampleID = job.id
                     let generation = UUID()
                     attempts[job.id] = generation
@@ -215,8 +251,13 @@ extension StoredDownloadState {
         jobs[index] = job
     }
     private func stop(_ id: String, as state: StoredDownloadState) {
-        guard update(id, { $0.state = state }) else { return }
+        guard let job = jobs.first(where: { $0.id == id }), update(id, { $0.state = state; $0.clearSystemTask() }) else { return }
+        if let name = job.transferSession, let number = job.transferNumber { system?.cancel(session: name, number: number) }
+        discardIncoming(job)
         workers[id]?.cancel()
+        if state == .cancelled, workers[id] == nil, UUID(uuidString: id) != nil, let staging {
+            try? FileManager.default.removeItem(at: staging.appendingPathComponent(id + ".m4a"))
+        }
     }
     func pause(_ job: StoredDownloadJob) { if jobs.first(where: { $0.id == job.id })?.state.stoppable == true { stop(job.id, as: .paused) } }
     func cancel(_ job: StoredDownloadJob) {
@@ -225,7 +266,7 @@ extension StoredDownloadState {
     }
     func retry(_ id: String, repair: Bool = false) {
         guard let job = jobs.first(where: { $0.id == id }), [.paused, .cancelled, .failed, .interrupted].contains(job.state) || (repair && job.state == .completed) else { return }
-        update(id) { $0.state = .queued; $0.errorMessage = nil; $0.attempts = ($0.attempts ?? 0) + 1 }
+        update(id) { $0.state = .queued; $0.errorMessage = nil; $0.refreshedGeneration = nil; $0.attempts = ($0.attempts ?? 0) + 1 }
         schedule()
     }
     func move(_ job: StoredDownloadJob, by offset: Int) {
@@ -235,5 +276,105 @@ extension StoredDownloadState {
             try storage.downloads.swapPositions(job, pending[index + offset])
             jobs = try storage.downloads.all().filter { $0.position != nil }.sorted { ($0.position ?? 0) < ($1.position ?? 0) }
         } catch { failStorage() }
+    }
+}
+
+extension StoredDownloadJob {
+    mutating func clearSystemTask() {
+        transferNumber = nil
+        transferSession = nil
+        transferGeneration = nil
+    }
+}
+
+extension DownloadManager {
+    private func incoming(_ job: StoredDownloadJob) -> URL? {
+        guard let generation = job.transferGeneration, UUID(uuidString: generation) != nil else { return nil }
+        return staging?.appendingPathComponent(generation + ".incoming")
+    }
+    private func discardIncoming(_ job: StoredDownloadJob) {
+        if let file = incoming(job) { try? FileManager.default.removeItem(at: file) }
+    }
+    private func reconcileSystem() {
+        guard let system, !reconciling, !storageFailed else { return }
+        reconciling = true
+        let before = jobs.filter { $0.transferGeneration != nil }
+        Task {
+            let inventory = await system.inventory()
+            var surviving = Set<String>()
+            for task in inventory {
+                guard let job = jobs.first(where: task.belongs),
+                      !preferences.wifiOnly || task.session == BackgroundTransfers.wifi else {
+                    task.cancel()
+                    continue
+                }
+                surviving.insert(job.id)
+                task.resumeIfSuspended()
+                backgroundProgress(task)
+            }
+            for job in before where !surviving.contains(job.id) {
+                guard jobs.first(where: { $0.id == job.id })?.transferGeneration == job.transferGeneration else { continue }
+                // A callback may already have preserved the complete file before process death.
+                if let file = incoming(job), FileManager.default.fileExists(atPath: file.path) {
+                    finishStaging(job)
+                } else {
+                    update(job.id) { $0.clearSystemTask(); $0.state = .queued }
+                }
+            }
+            reconciling = false
+            schedule()
+        }
+    }
+    func backgroundProgress(_ task: SystemDownload) {
+        guard let job = jobs.first(where: task.belongs), let generation = job.transferGeneration.flatMap(UUID.init(uuidString:)),
+              task.received >= (job.received ?? 0) else { return }
+        attempts[job.id] = generation
+        progress(job.id, attempt: generation, bytes: task.received, total: task.expected, now: ProcessInfo.processInfo.systemUptime)
+    }
+    func backgroundFile(_ task: SystemDownload, response: HTTPURLResponse?, location: URL) {
+        guard let job = jobs.first(where: task.belongs), let destination = incoming(job) else { return }
+        do {
+            guard let response, DownloadMedia.permits(response.url) else { throw DownloadFailure.invalid }
+            if [401,403,410].contains(response.statusCode) { throw DownloadFailure.rejected }
+            let length = try location.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard length <= DownloadMedia.limit else { throw DownloadFailure.size }
+            guard length > 0, response.statusCode == 200,
+                  ["audio/mp4", "audio/m4a", "audio/x-m4a", "application/octet-stream"].contains(response.mimeType ?? ""),
+                  response.expectedContentLength < 0 || response.expectedContentLength == Int64(length) else { throw DownloadFailure.invalid }
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.moveItem(at: location, to: destination)
+            }
+        } catch { backgroundEnded(task, failure: error as? DownloadFailure ?? .disk) }
+    }
+    func backgroundEnded(_ task: SystemDownload, failure: DownloadFailure?) {
+        guard let job = jobs.first(where: task.belongs) else { return }
+        if let failure {
+            discardIncoming(job)
+            update(job.id) {
+                $0.clearSystemTask()
+                if failure == .rejected && $0.refreshedGeneration != true {
+                    $0.refreshedGeneration = true; $0.attempts = ($0.attempts ?? 0) + 1; $0.state = .queued
+                } else {
+                    $0.state = failure == .connection ? .interrupted : .failed
+                    $0.errorMessage = failure.rawValue
+                }
+            }
+        } else { finishStaging(job) }
+        rates[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; attempts[job.id] = nil
+        schedule()
+    }
+    private func finishStaging(_ job: StoredDownloadJob) {
+        guard let incoming = incoming(job), let staging, UUID(uuidString: job.id) != nil else { return }
+        let final = staging.appendingPathComponent(job.id + ".m4a")
+        do {
+            if !FileManager.default.fileExists(atPath: final.path) { try FileManager.default.moveItem(at: incoming, to: final) }
+            let bytes = try final.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard bytes > 0 else { throw DownloadFailure.invalid }
+            update(job.id) {
+                $0.clearSystemTask(); $0.state = .queued; $0.received = Int64(bytes); $0.expected = Int64(bytes); $0.progress = 1
+            }
+        } catch {
+            update(job.id) { $0.clearSystemTask(); $0.state = .failed; $0.errorMessage = DownloadFailure.disk.rawValue }
+        }
     }
 }

@@ -20,7 +20,7 @@ struct DownloadsView: View {
                                 if let channel = job.channel { Text(channel).font(.caption) }
                             }
                         }
-                        Text(job.state.label).accessibilityIdentifier("download-state-" + (job.sourceIdentifier ?? job.id))
+                        Text(manager.stateLabel(for: job)).accessibilityIdentifier("download-state-" + (job.sourceIdentifier ?? job.id))
                         if let message = job.errorMessage { Text(message).font(.caption) }
                         if job.state == .downloading {
                             if let expected = job.expected {
