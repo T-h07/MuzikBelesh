@@ -32,7 +32,8 @@ trap 'rm -rf "$work"' EXIT
 app="$OUTPUT_DIR/Payload/OFFLINE.app"
 for executable in "$app/OFFLINE" "$app/PlugIns/OFFLINEShareExtension.appex/OFFLINEShareExtension"; do
   cp "$executable" "$work/binary"
-  codesign --force --sign - --timestamp=none --entitlements "$entitlements" "$work/binary"
+  identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$(dirname "$executable")/Info.plist")"
+  codesign --force --sign - --identifier "$identifier" --timestamp=none --entitlements "$entitlements" "$work/binary"
   codesign --verify "$work/binary"
   codesign -d --entitlements - "$work/binary" > "$work/actual.plist"
   python3 - "$entitlements" "$work/actual.plist" <<'CHECK'
