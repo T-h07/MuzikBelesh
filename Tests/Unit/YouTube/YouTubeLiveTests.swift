@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import OFFLINE
 
@@ -27,6 +28,20 @@ final class YouTubeLiveTests: XCTestCase {
         } catch { XCTFail("Live NEKO discovery: \(YouTubeError.map(error, fallback: .searchUnavailable).localizedDescription)") }
     }
     func testLiveOpenMovieLocalResolution() async { await resolve("aqz-KE-bpKQ") }
+    func testAuthorizedOpenMovieTransferAndOfflineDecode() async throws {
+        let transport = YouTubeURLSessionTransport()
+        let resolver = YouTubeKitAudioResolver(metadata: YouTubeWebProvider(transport: transport), transport: transport)
+        let video = YouTubeVideo(id: "aqz-KE-bpKQ", title: "Big Buck Bunny")
+        let stream = try await resolver.resolve(video: video, quality: .dataSaver)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try await TransferService().download(stream.url, to: file, wifiOnly: true) { _, _ in }
+        try await DownloadMedia.validate(file)
+        let decoder = try AVAudioFile(forReading: file)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: decoder.processingFormat, frameCapacity: 4096))
+        try decoder.read(into: buffer)
+        XCTAssertGreaterThan(buffer.frameLength, 0)
+    }
     func testLiveUnavailableVideoFailsExplicitly() async {
         do {
             _ = try await YouTubeWebProvider(transport: YouTubeURLSessionTransport()).metadata(videoID: "___________")

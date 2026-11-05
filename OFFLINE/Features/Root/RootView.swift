@@ -9,6 +9,7 @@ struct RootView: View {
     var body: some View {
         KeyboardSafeHost(content: RootTabsView(scenePhase: scenePhase, coordinator: coordinator)
             .environmentObject(container)
+            .environmentObject(coordinator)
             .environmentObject(container.audioPlayer)
             .environmentObject(container.library))
             .ignoresSafeArea().preferredColorScheme(.dark)
@@ -27,13 +28,14 @@ private struct RootTabsView: View {
                 TabContent(coordinator: coordinator) { NavigationStack { HomeView(coordinator: coordinator) } }.tabItem { Label("Home", systemImage: "house.fill") }.tag(RootTab.home)
                 TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { SearchView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(RootTab.search)
                 TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
-                TabContent(coordinator: coordinator) { NavigationStack { DownloadsView() } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
+                TabContent(coordinator: coordinator) { NavigationStack { DownloadsView(manager: container.downloads) } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
         .tint(AppColors.accentPrimary)
         .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
         .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .inactive { container.downloads.setForeground(phase == .active) }
             if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
             else { searchFocus = nil }
         }

@@ -36,12 +36,56 @@ final class YouTubeUITests: XCTestCase {
         let prepare = app.buttons["youtube-prepare"]
         if !prepare.isHittable { app.swipeUp() }
         prepare.tap()
-        XCTAssertTrue(app.staticTexts["youtube-prepared"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["youtube-prepared"].label.contains("Nothing has been downloaded"))
+        let viewJob = app.buttons["youtube-view-job"]
+        XCTAssertTrue(viewJob.waitForExistence(timeout: 5))
+        viewJob.tap()
+        let play = app.buttons["play-download"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        play.tap()
+        XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Search"].tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(first.waitForExistence(timeout: 3))
         XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
     }
+    func testQueueActionsSettingsAndRecoveryAfterRelaunch() {
+        app.terminate()
+        app.launchArguments += ["--download-cellular", "--download-fail-once", "--download-queue-fixtures"]
+        app.launch()
+        app.tabBars.buttons["Downloads"].tap()
+        let second = app.staticTexts["download-state-fixture0002"]
+        XCTAssertEqual(second.label, "Waiting for Wi-Fi")
+        app.buttons["earlier-fixture0002"].tap()
+        XCTAssertLessThan(second.frame.minY, app.staticTexts["download-state-fixture0001"].frame.minY)
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertEqual(second.label, "Cancelled")
+        app.buttons["Retry"].firstMatch.tap()
+        XCTAssertEqual(second.label, "Waiting for Wi-Fi")
+        app.tabBars.buttons["Home"].tap()
+        app.buttons["Settings"].tap()
+        app.segmentedControls.buttons["1"].tap()
+        let wifi = app.switches["downloads-wifi"]
+        XCTAssertEqual(wifi.value as? String, "1")
+        wifi.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertEqual(wifi.value as? String, "0")
+        app.buttons["Done"].tap()
+        app.tabBars.buttons["Downloads"].tap()
+        let failed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Failed"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [failed], timeout: 8), .completed)
+        app.buttons["Retry"].firstMatch.tap()
+        let done = NSPredicate(format: "label == %@", "Downloaded")
+        expectation(for: done, evaluatedWith: second)
+        waitForExpectations(timeout: 20)
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--youtube-fixtures", "--download-cellular"]
+        app.launch()
+        app.tabBars.buttons["Downloads"].tap()
+        XCTAssertEqual(second.label, "Downloaded")
+        app.tabBars.buttons["Library"].tap()
+        app.buttons["library-filter-Songs"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Queued fixture")).firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testLongPageClearsMiniPlayerAndLoadsNextPage() {
         app.tabBars.buttons["Library"].tap()
         app.buttons["library-filter-Songs"].tap()

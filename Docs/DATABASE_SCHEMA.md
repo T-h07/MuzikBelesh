@@ -14,3 +14,7 @@ Migrations are registered in `OFFLINE/Storage/DatabaseManager.swift`:
 8. `v008_navigation_history` — played IDs and history cursor.
 
 Tracks reference optional artists and albums. Playlist membership, likes, queue entries, history, sources, and jobs reference tracks. Deleting a playlist never deletes tracks; deleting a track cascades dependent relationship records. The unique `tracks_contentSHA256` index provides content duplicate detection, while source records remain extensible for later YouTube integration.
+
+## Phase 7 downloads
+
+v009 and v010 add library management and managed albums. v011 extends download_jobs with title, channel, thumbnail, position, received and expected bytes, attempt count, and start and finish dates. A partial unique index covers YouTube IDs for managed jobs. Legacy rows retain their original fields.

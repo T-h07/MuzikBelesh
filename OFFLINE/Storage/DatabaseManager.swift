@@ -88,6 +88,15 @@ final class DatabaseManager {
             }
         }
         LibraryMigration.register(in: &migrator)
+        migrator.registerMigration("v011_audio_downloads") { db in
+            try db.alter(table: "download_jobs") { table in
+                for column in ["title", "channel", "thumbnail"] { table.add(column: column, .text) }
+                for column in ["position", "received", "expected", "attempts"] { table.add(column: column, .integer) }
+                for column in ["startedAt", "finishedAt"] { table.add(column: column, .datetime) }
+            }
+            // Earlier placeholder rows have no queue position and retain their historical identity.
+            try db.execute(sql: "CREATE UNIQUE INDEX download_youtube_identity ON download_jobs(sourceIdentifier) WHERE sourceType = 'youtube' AND position IS NOT NULL")
+        }
         if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
         else { try migrator.migrate(dbQueue) }
     }

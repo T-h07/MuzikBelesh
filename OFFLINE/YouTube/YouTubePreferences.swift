@@ -6,9 +6,19 @@ import GRDB
     private let defaults: UserDefaults
     private let key = "youtube.audioQuality"
     @Published var quality: AudioQuality { didSet { defaults.set(quality.rawValue, forKey: key) } }
+    @Published var wifiOnly: Bool { didSet { defaults.set(wifiOnly, forKey: "downloads.wifiOnly") } }
+    @Published var simultaneous: Int { didSet { defaults.set(simultaneous, forKey: "downloads.simultaneous") } }
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        quality = defaults.string(forKey: key).flatMap(AudioQuality.init(rawValue:)) ?? .standard
+        wifiOnly = (defaults.object(forKey: "downloads.wifiOnly") as? Bool) ?? true
+        let limit = defaults.integer(forKey: "downloads.simultaneous")
+        simultaneous = (1...3).contains(limit) ? limit : 2
+        switch defaults.string(forKey: key) {
+        case "High": quality = .high
+        case "Standard": quality = .standard
+        case let value: quality = value.flatMap(AudioQuality.init(rawValue:)) ?? .standard
+        }
+        defaults.set(quality.rawValue, forKey: key)
     }
 }
 
@@ -23,6 +33,7 @@ struct YouTubeLibraryLookup: YouTubeLibraryChecking, @unchecked Sendable {
         let track = try await database.read { db in try LibraryRepository.sourceTrack(type: "youtube", identifier: videoID, db: db) }
         guard let track else { return .notDownloaded }
         guard track.availability == .available, let url = try? paths.musicURL(relativePath: track.fileRelativePath), FileManager.default.fileExists(atPath: url.path) else { return .fileUnavailable }
+        guard (try? AudioFileService().sha256(url: url)) == track.contentSHA256 else { return .fileUnavailable }
         return .downloaded(trackID: track.id)
     }
 }

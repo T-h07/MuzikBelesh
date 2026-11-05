@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 enum StoredTrackAvailability: String, Codable, DatabaseValueConvertible, Sendable { case available, missing, modified }
-enum StoredDownloadState: String, Codable, DatabaseValueConvertible, Sendable { case queued, interrupted, completed, cancelled, failed }
+enum StoredDownloadState: String, Codable, DatabaseValueConvertible, Sendable { case queued, waitingForWiFi, resolving, downloading, paused, interrupted, verifying, importing, completed, cancelled, failed }
 
 struct StoredArtist: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable, Sendable {
     static let databaseTableName = "artists"
@@ -114,6 +114,15 @@ struct StoredDownloadJob: Codable, FetchableRecord, PersistableRecord, Identifia
     var state: StoredDownloadState
     var progress: Double
     var errorMessage: String?
+    var title: String?
+    var channel: String?
+    var thumbnail: String?
+    var position: Int?
+    var received: Int64?
+    var expected: Int64?
+    var attempts: Int?
+    var startedAt: Date?
+    var finishedAt: Date?
     var quality: String
     var dateAdded: Date
     var dateModified: Date

@@ -5,6 +5,7 @@ import Foundation
 final class AudioPlayerService: ObservableObject {
     @Published private(set) var state = AudioPlaybackState()
 
+    private var libraryTimeline: Double?
     private let player: PlaybackPlayer
     private let nativePlayer: AVPlayer?
     private let commandGate = PlaybackCommandGate()
@@ -127,12 +128,13 @@ final class AudioPlayerService: ObservableObject {
             let asset = AVURLAsset(url: resolved.url)
             let duration = try await PlaybackAssetInspection.duration(of: asset)
             guard duration.seconds.isFinite, duration.seconds > 0 else { throw AudioPlaybackError.unsupportedAudio }
+            let localDuration = await storage?.downloadPlaybackDuration(track: resolved.track, url: resolved.url)
             guard revision == intentRevision, reconcileSleepTimer() else { throw CancellationError() }
             try session.configure()
             updateContext(with: trackID)
             queue.setCurrent(trackID)
-            replaceItem(with: AVPlayerItem(asset: asset), trackID: trackID, track: resolved.track)
-            state.duration = duration.seconds
+            replaceItem(with: AVPlayerItem(asset: asset), trackID: trackID, track: resolved.track, localDuration: localDuration)
+            state.duration = libraryTimeline ?? duration.seconds
             wantsPlayback = autoplay
             if autoplay { player.play(); synchronizeTransport() }
             else { player.pause(); state.status = .paused }
@@ -300,16 +302,23 @@ final class AudioPlayerService: ObservableObject {
         defer { endCommand() }
         guard state.currentTrackID == trackID, item == nil else { return }
         guard let resolved = try? resolver.resolve(trackID: trackID) else { fail("The saved track is no longer available"); return }
-        replaceItem(with: AVPlayerItem(url: resolved.url), trackID: trackID, track: resolved.track)
+        let revision = intentRevision
+        let localDuration = await storage?.downloadPlaybackDuration(track: resolved.track, url: resolved.url)
+        guard revision == intentRevision, state.currentTrackID == trackID, item == nil else { return }
+        replaceItem(with: AVPlayerItem(url: resolved.url), trackID: trackID, track: resolved.track, localDuration: localDuration)
         state.status = .paused
         if position > 0 { _ = await player.seek(to: CMTime(seconds: min(position, max(0, state.duration - endpointTolerance)), preferredTimescale: 600)); state.elapsedTime = min(position, max(0, state.duration - endpointTolerance)) }
         publish(track: resolved.track)
     }
 
-    private func replaceItem(with newItem: AVPlayerItem, trackID: String, track: StoredTrack) {
+    private func replaceItem(with newItem: AVPlayerItem, trackID: String, track: StoredTrack, localDuration: Double?) {
+        libraryTimeline = localDuration
+        if let libraryTimeline {
+            newItem.forwardPlaybackEndTime = CMTime(seconds: libraryTimeline, preferredTimescale: 44100)
+        }
         transportVerification?.cancel(); transportVerification = nil
         removeItemObservers(); itemGeneration += 1; completedGeneration = nil; let generation = itemGeneration; item = newItem; state.currentTrackID = trackID; state.status = .loading; state.elapsedTime = 0; state.duration = TimeInterval(track.durationMs ?? 0) / 1000
-        statusObserver = newItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in Task { @MainActor in guard let self, self.item === item else { return }; if item.status == .failed { self.fail("Audio could not be loaded. Try Play again.") } else if item.status == .readyToPlay { let duration = item.duration.seconds; if duration.isFinite && duration > 0 { self.state.duration = duration }; self.synchronizeTransport(); self.publish(track: track) } } }
+        statusObserver = newItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in Task { @MainActor in guard let self, self.item === item else { return }; if item.status == .failed { self.fail("Audio could not be loaded. Try Play again.") } else if item.status == .readyToPlay { let duration = item.duration.seconds; if duration.isFinite && duration > 0 { self.state.duration = self.libraryTimeline ?? duration }; self.synchronizeTransport(); self.publish(track: track) } } }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: newItem, queue: .main) { [weak self, weak newItem] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }

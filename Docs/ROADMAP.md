@@ -20,8 +20,4 @@ Phase 5: merged through PR #6 at `9ba81a7fe6d0cd6420958971ac2a89bfadb68264`,
 following developer-reported build 155 category acceptance on iPhone 13 Pro Max
 (iOS 27.0.1). Individual procedures not separately attested remain documented.
 
-Phase 6: **IN PROGRESS** on `feature/phase-06-youtube`. Real no-key web search,
-local-only YouTubeKit extraction and Phase 7 request preparation are being verified.
-See PHASE_06_YOUTUBE.md and PHASE_06_DEVICE_TESTING.md. Source compilation alone
-is not acceptance. No media transfer is implemented and Phase 7 has not started.
-Milestone C remains incomplete; physical Phase 6 acceptance is pending.
+Phase 6 merged through PR #7 at `7674daf`. Phase 7 download management is under development on `feature/phase-07-downloads`. Physical acceptance is tracked in PHASE_07_DEVICE_TESTING.md.

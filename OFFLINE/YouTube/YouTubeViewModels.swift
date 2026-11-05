@@ -73,7 +73,7 @@ import Combine
 }
 
 @MainActor final class VideoDetailsViewModel: ObservableObject {
-    enum State: Equatable { case idle, loadingMetadata, resolvingStreams, ready, unavailable(YouTubeError), failed(YouTubeError) }
+    enum State: Equatable { case idle, local, loadingMetadata, resolvingStreams, ready, unavailable(YouTubeError), failed(YouTubeError) }
     @Published private(set) var video: YouTubeVideo
     @Published private(set) var state: State = .idle
     @Published private(set) var stream: ResolvedAudioStream?
@@ -94,16 +94,15 @@ import Combine
     var busy: Bool { state == .loadingMetadata || state == .resolvingStreams || preparing }
     func load(quality: AudioQuality, force: Bool = false) {
         guard !busy else { return }
-        if !force, state == .ready, resolvedQuality == quality, stream?.isFresh(at: Date()) == true { return }
-        begin(quality: quality, prepare: false)
+        begin(quality: quality, prepare: false, cached: force ? nil : stream)
     }
     func prepare(quality: AudioQuality) {
         guard !busy else { return }
         begin(quality: quality, prepare: true)
     }
-    private func begin(quality: AudioQuality, prepare: Bool) {
+    private func begin(quality: AudioQuality, prepare: Bool, cached: ResolvedAudioStream? = nil) {
         cancel(); preparedRequest = nil; stream = nil; preparing = prepare
-        state = metadataLoaded ? .resolvingStreams : .loadingMetadata
+        state = .loadingMetadata
         let revision = generation
         task = Task {
             defer { if revision == generation { preparing = false } }
@@ -111,6 +110,14 @@ import Combine
                 let local = try? await library.status(videoID: video.id)
                 guard revision == generation else { return }
                 libraryStatus = local ?? .unknown
+                if case .downloaded = libraryStatus, !prepare {
+                    state = .local
+                    return
+                }
+                if let cached, cached.isFresh(at: Date()), resolvedQuality == quality {
+                    stream = cached; state = .ready
+                    return
+                }
                 if !metadataLoaded {
                     let details = try await metadata.metadata(videoID: video.id)
                     try Task.checkCancellation()

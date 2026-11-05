@@ -60,7 +60,7 @@ jobs:
         if: inputs.prebuilt_run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: phase6-test-products
+          name: offline-test-products
           path: build/prebuilt
           run-id: ${{ inputs.prebuilt_run_id }}
           github-token: ${{ github.token }}
@@ -88,16 +88,16 @@ jobs:
         if: inputs.verification_scope == 'focused'
         uses: actions/upload-artifact@v4
         with:
-          name: phase6-test-products
+          name: offline-test-products
           path: |
             build/test-products.tar.gz
             build/product-source.txt
           retention-days: 7
           if-no-files-found: error
-      - name: Focused Phase 6 and keyboard regressions
+      - name: Focused download, YouTube and keyboard regressions
         if: inputs.verification_scope == 'focused'
         run: |
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -only-testing:OFFLINEUITests/YouTubeUITests -only-testing:OFFLINETests/YouTubeURLParserTests -only-testing:OFFLINETests/YouTubeProviderTests -only-testing:OFFLINETests/YouTubeSearchStateTests -only-testing:OFFLINETests/YouTubeAudioTests -only-testing:OFFLINETests/YouTubeLibraryIntegrityTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -only-testing:OFFLINEUITests/YouTubeUITests -only-testing:OFFLINETests/YouTubeURLParserTests -only-testing:OFFLINETests/YouTubeProviderTests -only-testing:OFFLINETests/YouTubeSearchStateTests -only-testing:OFFLINETests/DownloadTests -only-testing:OFFLINETests/YouTubeAudioTests -only-testing:OFFLINETests/YouTubeLibraryIntegrityTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Opt-in live YouTube compatibility
         if: inputs.live_youtube
         continue-on-error: true
