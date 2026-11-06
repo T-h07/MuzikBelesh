@@ -32,7 +32,34 @@ concurrency:
   cancel-in-progress: true
 permissions: {contents: read, actions: read}
 jobs:
+  foundation-contracts:
+    if: inputs.verification_scope == 'foundation'
+    name: diagnostic-foundation-contracts
+    runs-on: ${{ inputs.runner_label || 'macos-15' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate diagnostic scope
+        env:
+          COMPARE_DEVELOP: ${{ inputs.compare_develop }}
+        run: test "$COMPARE_DEVELOP" != true
+      - name: Run unmodified foundation contract tests
+        run: bash Scripts/test-playlist-migration-foundation.sh
+      - name: Upload foundation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-contract-results
+          path: |
+            build/FoundationContracts.log
+            build/FoundationContracts-source.txt
+          if-no-files-found: error
   build-and-test:
+    if: inputs.verification_scope != 'foundation'
+    # A focused diagnostic must never impersonate the full regression gate.
+    name: ${{ inputs.verification_scope == 'library-menu' && format('diagnostic-library-menu-{0}', inputs.compare_develop && 'develop' || 'head') || 'build-and-test' }}
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
     timeout-minutes: 40
     steps:
@@ -79,7 +106,7 @@ jobs:
           run-id: ${{ inputs.prebuilt_run_id }}
           github-token: ${{ github.token }}
       - name: Isolate diagnostic simulator
-        if: inputs.verification_scope == 'foundation' || inputs.verification_scope == 'library-menu'
+        if: inputs.verification_scope == 'library-menu'
         run: |
           # A new device keeps diagnostic runs independent of earlier UI sessions.
           xcrun simctl list devices --json > /tmp/ci-devices.json
@@ -131,11 +158,6 @@ jobs:
         if: inputs.verification_scope == 'profile'
         run: |
           xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/PerformanceResults.xcresult -only-testing:OFFLINETests/ReleasePerformanceTests -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
-      - name: Phase 10 foundation contracts
-        if: inputs.verification_scope == 'foundation'
-        run: |
-          grep -rq 'class PlaylistMigrationFoundationTests' Tests/Unit
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/FoundationResults.xcresult -only-testing:OFFLINETests/PlaylistMigrationFoundationTests -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Repeat track menu and lifecycle regressions
         if: inputs.verification_scope == 'library-menu'
         run: |
@@ -203,7 +225,6 @@ jobs:
             build/CompactResults.xcresult
             build/KeyboardResults.xcresult
             build/YouTubeLiveResults.xcresult
-            build/FoundationResults.xcresult
             build/MenuResults.xcresult
           if-no-files-found: ignore
       - name: Dispose diagnostic simulator
