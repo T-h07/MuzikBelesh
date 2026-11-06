@@ -142,10 +142,10 @@ jobs:
           test -f "${TEST_RUN_FILES[0]}"
           echo "TEST_RUN=${TEST_RUN_FILES[0]}" >> "$GITHUB_ENV"
       - name: Retain compiled products for final verification
-        if: inputs.verification_scope == 'focused'
+        if: inputs.verification_scope == 'focused' || inputs.verification_scope == 'library-menu'
         run: tar -czf build/test-products.tar.gz -C build/TestProducts/Build Products
       - name: Upload compiled test products
-        if: inputs.verification_scope == 'focused'
+        if: inputs.verification_scope == 'focused' || inputs.verification_scope == 'library-menu'
         uses: actions/upload-artifact@v4
         with:
           name: offline-test-products
