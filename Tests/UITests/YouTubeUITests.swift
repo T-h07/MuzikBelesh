@@ -1,0 +1,220 @@
+import XCTest
+
+final class YouTubeUITests: XCTestCase {
+    private var app: XCUIApplication!
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        executionTimeAllowance = 120
+        app = XCUIApplication()
+        app.launchEnvironment["MB_UI_TEST_ID"] = UUID().uuidString
+        app.launchArguments = ["--ui-testing", "--reset-ui-library", "--youtube-fixtures"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Search"].waitForExistence(timeout: 10))
+    }
+    override func tearDownWithError() throws { app?.terminate() }
+    private func youtubeSearch() {
+        app.tabBars.buttons["Search"].tap()
+        app.segmentedControls.buttons["YouTube"].tap()
+    }
+    private func inspect(_ value: String) {
+        let field = app.textFields["youtube-link-input"]
+        XCTAssertTrue(field.waitForExistence(timeout: 3)); field.tap(); field.typeText(value)
+        app.buttons["youtube-inspect-link"].tap()
+    }
+    func testReleasePlayerControlsWithLargeTextAndRepeatedPresentation() {
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
+        app.launch()
+        app.tabBars.buttons["Library"].tap()
+        app.buttons["library-filter-Songs"].tap()
+        let track = app.staticTexts["Fixture A"].firstMatch
+        XCTAssertTrue(track.waitForExistence(timeout: 5))
+        track.tap()
+        let open = app.buttons["Open Now Playing"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        for _ in 0..<3 {
+            open.tap()
+            let pause = app.buttons["Pause"].firstMatch
+            XCTAssertTrue(pause.waitForExistence(timeout: 4))
+            if !pause.isHittable { app.swipeUp() }
+            XCTAssertTrue(pause.isHittable)
+            app.buttons["Done"].firstMatch.tap()
+            XCTAssertTrue(open.waitForExistence(timeout: 4))
+        }
+        app.tabBars.buttons["Downloads"].tap()
+        XCTAssertTrue(app.staticTexts["No downloads"].waitForExistence(timeout: 4))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Release-Large-Text"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testPendingSharePrefillsImportAndUsesExistingDownloadPipeline() {
+        app.terminate()
+        app.launchArguments.append("--pending-share")
+        app.launch()
+        let field = app.textFields["youtube-link-input"]
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        XCTAssertEqual(field.value as? String, "https://www.youtube.com/watch?v=9bZkp7q19f0")
+        app.buttons["youtube-inspect-link"].tap()
+        XCTAssertTrue(app.staticTexts["youtube-stream-ready"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["youtube-detail-title"].label, "Resolved Fixture Song")
+        let download = app.buttons["youtube-prepare"]
+        if !download.isHittable { app.swipeUp() }
+        download.tap()
+        let job = app.buttons["youtube-view-job"]
+        XCTAssertTrue(job.waitForExistence(timeout: 8))
+        job.tap()
+        let play = app.buttons["play-download"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        play.tap()
+        XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 5))
+        youtubeSearch()
+        app.buttons["youtube-paste-link"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 4))
+        XCTAssertNotEqual(field.value as? String, "https://www.youtube.com/watch?v=9bZkp7q19f0")
+    }
+
+    func testSearchPaginationDetailsPreparationAndBackNavigation() {
+        youtubeSearch()
+        let field = app.textFields["search-field"]
+        field.tap(); field.typeText("fixture\n")
+        let first = app.buttons["youtube-result-9bZkp7q19f0"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        app.buttons["youtube-load-more"].tap()
+        XCTAssertTrue(app.buttons["youtube-result-dQw4w9WgXcQ"].waitForExistence(timeout: 3))
+        first.tap()
+        XCTAssertTrue(app.staticTexts["youtube-stream-ready"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["youtube-detail-title"].label, "Resolved Fixture Song")
+        XCTAssertEqual(app.staticTexts["youtube-library-status"].label, "Not Downloaded")
+        let prepare = app.buttons["youtube-prepare"]
+        if !prepare.isHittable { app.swipeUp() }
+        prepare.tap()
+        let viewJob = app.buttons["youtube-view-job"]
+        XCTAssertTrue(viewJob.waitForExistence(timeout: 5))
+        viewJob.tap()
+        let play = app.buttons["play-download"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        play.tap()
+        XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Search"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(first.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
+    }
+    func testQueueActionsSettingsAndRecoveryAfterRelaunch() {
+        app.terminate()
+        app.launchArguments += ["--download-cellular", "--download-fail-once", "--download-queue-fixtures"]
+        app.launch()
+        app.tabBars.buttons["Downloads"].tap()
+        let second = app.staticTexts["download-state-fixture0002"]
+        XCTAssertEqual(second.label, "Waiting for Wi-Fi")
+        app.buttons["earlier-fixture0002"].tap()
+        XCTAssertLessThan(second.frame.minY, app.staticTexts["download-state-fixture0001"].frame.minY)
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertEqual(second.label, "Cancelled")
+        app.buttons["Retry"].firstMatch.tap()
+        XCTAssertEqual(second.label, "Waiting for Wi-Fi")
+        app.tabBars.buttons["Home"].tap()
+        app.buttons["Settings"].tap()
+        app.segmentedControls.buttons["1"].tap()
+        let wifi = app.switches["downloads-wifi"]
+        XCTAssertEqual(wifi.value as? String, "1")
+        wifi.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertEqual(wifi.value as? String, "0")
+        app.buttons["Done"].tap()
+        app.tabBars.buttons["Downloads"].tap()
+        let failed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Failed"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [failed], timeout: 8), .completed)
+        app.buttons["Retry"].firstMatch.tap()
+        let done = NSPredicate(format: "label == %@", "Downloaded")
+        expectation(for: done, evaluatedWith: second)
+        waitForExpectations(timeout: 20)
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--youtube-fixtures", "--download-cellular"]
+        app.launch()
+        app.tabBars.buttons["Downloads"].tap()
+        XCTAssertEqual(second.label, "Downloaded")
+        app.tabBars.buttons["Library"].tap()
+        app.buttons["library-filter-Songs"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Queued fixture")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testLongPageClearsMiniPlayerAndLoadsNextPage() {
+        app.tabBars.buttons["Library"].tap()
+        app.buttons["library-filter-Songs"].tap()
+        app.staticTexts["Fixture A"].firstMatch.tap()
+        let player = app.buttons["Open Now Playing"]
+        XCTAssertTrue(player.waitForExistence(timeout: 5))
+        let scroll = app.scrollViews.firstMatch
+        for tab in ["Home", "Downloads", "Search"] {
+            app.tabBars.buttons[tab].tap()
+            XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+            XCTAssertLessThanOrEqual(scroll.frame.maxY, player.frame.minY, tab)
+        }
+        app.segmentedControls.buttons["YouTube"].tap()
+        let field = app.textFields["search-field"]
+        field.tap()
+        field.typeText("long page\n")
+        XCTAssertTrue(app.buttons["youtube-result-fixture0001"].waitForExistence(timeout: 5))
+        let more = app.buttons["youtube-load-more"]
+        for _ in 0..<6 {
+            if more.exists && more.isHittable && scroll.frame.contains(more.frame) { break }
+            scroll.swipeUp()
+        }
+        let last = app.buttons["youtube-result-fixture0016"]
+        XCTAssertTrue(scroll.frame.contains(last.frame))
+        XCTAssertTrue(scroll.frame.contains(more.frame))
+        XCTAssertGreaterThanOrEqual(more.frame.height, 44)
+        XCTAssertLessThanOrEqual(more.frame.maxY, player.frame.minY)
+        XCTAssertTrue(more.isHittable)
+        more.tap()
+        scroll.swipeUp()
+        let next = app.buttons["youtube-result-dQw4w9WgXcQ"]
+        XCTAssertTrue(next.waitForExistence(timeout: 5))
+        XCTAssertTrue(scroll.frame.contains(next.frame))
+        next.tap()
+        XCTAssertTrue(app.staticTexts["youtube-stream-ready"].waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(scroll.frame.maxY, player.frame.minY)
+        app.buttons["Pause"].tap()
+        XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 5))
+    }
+
+    func testValidPastedLinkUsesSameDetailsAndCanReturn() {
+        youtubeSearch(); app.buttons["youtube-paste-link"].tap()
+        inspect("https://m.youtube.com/watch?v=9bZkp7q19f0&si=fixture&list=anything")
+        XCTAssertTrue(app.staticTexts["youtube-stream-ready"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["youtube-detail-title"].label, "Resolved Fixture Song")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.textFields["youtube-link-input"].waitForExistence(timeout: 3))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["youtube-paste-link"].waitForExistence(timeout: 3))
+    }
+    func testMalformedLinkShowsValidationErrorWithoutOpeningDetails() {
+        youtubeSearch(); app.buttons["youtube-paste-link"].tap()
+        inspect("https://youtube.com.attacker.example/watch?v=9bZkp7q19f0")
+        XCTAssertTrue(app.staticTexts["youtube-link-error"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["youtube-detail-title"].exists)
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
+    }
+    func testYouTubeSearchAndDetailsPreserveLocalPlayback() {
+        app.tabBars.buttons["Library"].tap()
+        app.buttons["library-filter-Songs"].tap()
+        let track = app.staticTexts["Fixture A"].firstMatch
+        XCTAssertTrue(track.waitForExistence(timeout: 5)); track.tap()
+        XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 5))
+        youtubeSearch()
+        let field = app.textFields["search-field"]
+        field.tap(); field.typeText("fixture\n")
+        let result = app.buttons["youtube-result-9bZkp7q19f0"]
+        XCTAssertTrue(result.waitForExistence(timeout: 5)); result.tap()
+        XCTAssertTrue(app.staticTexts["youtube-stream-ready"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Pause"].exists)
+        XCTAssertTrue(app.staticTexts["Fixture A"].firstMatch.exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["Pause"].isHittable)
+        app.tabBars.buttons["Library"].tap()
+        XCTAssertTrue(app.buttons["Pause"].isHittable)
+    }
+}

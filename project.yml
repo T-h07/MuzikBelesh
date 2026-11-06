@@ -1,0 +1,134 @@
+name: OFFLINE
+options:
+  bundleIdPrefix: com.th07
+  deploymentTarget:
+    iOS: '17.0'
+  createIntermediateGroups: true
+  defaultConfig: Debug
+packages:
+  YouTubeKit:
+    url: https://github.com/alexeichhorn/YouTubeKit.git
+    exactVersion: 0.4.10
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    version: 7.11.1
+settings:
+  base:
+    SWIFT_VERSION: 5.9
+    DEVELOPMENT_TEAM: ''
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: ''
+    CURRENT_PROJECT_VERSION: '3'
+    MARKETING_VERSION: '1.0.0'
+targets:
+  OFFLINE:
+    type: application
+    platform: iOS
+    deploymentTarget: '17.0'
+    sources:
+      - path: OFFLINE
+        excludes: [Resources/Info.plist]
+      - path: OFFLINEShareExtension/SharedURLHandler.swift
+      - path: Sharing/SharedLinkInbox.swift
+    resources: [OFFLINE/Resources/Assets.xcassets]
+    info:
+      path: OFFLINE/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Muzik Belesh
+        CFBundleShortVersionString: '1.0.0'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
+        MBBuildCommit: '$(GIT_COMMIT_SHORT)'
+        MBBuildDate: '$(BUILD_DATE)'
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIBackgroundModes: [audio]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh
+        CODE_SIGN_ENTITLEMENTS: Sharing/ShareGroups.entitlements
+        TARGETED_DEVICE_FAMILY: '1'
+        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GIT_COMMIT_SHORT: local
+        BUILD_DATE: unknown
+      configs:
+        Debug: {SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG}
+        Release: {SWIFT_OPTIMIZATION_LEVEL: -O}
+    dependencies:
+      - package: YouTubeKit
+      - package: GRDB
+        product: GRDB
+      - target: OFFLINEShareExtension
+  OFFLINETests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: '17.0'
+    sources: [Tests/Unit, Tests/Fixtures]
+    dependencies:
+      - target: OFFLINE
+      - package: YouTubeKit
+      - package: GRDB
+        product: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.tests
+        GENERATE_INFOPLIST_FILE: YES
+  OFFLINEUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '17.0'
+    sources: [Tests/UITests]
+    dependencies: [{target: OFFLINE}]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: OFFLINE
+  OFFLINEShareExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: '17.0'
+    sources:
+      - path: Sharing/SharedLinkInbox.swift
+      - path: OFFLINE/YouTube/YouTubeURLValidator.swift
+      - path: OFFLINEShareExtension
+        excludes: [Info.plist]
+    info:
+      path: OFFLINEShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Muzik Belesh
+        CFBundlePackageType: 'XPC!'
+        CFBundleShortVersionString: '1.0.0'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionJavaScriptPreprocessingFile: PageURL
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh.share
+        CODE_SIGN_ENTITLEMENTS: Sharing/ShareGroups.entitlements
+        TARGETED_DEVICE_FAMILY: '1'
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: OFFLINEShareExtension/Info.plist
+    dependencies: []
+schemes:
+  OFFLINE:
+    build:
+      targets:
+        OFFLINE: all
+        OFFLINETests: [test]
+        OFFLINEShareExtension: all
+    test:
+      targets: [OFFLINETests, OFFLINEUITests]
+      gatherCoverageData: false
+

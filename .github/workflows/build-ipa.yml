@@ -1,0 +1,43 @@
+name: Build unsigned IPA
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Optional build number for an in-place candidate after CI verification
+        type: string
+        default: ''
+concurrency:
+  group: unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+permissions: {contents: read}
+jobs:
+  package:
+    runs-on: macos-15
+    env:
+      BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate build number
+        run: '[[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]'
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          test "$(xcodegen --version)" = "Version: 2.46.0"
+      - name: Generate and resolve
+        run: xcodegen generate && xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+      - name: Build unsigned device app
+        run: |
+          GIT_COMMIT_SHORT="${GITHUB_SHA:0:7}"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" clean build
+      - name: Package and validate IPA
+        run: bash Scripts/package-ipa.sh
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFLINE-unsigned-IPA
+          path: |
+            build/ipa/OFFLINE-unsigned.ipa
+            build/ipa/OFFLINE-build-manifest.json
+          if-no-files-found: error
+

@@ -1,0 +1,181 @@
+name: CI
+on:
+  pull_request: {branches: [develop]}
+  push:
+    branches: [develop, 'feature/**']
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Standard runner pool (Intel is a bounded capacity fallback)
+        type: choice
+        options: [macos-15, macos-15-intel]
+        default: macos-15
+      verification_scope:
+        description: Focused regression or complete final verification
+        type: choice
+        options: [complete, focused, profile]
+        default: complete
+      live_youtube:
+        description: Opt-in external YouTube compatibility checks (separate from deterministic gates)
+        type: boolean
+        default: false
+      prebuilt_run_id:
+        description: Reuse test products from a focused run of this exact commit
+        type: string
+        default: ''
+concurrency:
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+permissions: {contents: read, actions: read}
+jobs:
+  build-and-test:
+    runs-on: ${{ inputs.runner_label || 'macos-15' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          test "$(xcodegen --version)" = "Version: 2.46.0"
+      - name: Toolchain diagnostics
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          swift --version
+          xcodegen --version
+          xcrun simctl list devices available
+      - name: Generate project
+        run: xcodegen generate
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+      - name: Select simulator
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone .*Pro Max \(/ {print $2; exit}')
+          test -n "$DEVICE_ID"
+          xcrun simctl list devices available | grep "$DEVICE_ID"
+          echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+      - name: Download compiled test products
+        if: inputs.prebuilt_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: offline-test-products
+          path: build/prebuilt
+          run-id: ${{ inputs.prebuilt_run_id }}
+          github-token: ${{ github.token }}
+      - name: Build all test products once
+        if: inputs.prebuilt_run_id == ''
+        run: |
+          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -derivedDataPath build/TestProducts build-for-testing CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          git rev-parse HEAD > build/product-source.txt
+      - name: Locate and verify compiled test products
+        run: |
+          if [[ -n "${{ inputs.prebuilt_run_id }}" ]]; then
+            test "$(cat build/prebuilt/product-source.txt)" = "$(git rev-parse HEAD)"
+            mkdir -p build/TestProducts/Build
+            tar -xzf build/prebuilt/test-products.tar.gz -C build/TestProducts/Build
+          fi
+          TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
+          test -f "${TEST_RUN_FILES[0]}"
+          echo "TEST_RUN=${TEST_RUN_FILES[0]}" >> "$GITHUB_ENV"
+      - name: Retain compiled products for final verification
+        if: inputs.verification_scope == 'focused'
+        run: tar -czf build/test-products.tar.gz -C build/TestProducts/Build Products
+      - name: Upload compiled test products
+        if: inputs.verification_scope == 'focused'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-test-products
+          path: |
+            build/test-products.tar.gz
+            build/product-source.txt
+          retention-days: 7
+          if-no-files-found: error
+      - name: Repeatable performance baseline
+        if: inputs.verification_scope == 'profile'
+        run: |
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/PerformanceResults.xcresult -only-testing:OFFLINETests/ReleasePerformanceTests -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Focused download, YouTube and keyboard regressions
+        if: inputs.verification_scope == 'focused'
+        run: |
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -only-testing:OFFLINEUITests/YouTubeUITests -only-testing:OFFLINETests/ReleasePerformanceTests -only-testing:OFFLINETests/ReleaseReliabilityTests -only-testing:OFFLINETests/PlaybackServiceAuditTests -only-testing:OFFLINETests/ShareURLValidationTests -only-testing:OFFLINETests/SharedLinkInboxTests -only-testing:OFFLINETests/YouTubeURLParserTests -only-testing:OFFLINETests/YouTubeProviderTests -only-testing:OFFLINETests/YouTubeSearchStateTests -only-testing:OFFLINETests/BackgroundDownloadTests -only-testing:OFFLINETests/DownloadTests -only-testing:OFFLINETests/YouTubeAudioTests -only-testing:OFFLINETests/YouTubeLibraryIntegrityTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Opt-in live YouTube compatibility
+        if: inputs.live_youtube
+        continue-on-error: true
+        run: |
+          python3 Scripts/enable-youtube-live-tests.py "$TEST_RUN" build/Live.xctestrun
+          xcodebuild -xctestrun build/Live.xctestrun -destination "id=$SIMULATOR_ID" -resultBundlePath build/YouTubeLiveResults.xcresult -only-testing:OFFLINETests/YouTubeLiveTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Compact iPhone library layout
+        if: inputs.verification_scope != 'focused' && inputs.verification_scope != 'profile'
+        run: |
+          COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
+          test -n "$COMPACT_ID"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Export compact screenshots
+        if: always()
+        run: |
+          if [[ -d build/CompactResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/CompactResults.xcresult --output-path build/CompactScreenshots
+          fi
+      - name: Standard iPhone accessibility
+        if: inputs.verification_scope == 'complete'
+        run: |
+          STANDARD_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone 16 \(/ {print $2; exit}')
+          test -n "$STANDARD_ID"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$STANDARD_ID" -resultBundlePath build/StandardResults.xcresult -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Complete regression suite
+        if: inputs.verification_scope != 'focused' && inputs.verification_scope != 'profile'
+        run: |
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Export UI screenshots
+        if: always()
+        run: |
+          if [[ -d build/TestResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/TestResults.xcresult --output-path build/UITestScreenshots
+          fi
+          if [[ -d build/KeyboardResults.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/KeyboardResults.xcresult --output-path build/KeyboardScreenshots
+          fi
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-ui-screenshots
+          path: |
+            build/UITestScreenshots
+            build/CompactScreenshots
+            build/KeyboardScreenshots
+          if-no-files-found: ignore
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playback-test-results
+          path: |
+            build/StandardResults.xcresult
+            build/PerformanceResults.xcresult
+            build/TestResults.xcresult
+            build/CompactResults.xcresult
+            build/KeyboardResults.xcresult
+            build/YouTubeLiveResults.xcresult
+          if-no-files-found: ignore
+
+      - name: Build verified unsigned device candidate
+        if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''
+        run: |
+          GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DeviceCandidate CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" build
+          bash Scripts/package-ipa.sh build/DeviceCandidate/Build/Products/Release-iphoneos/OFFLINE.app build/ipa
+      - name: Upload verified unsigned candidate
+        if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: OFFLINE-unsigned-IPA
+          path: |
+            build/ipa/OFFLINE-unsigned.ipa
+            build/ipa/OFFLINE-build-manifest.json
+          if-no-files-found: error
