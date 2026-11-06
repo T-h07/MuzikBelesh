@@ -343,10 +343,17 @@ final class AudioPlayerService: ObservableObject {
         timeObserver = native.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self, generation == self.itemGeneration, !self.state.isSeeking, time.seconds.isFinite else { return }
-                self.state.elapsedTime = max(0, time.seconds)
-                self.updateSkipAvailability(); self.publishCurrent()
-                if abs(self.state.elapsedTime - self.lastSavedPosition) >= 5 { self.lastSavedPosition = self.state.elapsedTime; self.record("clock-sampled"); self.persist() }
+                self.samplePlaybackTime(time.seconds)
             }
+        }
+    }
+
+    func samplePlaybackTime(_ seconds: Double) {
+        guard seconds.isFinite, !state.isSeeking else { return }
+        state.elapsedTime = max(0, seconds)
+        updateSkipAvailability(); publishCurrent()
+        if abs(state.elapsedTime - lastSavedPosition) >= 5 {
+            lastSavedPosition = state.elapsedTime; record("clock-sampled"); persist()
         }
     }
 
