@@ -35,7 +35,7 @@ for executable in "$app/OFFLINE" "$app/PlugIns/OFFLINEShareExtension.appex/OFFLI
   identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$(dirname "$executable")/Info.plist")"
   codesign --force --sign - --identifier "$identifier" --timestamp=none --entitlements "$entitlements" "$work/binary"
   codesign --verify "$work/binary"
-  codesign -d --entitlements - "$work/binary" > "$work/actual.plist"
+  codesign -d --entitlements - --xml "$work/binary" > "$work/actual.plist"
   python3 - "$entitlements" "$work/actual.plist" <<'CHECK'
 import plistlib, sys
 with open(sys.argv[1], "rb") as expected, open(sys.argv[2], "rb") as actual:
