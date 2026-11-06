@@ -24,3 +24,43 @@ Baseline is the accepted Phase 8 merge b9386122a56ddf1550b360c4ce9401ff100ceeb3.
 No confirmed P0 data-loss defect was found in this initial inspection. Hardware-dependent correctness, energy, thermal, interruption and signing claims remain subject to Phase 9 device acceptance. This register records source findings, with final evidence added as verification completes.
 
 A profile-only dispatch in the existing CI workflow runs repeatable isolated playback work-count and large-library timing tests. It provides a simulator baseline, without implying device CPU percentage, battery consumption or temperature. No live media network requests are needed.
+
+## Candidate corrections and residual evidence
+
+The 16 reviewed areas above produced 10 grouped actionable findings: two P1
+(clock overhead; route/reset recovery), seven P2 (Release mocks, artwork churn,
+queue checkpoint rewrites, quadratic/unbounded navigation, resource scheduling,
+export allocation/failure cleanup, candidate packaging), and one P3 (stale
+Diagnostics presentation). No confirmed P0 was identified. The initial register
+used provisional P2 for Diagnostics; final severity is cosmetic P3. All ten have
+candidate corrections; their execution evidence is supplied by the integration
+PR's focused/full runs. No pending run is represented as passed here.
+
+Clock checkpoints now update only position; metadata is event-driven and artwork
+reused. Set-based context setup and bulk availability reads remove quadratic and
+per-track query costs. Navigation memory is bounded independently of listening
+history. Waiting playback pauses on route loss. Media reset rebuilds the native
+player/item paused, preserving identity/position and awaiting explicit Play.
+Resource notifications reduce display cadence and new transfer concurrency,
+defer new work at serious/critical pressure, and suspend nonessential per-file
+duration maintenance without modifying user preferences. Export uses a verified
+streaming copy; failed writes remove partial output and retain the source. Release
+excludes legacy mocks, exposes current system diagnostics and verifies the 1.0.0
+app/extension metadata before packaging.
+
+Regression additions: ReleasePerformanceTests (clock work counts, scaling and
+XCTest CPU/memory), ReleaseReliabilityTests (SQLite capacity rollback, streaming
+write failure, export lifetime/hash, 10k records, bounded history, artwork reuse,
+200 repeated track changes/deallocation), PlaybackServiceAuditTests (waiting route
+and reset), BackgroundDownloadTests (thermal queue/recovery) and YouTubeUITests
+(large text/repeated player presentation). Historical migrations, safe deletion,
+import/duplicate, duration/EOF, URL/redirect, inbox and restoration suites remain
+part of the complete verification. No new database migration or audio-byte
+normalization is introduced.
+
+Residual risks are empirical: real radio switching, locked audio/sleep,
+interruption behavior, extended memory/energy/thermal trends, live YouTube,
+VoiceOver and build 189 in-place signing/data continuity. They are NOT RUN for
+this candidate, not waived. See PHASE_09_FEATURE_MATRIX.md,
+PHASE_09_PERFORMANCE.md and PHASE_09_DEVICE_TESTING.md. Any new failing test or
+physical defect reopens its severity and release gate before integration.

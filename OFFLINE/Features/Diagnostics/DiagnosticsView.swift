@@ -3,13 +3,14 @@ struct DiagnosticsView: View {
     @StateObject var viewModel: DiagnosticsViewModel
     var body: some View { ScrollView { VStack(alignment: .leading, spacing: 18) {
         Text("Muzik Belesh").font(.system(size: 38, weight: .bold)).foregroundStyle(.white)
-        Text("Phase 0 — Foundation & Feasibility").foregroundStyle(Color.lime)
+        Text("Playback and System Diagnostics").foregroundStyle(Color.lime)
         Divider().overlay(.gray)
         PlaybackDiagnosticsView(service: viewModel.container.audioPlayer, diagnostics: viewModel.container.audioPlayer.diagnostics)
         Divider().overlay(.gray)
         status("Launch", "Successful"); status("Version", "\(viewModel.container.configuration.version) (\(viewModel.container.configuration.build))")
         status("iOS", ProcessInfo.processInfo.operatingSystemVersionString); status("Bundle", viewModel.container.configuration.bundleIdentifier)
         status("Configuration", viewModel.container.configuration.buildConfiguration); status("YouTubeKit", viewModel.youtubeStatus); status("Share extension", viewModel.shareStatus)
+        ResourceDiagnosticsView(monitor: viewModel.container.resources)
         Text("Optional YouTubeKit probe").font(.headline).foregroundStyle(.white)
         TextField("YouTube URL or video ID", text: $viewModel.input).textFieldStyle(.roundedBorder)
         Button("Resolve metadata and audio stream") { Task { await viewModel.runProbe() } }.buttonStyle(.borderedProminent).tint(Color.lime)

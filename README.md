@@ -5,11 +5,11 @@ AVFoundation playback, background audio and Lock Screen controls. Windows suppor
 editing/Git; GitHub Actions macOS builds and tests the application. The canonical
 bundle identifier remains `com.th07.muzikbelesh`.
 
-Phase 4 is merged into `develop` at `a58861f` (PR #5; its merge records physical
-iPhone acceptance). Phase 5 on `feature/phase-05-library` adds persisted playlists,
-likes, artists/albums, local search/sorting, metadata/artwork editing and confirmed,
-recoverable deletion. Existing mock catalogs remain development fixtures; production
-Library, Home and local Search use SQLite.
+Phase 8 build 189 was accepted on-device and merged into `develop` at
+`b938612`. Phase 9 on `feature/phase-09-release` prepares the **1.0.0 release
+candidate** with reliability and performance hardening. Physical acceptance and
+explicit publication approval remain pending; the stable release is not published.
+Production screens use the persistent SQLite library; mock catalogs are Debug-only.
 
 ## Use
 
@@ -40,12 +40,17 @@ regressions, SQLite/filesystem tests, the ten-track lifecycle and UI workflows.
 manifest. SideStore signs the unsigned app and extension; update in place to retain
 the existing application container.
 
-**Milestone B — Complete Offline Music Player: device acceptance pending.**
-Phase 5 is not marked complete or automatically merged until every mandatory gate,
-including the required physical iPhone checks, is recorded as passing. Phase 6 has
-not started. Final CI/IPA provenance and device status are recorded in the Phase 5 PR.
+YouTube mode in Search supports search, pagination, details and queued audio
+downloads with quality and Wi-Fi preferences. Native transfers reconcile after
+backgrounding. Share a YouTube/Safari link to Muzik Belesh, then manually open the
+app to finish the validated handoff. Downloads never start solely from sharing.
 
 ## Documentation
+
+- [Release audit](Docs/PHASE_09_RELEASE_AUDIT.md) and [15-feature matrix](Docs/PHASE_09_FEATURE_MATRIX.md)
+- [Performance evidence and limits](Docs/PHASE_09_PERFORMANCE.md)
+- [Candidate device checklist P0–P24](Docs/PHASE_09_DEVICE_TESTING.md)
+- [Release gates](Docs/PHASE_09_RELEASE_CHECKLIST.md) and [known limitations](Docs/KNOWN_LIMITATIONS.md)
 
 - [Library architecture](Docs/LIBRARY_ARCHITECTURE.md)
 - [Playlist management](Docs/PLAYLIST_MANAGEMENT.md)

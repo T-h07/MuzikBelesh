@@ -15,6 +15,7 @@ private final class SQLCounts: @unchecked Sendable {
         if sql.hasPrefix("SELECT") { selects += 1 }
         if ["UPDATE", "INSERT", "DELETE"].contains(where: sql.hasPrefix) { writes += 1 }
     }
+    var values: (Int, Int) { lock.lock(); defer { lock.unlock() }; return (selects, writes) }
     var summary: String {
         lock.lock()
         defer { lock.unlock() }
@@ -38,9 +39,29 @@ final class ReleasePerformanceTests: XCTestCase {
         let elapsed = ProcessInfo.processInfo.systemUptime - start
         token.cancel()
         try await fixture.storage.database.dbQueue.write { $0.trace(nil) }
-        print("PHASE9 clock60s cpuWorkSeconds=\(elapsed) publications=\(publications) \(counts.summary)")
+        print("PHASE9 clock60s workElapsedSeconds=\(elapsed) publications=\(publications) \(counts.summary)")
         XCTAssertEqual(try fixture.storage.playback.queue().count, 20)
         XCTAssertEqual(player.state.elapsedTime, 60)
+        XCTAssertEqual(counts.values.0, 0)
+        XCTAssertEqual(counts.values.1, 12)
+        XCTAssertLessThanOrEqual(publications, 123)
+    }
+
+    func testSearchCPUAndMemoryMetrics() throws {
+        let fixture = try LibraryFixture(count: 1)
+        let original = try XCTUnwrap(fixture.storage.tracks.find(id: fixture.ids[0]))
+        var snapshot = LibrarySnapshot()
+        snapshot.tracks = (0..<10000).map { index in
+            var track = original
+            track.id = "metric-\(index)"
+            track.title = "Synthetic Song \(index)"
+            return track
+        }
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+        measure(metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()], options: options) {
+            XCTAssertFalse(LibrarySearchEngine.search("Synthetic Song 9", in: snapshot).isEmpty)
+        }
     }
 
     func testLargeLibraryAndQueueBaseline() throws {

@@ -13,6 +13,7 @@ final class PlaybackNavigationEngine {
     private(set) var shufflePosition = 0
     private(set) var history: [String] = []
     private(set) var historyPosition = -1
+    static let historyLimit = 1000
     private var explicitQueue: [String] = []
     private let makeShuffle: ([String]) -> [String]
 
@@ -23,13 +24,13 @@ final class PlaybackNavigationEngine {
         self.shuffleOrder = shuffleOrder; self.shufflePosition = min(shuffleOrder.count, max(0, shufflePosition))
         self.history = history; self.historyPosition = history.isEmpty ? -1 : min(max(-1, historyPosition), history.count - 1)
         self.explicitQueue = explicitQueue
+        trimHistory()
         reconcileHistoryCursor()
     }
 
     func setContext(_ ids: [String], currentID: String?) {
-        let filtered = ids
-        var unique: [String] = []
-        for id in filtered where !unique.contains(id) { unique.append(id) }
+        var seen = Set<String>()
+        let unique = ids.filter { seen.insert($0).inserted }
         let oldContext = Set(context)
         context = unique
         self.currentID = currentID
@@ -91,6 +92,7 @@ final class PlaybackNavigationEngine {
         if direction == .previous, historyPosition > 0, history[historyPosition - 1] == id { historyPosition -= 1; return }
         if direction == .forward, historyPosition >= 0, historyPosition + 1 < history.count, history[historyPosition + 1] == id { historyPosition += 1; return }
         history = Array(history.prefix(max(0, historyPosition + 1))); history.append(id); historyPosition = history.count - 1
+        trimHistory()
     }
 
     func hasNext(reason: PlaybackAdvanceReason = .automatic, explicitQueue: [String]? = nil) -> Bool {
@@ -105,6 +107,13 @@ final class PlaybackNavigationEngine {
         return index + 1 < context.count || repeatMode == .all
     }
     func hasPrevious() -> Bool { previous() != nil }
+
+    private func trimHistory() {
+        guard history.count > Self.historyLimit else { return }
+        let start = max(0, min(history.count - Self.historyLimit, historyPosition - Self.historyLimit / 2))
+        history = Array(history[start..<(start + Self.historyLimit)])
+        historyPosition -= start
+    }
 
     private var hasCurrentHistoryEntry: Bool {
         history.indices.contains(historyPosition) && history[historyPosition] == currentID

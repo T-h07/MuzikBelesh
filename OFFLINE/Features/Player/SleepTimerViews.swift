@@ -21,9 +21,24 @@ struct SleepTimerSheet: View {
 }
 
 struct SleepTimerStatusIndicator: View {
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var timer: SleepTimerService
     var showsLabel = false
     var onTap: () -> Void
-    var body: some View { if timer.isActive { TimelineView(.periodic(from: .now, by: 1)) { _ in Button(action: onTap) { Label(showsLabel ? "Sleep Timer · \(format(timer.remaining))" : format(timer.remaining), systemImage: "moon.fill").font(.caption.weight(.semibold)).foregroundStyle(AppColors.accentPrimary).padding(.horizontal, AppSpacing.sm).padding(.vertical, 6).background(AppColors.backgroundSecondary, in: Capsule()) }.buttonStyle(.plain).accessibilityIdentifier("sleep-timer-indicator") } } }
+    var body: some View {
+        if timer.isActive {
+            if scenePhase == .active {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in control }
+            } else { control }
+        }
+    }
+    private var control: some View {
+        Button(action: onTap) {
+            Label(showsLabel ? "Sleep Timer · \(format(timer.remaining))" : format(timer.remaining), systemImage: "moon.fill")
+                .font(.caption.weight(.semibold)).foregroundStyle(AppColors.accentPrimary)
+                .padding(.horizontal, AppSpacing.sm).padding(.vertical, 6)
+                .background(AppColors.backgroundSecondary, in: Capsule())
+        }.buttonStyle(.plain).accessibilityIdentifier("sleep-timer-indicator")
+    }
     private func format(_ seconds: TimeInterval) -> String { String(format: "%02d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
 }

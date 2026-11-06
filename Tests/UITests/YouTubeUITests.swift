@@ -21,6 +21,34 @@ final class YouTubeUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 3)); field.tap(); field.typeText(value)
         app.buttons["youtube-inspect-link"].tap()
     }
+    func testReleasePlayerControlsWithLargeTextAndRepeatedPresentation() {
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
+        app.launch()
+        app.tabBars.buttons["Library"].tap()
+        app.buttons["library-filter-Songs"].tap()
+        let track = app.staticTexts["Fixture A"].firstMatch
+        XCTAssertTrue(track.waitForExistence(timeout: 5))
+        track.tap()
+        let open = app.buttons["Open Now Playing"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        for _ in 0..<3 {
+            open.tap()
+            let pause = app.buttons["Pause"].firstMatch
+            XCTAssertTrue(pause.waitForExistence(timeout: 4))
+            if !pause.isHittable { app.swipeUp() }
+            XCTAssertTrue(pause.isHittable)
+            app.buttons["Done"].firstMatch.tap()
+            XCTAssertTrue(open.waitForExistence(timeout: 4))
+        }
+        app.tabBars.buttons["Downloads"].tap()
+        XCTAssertTrue(app.staticTexts["No downloads"].waitForExistence(timeout: 4))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Release-Large-Text"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testPendingSharePrefillsImportAndUsesExistingDownloadPipeline() {
         app.terminate()
         app.launchArguments.append("--pending-share")

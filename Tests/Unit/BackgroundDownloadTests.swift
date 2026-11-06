@@ -5,6 +5,32 @@ import XCTest
 @testable import OFFLINE
 
 @MainActor final class BackgroundDownloadTests: XCTestCase {
+    func testThermalDeferralPreservesActiveTransferAndLowPowerLimitsNewTasks() async throws {
+        let fixture = try LibraryFixture(count: 0)
+        let prefs = YouTubePreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        prefs.simultaneous = 3
+        let system = TestSystem()
+        let manager = makeManager(fixture.storage, prefs, system)
+        manager.setResourcePolicy(ResourcePolicy(thermal: .serious))
+        manager.setForeground(true)
+        manager.setPath(connected: true, wifi: true)
+        for index in 1...3 { manager.enqueue(YouTubeVideo(id: String(format: "fixture%04d", index), title: "Test"), quality: .standard) }
+        try await until { system.enumerations > 0 }
+        XCTAssertEqual(system.created, 0)
+        XCTAssertEqual(manager.stateLabel(for: manager.jobs[0]), "Waiting for device to cool")
+        manager.setResourcePolicy(ResourcePolicy(lowPower: true))
+        try await until { system.created == 1 }
+        XCTAssertEqual(prefs.simultaneous, 3)
+        let active = system.tasks[0]
+        manager.setResourcePolicy(ResourcePolicy(thermal: .critical))
+        XCTAssertTrue(system.cancelled.isEmpty)
+        XCTAssertTrue(manager.jobs.contains(where: active.belongs))
+        manager.setResourcePolicy(ResourcePolicy())
+        try await until { system.created == 3 }
+        XCTAssertTrue(system.cancelled.isEmpty)
+        XCTAssertEqual(Set(system.tasks.compactMap(\.description)).count, 3)
+    }
+
     private func makeManager(_ storage: StorageCoordinator, _ prefs: YouTubePreferences, _ system: TestSystem) -> DownloadManager {
         DownloadManager(storage: storage, preferences: prefs, preparer: YouTubeDownloadPreparer(resolver: YouTubeUITestFixtures()), transfer: FixtureAudioTransfer(), artwork: YouTubeArtworkLoader(), observeNetwork: false, system: system)
     }

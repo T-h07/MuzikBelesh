@@ -28,6 +28,7 @@ final class StorageCoordinator: ObservableObject {
         playback = GRDBPlaybackRepository(db: database.dbQueue)
         downloads = GRDBDownloadJobRepository(db: database.dbQueue)
         try downloads.markInterrupted()
+        try? PreparedAudioExport.cleanupAbandoned(in: paths.exports)
         do { try ManagedLibraryFiles.recover(paths: paths, db: database.dbQueue) }
         catch { lastError = "A pending file operation needs recovery. Existing recovery copies were retained." }
         try reconcileMissingFiles()
@@ -79,6 +80,9 @@ final class StorageCoordinator: ObservableObject {
             try? FileManager.default.removeItem(at: staging)
             finishImportJournal(id, state: "rolled_back")
             if error is CancellationError { throw error }
+            if (error as NSError).domain == NSCocoaErrorDomain && (error as NSError).code == NSFileWriteOutOfSpaceError {
+                throw StorageError.insufficientStorage
+            }
             throw error is StorageError || error is LibraryError ? error : StorageError.importIncomplete
         }
     }
@@ -163,6 +167,22 @@ final class StorageCoordinator: ObservableObject {
             try? FileManager.default.removeItem(at: destination)
             if let artworkName { try? ManagedLibraryFiles.cleanupArtwork(artworkName, paths: paths, db: database.dbQueue) }
             throw error
+        }
+    }
+
+    func prepareExport(trackID: String) async throws -> PreparedAudioExport {
+        try await mutations.withLock {
+            try await Task.detached(priority: .userInitiated) { [self] in
+                guard let track = try tracks.find(id: trackID), track.availability == .available else { throw StorageError.missingFile }
+                let source = try paths.musicURL(relativePath: track.fileRelativePath)
+                let directory = paths.exports.appendingPathComponent("Export-" + UUID().uuidString, isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let filename = safeFilename(String(track.title.prefix(100)), fileExtension: track.fileExtension)
+                let export = PreparedAudioExport(directory: directory, url: directory.appendingPathComponent(filename))
+                try audio.copyStreaming(from: source, to: export.url)
+                guard try audio.sha256(url: export.url) == track.contentSHA256 else { throw StorageError.exportFailed }
+                return export
+            }.value
         }
     }
 

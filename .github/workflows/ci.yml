@@ -101,7 +101,7 @@ jobs:
       - name: Focused download, YouTube and keyboard regressions
         if: inputs.verification_scope == 'focused'
         run: |
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -only-testing:OFFLINEUITests/YouTubeUITests -only-testing:OFFLINETests/ShareURLValidationTests -only-testing:OFFLINETests/SharedLinkInboxTests -only-testing:OFFLINETests/YouTubeURLParserTests -only-testing:OFFLINETests/YouTubeProviderTests -only-testing:OFFLINETests/YouTubeSearchStateTests -only-testing:OFFLINETests/BackgroundDownloadTests -only-testing:OFFLINETests/DownloadTests -only-testing:OFFLINETests/YouTubeAudioTests -only-testing:OFFLINETests/YouTubeLibraryIntegrityTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/KeyboardResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchTabTransitionClearScrollAndPlaybackKeepNavigationAccessible -only-testing:OFFLINEUITests/YouTubeUITests -only-testing:OFFLINETests/ReleasePerformanceTests -only-testing:OFFLINETests/ReleaseReliabilityTests -only-testing:OFFLINETests/PlaybackServiceAuditTests -only-testing:OFFLINETests/ShareURLValidationTests -only-testing:OFFLINETests/SharedLinkInboxTests -only-testing:OFFLINETests/YouTubeURLParserTests -only-testing:OFFLINETests/YouTubeProviderTests -only-testing:OFFLINETests/YouTubeSearchStateTests -only-testing:OFFLINETests/BackgroundDownloadTests -only-testing:OFFLINETests/DownloadTests -only-testing:OFFLINETests/YouTubeAudioTests -only-testing:OFFLINETests/YouTubeLibraryIntegrityTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Opt-in live YouTube compatibility
         if: inputs.live_youtube
         continue-on-error: true
@@ -120,6 +120,12 @@ jobs:
           if [[ -d build/CompactResults.xcresult ]]; then
             xcrun xcresulttool export attachments --path build/CompactResults.xcresult --output-path build/CompactScreenshots
           fi
+      - name: Standard iPhone accessibility
+        if: inputs.verification_scope == 'complete'
+        run: |
+          STANDARD_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone 16 \(/ {print $2; exit}')
+          test -n "$STANDARD_ID"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$STANDARD_ID" -resultBundlePath build/StandardResults.xcresult -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
       - name: Complete regression suite
         if: inputs.verification_scope != 'focused' && inputs.verification_scope != 'profile'
         run: |
@@ -149,6 +155,7 @@ jobs:
         with:
           name: playback-test-results
           path: |
+            build/StandardResults.xcresult
             build/PerformanceResults.xcresult
             build/TestResults.xcresult
             build/CompactResults.xcresult

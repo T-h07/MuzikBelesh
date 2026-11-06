@@ -19,6 +19,9 @@ final class GRDBTrackRepository: TrackRepository {
     private let db: DatabaseQueue
     init(db: DatabaseQueue) { self.db = db }
     func all() throws -> [StoredTrack] { try db.read { try StoredTrack.order(Column("dateAdded").desc).fetchAll($0) } }
+    func availableIDs() throws -> Set<String> {
+        try db.read { Set(try String.fetchAll($0, sql: "SELECT id FROM tracks WHERE availability = ?", arguments: [StoredTrackAvailability.available.rawValue])) }
+    }
     func find(id: String) throws -> StoredTrack? { try db.read { try StoredTrack.fetchOne($0, key: id) } }
     func find(contentSHA256: String) throws -> StoredTrack? { try db.read { try StoredTrack.filter(Column("contentSHA256") == contentSHA256).fetchOne($0) } }
     func save(_ value: StoredTrack) throws {
@@ -60,6 +63,12 @@ final class GRDBPlaybackRepository: PlaybackRepository {
             try state.save(db)
             try db.execute(sql: "DELETE FROM playback_queue_entries")
             for entry in queue { try entry.save(db) }
+        }
+    }
+    func savePosition(trackID: String?, positionMs: Int64) throws {
+        try db.write {
+            try $0.execute(sql: "UPDATE playback_state SET positionMs = ?, dateModified = ? WHERE scope = 'default' AND currentTrackID IS ?",
+                           arguments: [positionMs, Date(), trackID])
         }
     }
     func state() throws -> StoredPlaybackState? { try db.read { try StoredPlaybackState.fetchOne($0, key: "default") } }

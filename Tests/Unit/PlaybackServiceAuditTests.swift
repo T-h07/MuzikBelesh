@@ -498,6 +498,40 @@ final class PlaybackServiceAuditTests: XCTestCase {
         }
     }
 
+    @MainActor func testRouteLossWhileTransportWaitsPreventsDelayedSpeakerPlayback() async throws {
+        let (_, player, service, root) = try fixture(duration: 20)
+        defer { try? FileManager.default.removeItem(at: root) }
+        player.startsImmediately = false
+        try await service.play(trackID: "track-0")
+        XCTAssertEqual(service.state.status, .loading)
+        service.handleRouteChange(route: "Speaker", reason: .oldDeviceUnavailable)
+        XCTAssertEqual(service.state.status, .paused)
+        XCTAssertFalse(player.isPlaying)
+        service.handleInterruption(Notification(name: AVAudioSession.interruptionNotification, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue]))
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    @MainActor func testMediaResetRestoresPausedPositionAndPowerPolicyPreservesPlayback() async throws {
+        let (_, player, service, root) = try fixture(duration: 20)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await service.play(trackID: "track-0")
+        await service.seek(to: 7)
+        service.setResourcePolicy(ResourcePolicy(thermal: .critical, lowPower: true))
+        XCTAssertTrue(player.isPlaying)
+        service.handleInterruption(Notification(name: AVAudioSession.interruptionNotification, userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue]))
+        let seeksBeforeReset = player.seeks.count
+        service.handleMediaServicesReset()
+        await libraryEventually { player.seeks.count > seeksBeforeReset && player.seeks.last == 7 && service.state.status == .paused }
+        XCTAssertEqual(service.state.currentTrackID, "track-0")
+        XCTAssertFalse(player.isPlaying)
+        service.handleInterruption(Notification(name: AVAudioSession.interruptionNotification, userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue, AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue]))
+        XCTAssertFalse(player.isPlaying)
+        try await service.play()
+        XCTAssertTrue(player.isPlaying)
+    }
+
     @MainActor private func fixture(duration: Double = 3) throws -> (StorageCoordinator, FakePlaybackPlayer, AudioPlayerService, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))

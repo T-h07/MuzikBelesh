@@ -28,3 +28,19 @@ counter does not regress below an already installed CI candidate. The same value
 is supplied to both targets and validated by the packager. Record both the tested
 application-source commit and the final packaging commit; confirm application,
 extension, tests and project configuration are identical before reusing evidence.
+
+## Phase 9 candidate verification
+
+The profile scope runs the repeatable clock SQL/publication and large-library
+measurements. Baseline evidence and its limits are in PHASE_09_PERFORMANCE.md.
+Focused adds reliability/resource policy/large-library regressions and retains
+compiled products. Complete reuses only exact-SHA products, tests compact and
+standard/large-screen layouts, then builds the Release device candidate. Never
+run focused and complete concurrently. Inspect each failure before retrying.
+
+Both targets use marketing version 1.0.0; CI supplies the increasing build number.
+Packaging checks audio background mode, identities, versions, deployment target,
+arm64, icons and both ad-hoc App Group entitlement blobs, and rejects fixture
+markers in Release executables. The manifest labels this a candidate with physical
+acceptance pending; it is not stable publication. Test evidence, package manifest
+and final SHA-256 are linked from the integration PR.

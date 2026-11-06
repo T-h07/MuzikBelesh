@@ -30,3 +30,17 @@ and paths do not change merely because metadata is edited.
 Physical migration/update and all PHASE_05_DEVICE_TESTING.md cases are still NOT RUN
 until the developer records results. Do not infer them from an unsigned build or
 synthetic migration tests. No production GitHub Release or stable tag is published.
+
+## Phase 9 upgrade from accepted build 189
+
+Install the 1.0.0 candidate over the existing app with the same SideStore identity.
+Do not uninstall or change bundle IDs/App Group. Both app and extension must be
+re-signed; ad-hoc entitlement metadata remains embedded so the signer can request
+`group.com.th07.muzikbelesh.inbox`. No Apple provisioning profile or trusted
+identity is supplied by the unsigned artifact.
+
+Before updating, record library counts, playlists, likes, edited metadata/artwork,
+queue and a few exported audio hashes. Compare after update using
+PHASE_09_DEVICE_TESTING.md P0/P1/P24, then repeat YouTube and Safari share with
+manual app opening. A signed install and passing simulator are insufficient to
+claim data-preserving device acceptance. Record the exact IPA checksum and build.

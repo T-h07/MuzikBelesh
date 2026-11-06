@@ -40,7 +40,7 @@ import SwiftUI
         navigator.restore(context: contextTrackIDs, currentID: currentID, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode, shuffleOrder: shuffleOrder, shufflePosition: shufflePosition, history: navigationHistory, historyPosition: navigationHistoryPosition, explicitQueue: entries.map(\.trackID))
     }
 
-    func setContext(_ ids: [String], current: String?) { contextTrackIDs = ids.filter { isAvailable($0) }; currentID = current; navigator.setContext(contextTrackIDs, currentID: current); pendingNavigator?.setContext(contextTrackIDs, currentID: current); syncFromNavigator() }
+    func setContext(_ ids: [String], current: String?) { let available = (try? storage?.tracks.availableIDs()) ?? []; contextTrackIDs = ids.filter { available.contains($0) }; currentID = current; navigator.setContext(contextTrackIDs, currentID: current); pendingNavigator?.setContext(contextTrackIDs, currentID: current); syncFromNavigator() }
     func setCurrent(_ id: String?) { currentID = id; navigator.setCurrent(id) }
     func didStart(_ id: String, direction: NavigationDirection = .forward) {
         if let pendingNavigator { navigator = pendingNavigator }

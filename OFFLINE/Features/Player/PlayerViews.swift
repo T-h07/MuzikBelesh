@@ -51,9 +51,9 @@ struct NowPlayingView: View {
                 Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }.disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")
             }.foregroundStyle(AppColors.textPrimary)
             HStack(spacing: AppSpacing.lg) {
-                Button { audioPlayer.queue.toggleShuffle() } label: { Image(systemName: "shuffle").foregroundStyle(audioPlayer.queue.shuffleEnabled ? AppColors.accentPrimary : AppColors.textSecondary) }.accessibilityLabel("Shuffle")
-                Button { audioPlayer.queue.cycleRepeat() } label: { Image(systemName: audioPlayer.queue.repeatMode.symbol).foregroundStyle(audioPlayer.queue.repeatMode == .off ? AppColors.textSecondary : AppColors.accentPrimary) }.accessibilityLabel("Repeat \(audioPlayer.queue.repeatMode.rawValue)")
-                Button { showingTimer = true } label: { Image(systemName: audioPlayer.sleepTimer.isActive ? "moon.fill" : "moon").foregroundStyle(audioPlayer.sleepTimer.isActive ? AppColors.accentPrimary : AppColors.textSecondary) }.accessibilityLabel("Sleep Timer")
+                Button { audioPlayer.queue.toggleShuffle() } label: { Image(systemName: "shuffle").foregroundStyle(audioPlayer.queue.shuffleEnabled ? AppColors.accentPrimary : AppColors.textSecondary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Shuffle").accessibilityValue(audioPlayer.queue.shuffleEnabled ? "On" : "Off")
+                Button { audioPlayer.queue.cycleRepeat() } label: { Image(systemName: audioPlayer.queue.repeatMode.symbol).foregroundStyle(audioPlayer.queue.repeatMode == .off ? AppColors.textSecondary : AppColors.accentPrimary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Repeat \(audioPlayer.queue.repeatMode.rawValue)")
+                Button { showingTimer = true } label: { Image(systemName: audioPlayer.sleepTimer.isActive ? "moon.fill" : "moon").foregroundStyle(audioPlayer.sleepTimer.isActive ? AppColors.accentPrimary : AppColors.textSecondary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Sleep Timer")
             }
             SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
             HStack {

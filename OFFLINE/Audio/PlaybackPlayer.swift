@@ -8,25 +8,32 @@ import AVFoundation
     func pause()
     func replaceCurrentItem(with item: AVPlayerItem?)
     func seek(to time: CMTime) async -> Bool
+    func resetAfterMediaServicesFailure()
+}
+
+extension PlaybackPlayer {
+    func resetAfterMediaServicesFailure() { replaceCurrentItem(with: nil) }
 }
 
 @MainActor final class NativePlaybackPlayer: PlaybackPlayer {
-    let player = AVPlayer()
+    private(set) var player = AVPlayer()
+    func resetAfterMediaServicesFailure() { player = AVPlayer() }
     var nativePlayer: AVPlayer? { player }
     var isPlaying: Bool { player.timeControlStatus == .playing }
     func play() { player.play() }
     func pause() { player.pause() }
     func replaceCurrentItem(with item: AVPlayerItem?) { player.replaceCurrentItem(with: item) }
     func seek(to time: CMTime) async -> Bool {
-        await withCheckedContinuation { continuation in
+        let seekPlayer = player
+        return await withCheckedContinuation { continuation in
             let result = PlaybackSeekResult(continuation)
-            let timeout = Task { @MainActor [weak self] in
+            let timeout = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard !Task.isCancelled else { return }
-                self?.player.currentItem?.cancelPendingSeeks()
+                seekPlayer.currentItem?.cancelPendingSeeks()
                 result.finish(false)
             }
-            player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+            seekPlayer.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
                 Task { @MainActor in timeout.cancel(); result.finish(finished) }
             }
         }

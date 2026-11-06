@@ -1,3 +1,4 @@
+#if DEBUG
 import SwiftUI
 
 final class MockMusicStore: ObservableObject {
@@ -46,3 +47,5 @@ final class MockDownloadStore: ObservableObject {
 
 final class MockSettingsStore: ObservableObject { @Published var audioQuality = "High"; @Published var wifiOnly = false; @Published var sleepTimer = "Off" }
 
+
+#endif

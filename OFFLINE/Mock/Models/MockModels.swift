@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 
 struct MockTrack: Identifiable, Equatable { let id: String; var title: String; var artist: String; var album: String; var artwork: String; var duration: TimeInterval; var genre: String }
@@ -7,7 +8,6 @@ struct MockPlaylist: Identifiable, Equatable { let id: String; var name: String;
 struct MockVideo: Identifiable, Equatable { let id: String; let title: String; let channel: String; let duration: String; let artwork: String; let videoID: String }
 enum MockDownloadState: String, CaseIterable { case queued, resolving, downloading, paused, waitingForWiFi, failed, completed, cancelled }
 struct MockDownloadJob: Identifiable, Equatable { let id: String; let video: MockVideo; var state: MockDownloadState; var progress: Double; var errorMessage: String? }
-enum RepeatMode: String, CaseIterable, Codable { case off, all, one }
 
 enum MockMusicCatalog {
     static let tracks: [MockTrack] = [
@@ -24,3 +24,5 @@ enum MockMusicCatalog {
     static let videos = [MockVideo(id: "video-neko", title: "NEKO - N’FRONT", channel: "NEKO", duration: "3:42", artwork: "video-neko", videoID: "dQw4w9WgXcQ"), MockVideo(id: "video-gangnam", title: "PSY - GANGNAM STYLE", channel: "officialpsy", duration: "4:13", artwork: "video-gangnam", videoID: "9bZkp7q19f0"), MockVideo(id: "video-night", title: "Late Night Mix — City Pop", channel: "Muzik Belesh", duration: "12:08", artwork: "video-night", videoID: "QdBZY2fkU-0")]
 }
 
+
+#endif
