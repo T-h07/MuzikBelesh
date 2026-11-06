@@ -1,5 +1,5 @@
 name: Publish Muzik Belesh v1.0.0
-# Single-use publication workflow. Only the introduction/update of this file
+# Single-use publication workflow. This workflow is invoked by an approved release push.
 # on the stable release branch can invoke publication.
 on:
   push:
