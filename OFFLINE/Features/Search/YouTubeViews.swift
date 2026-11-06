@@ -148,7 +148,8 @@ struct VideoDetailView: View {
 struct ImportLinkView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
-    @State private var urlText = ""
+    @State private var urlText: String
+    init(initialURL: String = "") { _urlText = State(initialValue: initialURL) }
     @State private var message: String?
     @State private var selected: YouTubeVideo?
     @FocusState private var focused: Bool

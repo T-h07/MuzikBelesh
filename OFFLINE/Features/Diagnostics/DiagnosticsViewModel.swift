@@ -6,7 +6,13 @@ import Foundation
     let container: AppContainer
     init(container: AppContainer) { self.container = container }
     var youtubeStatus: String { "Integrated (manual probe)" }
-    var shareStatus: String { "Packaging experiment configured" }
+    var shareStatus: String {
+        do {
+            _ = try SharedLinkInbox.installed().first()
+            return "App Group inbox readable"
+        } catch SharedLinkInbox.Failure.unavailable { return "App Group unavailable" }
+        catch { return "App Group inbox read failed" }
+    }
     func runProbe() async {
         state = .loading
         do { state = .success(try await container.youtubeProbe.resolve(input: input)) }

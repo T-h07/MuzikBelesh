@@ -21,6 +21,32 @@ final class YouTubeUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 3)); field.tap(); field.typeText(value)
         app.buttons["youtube-inspect-link"].tap()
     }
+    func testPendingSharePrefillsImportAndUsesExistingDownloadPipeline() {
+        app.terminate()
+        app.launchArguments.append("--pending-share")
+        app.launch()
+        let field = app.textFields["youtube-link-input"]
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        XCTAssertEqual(field.value as? String, "https://www.youtube.com/watch?v=9bZkp7q19f0")
+        app.buttons["youtube-inspect-link"].tap()
+        XCTAssertTrue(app.staticTexts["youtube-stream-ready"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["youtube-detail-title"].label, "Resolved Fixture Song")
+        let download = app.buttons["youtube-prepare"]
+        if !download.isHittable { app.swipeUp() }
+        download.tap()
+        let job = app.buttons["youtube-view-job"]
+        XCTAssertTrue(job.waitForExistence(timeout: 8))
+        job.tap()
+        let play = app.buttons["play-download"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        play.tap()
+        XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 5))
+        youtubeSearch()
+        app.buttons["youtube-paste-link"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 4))
+        XCTAssertNotEqual(field.value as? String, "https://www.youtube.com/watch?v=9bZkp7q19f0")
+    }
+
     func testSearchPaginationDetailsPreparationAndBackNavigation() {
         youtubeSearch()
         let field = app.textFields["search-field"]
