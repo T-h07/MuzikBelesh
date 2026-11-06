@@ -13,8 +13,12 @@ on:
       verification_scope:
         description: Focused regression or complete final verification
         type: choice
-        options: [complete, focused, profile]
+        options: [complete, focused, profile, foundation, library-menu]
         default: complete
+      compare_develop:
+        description: Run the selected diagnostic scope against develop instead of this branch
+        type: boolean
+        default: false
       live_youtube:
         description: Opt-in external YouTube compatibility checks (separate from deterministic gates)
         type: boolean
@@ -24,7 +28,7 @@ on:
         type: string
         default: ''
 concurrency:
-  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ inputs.verification_scope || 'complete' }}-${{ inputs.compare_develop || false }}
   cancel-in-progress: true
 permissions: {contents: read, actions: read}
 jobs:
@@ -34,7 +38,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.compare_develop && 'develop' || github.event.pull_request.head.sha || github.sha }}
+      - name: Record verification source
+        env:
+          COMPARE_DEVELOP: ${{ inputs.compare_develop }}
+          SCOPE: ${{ inputs.verification_scope }}
+        run: |
+          git rev-parse HEAD
+          if [[ "$COMPARE_DEVELOP" == true && "$SCOPE" != library-menu ]]; then
+            echo 'The develop comparison is only valid for the library-menu diagnostic.' >&2
+            exit 1
+          fi
       - name: Install XcodeGen
         run: |
           brew install xcodegen
@@ -64,6 +78,25 @@ jobs:
           path: build/prebuilt
           run-id: ${{ inputs.prebuilt_run_id }}
           github-token: ${{ github.token }}
+      - name: Isolate diagnostic simulator
+        if: inputs.verification_scope == 'foundation' || inputs.verification_scope == 'library-menu'
+        run: |
+          # A new device keeps diagnostic runs independent of earlier UI sessions.
+          xcrun simctl list devices --json > /tmp/ci-devices.json
+          read -r DEVICE_TYPE RUNTIME < <(python3 - "$SIMULATOR_ID" <<'PY'
+          import json, sys
+          for runtime, devices in json.load(open('/tmp/ci-devices.json'))['devices'].items():
+              for device in devices:
+                  if device['udid'] == sys.argv[1]:
+                      print(device['deviceTypeIdentifier'], runtime)
+          PY
+          )
+          test -n "$DEVICE_TYPE" && test -n "$RUNTIME"
+          DEVICE_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$DEVICE_TYPE" "$RUNTIME")
+          echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          echo "DIAGNOSTIC_SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
       - name: Build all test products once
         if: inputs.prebuilt_run_id == ''
         run: |
@@ -98,6 +131,15 @@ jobs:
         if: inputs.verification_scope == 'profile'
         run: |
           xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/PerformanceResults.xcresult -only-testing:OFFLINETests/ReleasePerformanceTests -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Phase 10 foundation contracts
+        if: inputs.verification_scope == 'foundation'
+        run: |
+          grep -rq 'class PlaylistMigrationFoundationTests' Tests/Unit
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/FoundationResults.xcresult -only-testing:OFFLINETests/PlaylistMigrationFoundationTests -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Repeat track menu and lifecycle regressions
+        if: inputs.verification_scope == 'library-menu'
+        run: |
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/MenuResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testMetadataSaveCancelAndLocalSearchAcrossAllFields -only-testing:OFFLINEUITests/LibraryManagementUITests/testLikeUnlikeIsSharedWithLikedSongs -only-testing:OFFLINEUITests/LibraryManagementUITests/testRestartRetainsPlaylistMetadataAndLikedState -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -test-iterations 3 -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Focused download, YouTube and keyboard regressions
         if: inputs.verification_scope == 'focused'
         run: |
@@ -109,7 +151,7 @@ jobs:
           python3 Scripts/enable-youtube-live-tests.py "$TEST_RUN" build/Live.xctestrun
           xcodebuild -xctestrun build/Live.xctestrun -destination "id=$SIMULATOR_ID" -resultBundlePath build/YouTubeLiveResults.xcresult -only-testing:OFFLINETests/YouTubeLiveTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Compact iPhone library layout
-        if: inputs.verification_scope != 'focused' && inputs.verification_scope != 'profile'
+        if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
         run: |
           COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
           test -n "$COMPACT_ID"
@@ -127,7 +169,7 @@ jobs:
           test -n "$STANDARD_ID"
           xcodebuild -xctestrun "$TEST_RUN" -destination "id=$STANDARD_ID" -resultBundlePath build/StandardResults.xcresult -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
       - name: Complete regression suite
-        if: inputs.verification_scope != 'focused' && inputs.verification_scope != 'profile'
+        if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
         run: |
           xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Export UI screenshots
@@ -161,7 +203,14 @@ jobs:
             build/CompactResults.xcresult
             build/KeyboardResults.xcresult
             build/YouTubeLiveResults.xcresult
+            build/FoundationResults.xcresult
+            build/MenuResults.xcresult
           if-no-files-found: ignore
+      - name: Dispose diagnostic simulator
+        if: always() && env.DIAGNOSTIC_SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$DIAGNOSTIC_SIMULATOR_ID"
+          xcrun simctl delete "$DIAGNOSTIC_SIMULATOR_ID"
 
       - name: Build verified unsigned device candidate
         if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''
