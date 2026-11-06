@@ -1,0 +1,143 @@
+name: Publish Muzik Belesh v1.0.0
+# Single-use publication workflow. Only the introduction/update of this file
+# on the stable release branch can invoke publication.
+on:
+  push:
+    branches: [release]
+    paths:
+      - '.github/workflows/publish-v1.0.0.yml'
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: muzik-belesh-v1.0.0-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'T-h07/MuzikBelesh'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APPROVED_RELEASE_COMMIT: 7aa32199f1c08e71c3f54c2cdbea14ee977aca76
+      APPROVED_SOURCE_COMMIT: 03782f5e5dd19e591c99533d01da3c8dd5337186
+      APPROVED_TREE_SHA: b39581eb65de26c422a2963b90f27984ad416c0b
+      APPROVED_IPA_SHA256: dc6c37eb89cb3277717348f79b9ba254505c7ec0aee1e391edae276f68ea596a
+    steps:
+      - name: Check out stable release
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify approved release source is present and unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/release"
+          test "$(git rev-parse "$APPROVED_RELEASE_COMMIT^{tree}")" = "$APPROVED_TREE_SHA"
+          test "$(git rev-parse "$APPROVED_SOURCE_COMMIT^{tree}")" = "$APPROVED_TREE_SHA"
+          git merge-base --is-ancestor "$APPROVED_RELEASE_COMMIT" HEAD
+          git diff --exit-code "$APPROVED_RELEASE_COMMIT" HEAD -- . ':!.github/workflows/publish-v1.0.0.yml'
+
+      - name: Download physically accepted Build 195 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: OFFLINE-unsigned-IPA
+          run-id: 42197209510
+          github-token: ${{ github.token }}
+          path: release-assets
+
+      - name: Verify IPA, version, extension and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, plistlib, zipfile
+          root = pathlib.Path("release-assets")
+          ipa = root / "OFFLINE-unsigned.ipa"
+          manifest_path = root / "OFFLINE-build-manifest.json"
+          assert ipa.is_file() and manifest_path.is_file(), "Expected IPA/manifest missing"
+          digest = hashlib.sha256(ipa.read_bytes()).hexdigest()
+          assert digest == os.environ["APPROVED_IPA_SHA256"], f"IPA SHA-256 mismatch: {digest}"
+          manifest = json.loads(manifest_path.read_text())
+          assert manifest["version"] == "1.0.0"
+          assert str(manifest["build"]) == "195"
+          assert manifest["sourceSHA"] == os.environ["APPROVED_SOURCE_COMMIT"]
+          assert manifest["sha256"] == digest
+          assert manifest["bundleID"] == "com.th07.muzikbelesh"
+          assert manifest["extensionID"] == "com.th07.muzikbelesh.share"
+          assert manifest["requestedGroupBothExecutables"] == "group.com.th07.muzikbelesh.inbox"
+          with zipfile.ZipFile(ipa) as archive:
+              assert archive.testzip() is None, "Corrupt IPA ZIP"
+              for relative, bundle_id in (
+                  ("Payload/OFFLINE.app/Info.plist", "com.th07.muzikbelesh"),
+                  ("Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex/Info.plist", "com.th07.muzikbelesh.share"),
+              ):
+                  info = plistlib.loads(archive.read(relative))
+                  assert info["CFBundleIdentifier"] == bundle_id
+                  assert info["CFBundleShortVersionString"] == "1.0.0"
+                  assert str(info["CFBundleVersion"]) == "195"
+          print(f"Verified Build 195 IPA SHA-256 {digest} and both bundle identities.")
+          PY
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## Muzik Belesh 1.0.0 — First stable personal release
+
+          Native, local-first iPhone music player. **SideStore installation is required; the attached IPA is unsigned and must be signed on-device.** Install over the existing copy with the same SideStore identity—**do not uninstall**, or local library data may be lost.
+
+          ### Included features
+          - Offline playback, background audio, Lock Screen and AirPods/Bluetooth controls.
+          - Persistent queue and history; shuffle, repeat, seeking and sleep timer.
+          - Playlists, liked tracks, albums, artists, search, sorting, and editable metadata/artwork.
+          - Files import/export and duplicate-safe library management.
+          - YouTube search, supported URL inspection and quality-aware audio downloading.
+          - Background download queue, progress/retry, Wi-Fi-only preference and optional cellular use.
+          - Native YouTube/Safari Share extension with persistent handoff; manually open Muzik Belesh after saving a link.
+
+          ### Reliability and efficiency
+          Improved playback clock/database efficiency, cached Now Playing artwork, linear-time large-queue setup, memory-bounded export, recovery from audio route changes, and Low Power Mode/thermal-aware scheduling. The original encoded audio files are not modified by these optimizations.
+
+          ### Acceptance
+          - Tested source: \`03782f5e5dd19e591c99533d01da3c8dd5337186\`
+          - Version/build: \`1.0.0 (195)\`
+          - Full regression: https://github.com/T-h07/MuzikBelesh/actions/runs/42197209510 — 262 unit/integration (six opt-in live tests skipped), 25 UI, five compact and one standard accessibility check passed.
+          - User-reported real iPhone 13 Pro Max acceptance: P0–P24 passed, including an in-place update over Build 189 and preservation of the library.
+
+          ### Known limitations
+          - YouTube availability depends on YouTube and connectivity. One cellular metadata request initially timed out before a successful retry.
+          - Automatic app foregrounding from the iOS Share extension is unsupported; open the app yourself after Save Link.
+          - User force-quitting iOS apps can interrupt OS-owned background downloads.
+
+          ### Artifacts
+          - \`OFFLINE-unsigned.ipa\`: verified unsigned IPA, requires SideStore signing.
+          - \`OFFLINE-build-manifest.json\`: signed-identity requirements, source SHA and IPA checksum.
+          - SHA-256 (IPA): \`dc6c37eb89cb3277717348f79b9ba254505c7ec0aee1e391edae276f68ea596a\`
+
+          This is a personal, offline-first release; no backend or App Store provisioning is included.
+          NOTES
+
+      - name: Create annotated stable tag and publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/tags/*:refs/tags/*'
+          if git show-ref --verify --quiet refs/tags/v1.0.0; then
+            test "$(git rev-list -n 1 v1.0.0)" = "$APPROVED_RELEASE_COMMIT"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a v1.0.0 "$APPROVED_RELEASE_COMMIT" -m "Muzik Belesh v1.0.0 — Build 195"
+            git push origin refs/tags/v1.0.0
+          fi
+          if gh release view v1.0.0 >/dev/null 2>&1; then
+            echo "Release already exists. Confirming expected assets."
+            gh release view v1.0.0 --json assets --jq '.assets[].name' | grep -Fx 'OFFLINE-unsigned.ipa'
+            gh release view v1.0.0 --json assets --jq '.assets[].name' | grep -Fx 'OFFLINE-build-manifest.json'
+          else
+            gh release create v1.0.0               release-assets/OFFLINE-unsigned.ipa               release-assets/OFFLINE-build-manifest.json               --verify-tag               --title 'Muzik Belesh v1.0.0'               --notes-file release-notes.md               --latest
+          fi
+          echo "Published verified GitHub Release v1.0.0." >> "$GITHUB_STEP_SUMMARY"
