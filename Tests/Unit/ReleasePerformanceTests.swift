@@ -30,14 +30,14 @@ final class ReleasePerformanceTests: XCTestCase {
         try await player.play(trackID: fixture.ids[0])
         for _ in 0..<20 { player.queue.addToQueue(trackID: fixture.ids[0]) }
         let counts = SQLCounts()
-        try fixture.storage.database.dbQueue.write { db in db.trace { counts.record($0.description) } }
+        try await fixture.storage.database.dbQueue.write { db in db.trace { counts.record($0.description) } }
         var publications = 0
         let token = player.objectWillChange.sink { publications += 1 }
         let start = ProcessInfo.processInfo.systemUptime
         for tick in 1...120 { player.samplePlaybackTime(Double(tick) / 2) }
         let elapsed = ProcessInfo.processInfo.systemUptime - start
         token.cancel()
-        try fixture.storage.database.dbQueue.write { $0.trace(nil) }
+        try await fixture.storage.database.dbQueue.write { $0.trace(nil) }
         print("PHASE9 clock60s cpuWorkSeconds=\(elapsed) publications=\(publications) \(counts.summary)")
         XCTAssertEqual(try fixture.storage.playback.queue().count, 20)
         XCTAssertEqual(player.state.elapsedTime, 60)
