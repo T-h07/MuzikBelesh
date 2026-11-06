@@ -2,6 +2,8 @@ import MediaPlayer
 import UIKit
 
 final class NowPlayingInfoCoordinator {
+    private var cachedData: Data?
+    private var cachedArtwork: MPMediaItemArtwork?
     private let center = MPNowPlayingInfoCenter.default()
 
     func update(state: AudioPlaybackState, track: StoredTrack?, artist: String?, album: String?, artworkData: Data?) {
@@ -14,11 +16,15 @@ final class NowPlayingInfoCoordinator {
             MPMediaItemPropertyPlaybackDuration: state.duration,
             MPNowPlayingInfoPropertyPlaybackRate: state.isPlaying ? 1.0 : 0.0
         ]
-        if let artworkData, let image = UIImage(data: artworkData) {
-            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        if cachedData != artworkData {
+            cachedData = artworkData
+            cachedArtwork = artworkData.flatMap(UIImage.init(data:)).map { image in
+                MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            }
         }
+        if let cachedArtwork { info[MPMediaItemPropertyArtwork] = cachedArtwork }
         center.nowPlayingInfo = info
     }
 
-    func clear() { center.nowPlayingInfo = nil }
+    func clear() { center.nowPlayingInfo = nil; cachedData = nil; cachedArtwork = nil }
 }

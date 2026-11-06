@@ -134,8 +134,8 @@ struct StoredTrackRow: View {
     @State private var showingEditor = false
     @State private var showingPlaylists = false
     @State private var confirmingDeletion = false
-    @State private var showingExporter = false
-    @State private var exportDocument: AudioExportDocument?
+    @State private var exporting = false
+    @State private var exportDocument: PreparedAudioExport?
     @State private var rowError: String?
     private var ids: [String] { contextTrackIDs ?? library.snapshot.tracks.map(\.id) }
     var body: some View {
@@ -157,9 +157,7 @@ struct StoredTrackRow: View {
             }.accessibilityIdentifier("confirm-delete-track")
             Button("Cancel", role: .cancel) { }
         } message: { Text("This removes the local audio file from Muzik Belesh and its playlist, liked-song and queue references. Other songs are preserved.") }
-        .fileExporter(isPresented: $showingExporter, document: exportDocument, contentType: .audio, defaultFilename: track.originalFilename ?? "\(track.title).\(track.fileExtension)") { result in
-            if case .failure(let error) = result { rowError = MusicLibraryService.message(error) }
-        }
+        .sheet(item: $exportDocument) { AudioExportPicker(export: $0) }
     }
     private var rowLabel: some View {
         HStack(spacing: AppSpacing.md) {
@@ -187,12 +185,14 @@ struct StoredTrackRow: View {
     }
     private func play() { onInteraction(); Task { await library.play(track.id, ids: ids, kind: contextKind, sourceID: contextSourceID) } }
     private func export() {
+        guard !exporting, exportDocument == nil else { return }
         onInteraction()
+        exporting = true
         Task {
+            defer { exporting = false }
             do {
                 guard let storage = container.storage else { throw LibraryError.operationFailed }
-                let data = try await storage.exportData(trackID: track.id)
-                exportDocument = AudioExportDocument(data: data); showingExporter = true
+                exportDocument = try await storage.prepareExport(trackID: track.id)
             } catch { rowError = MusicLibraryService.message(error) }
         }
     }

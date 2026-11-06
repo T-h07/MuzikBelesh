@@ -1,12 +1,18 @@
 import SwiftUI
+import Combine
 @MainActor
 final class AppContainer: ObservableObject {
+    let resources: ResourceMonitor
+    private var subscriptions = Set<AnyCancellable>()
+    private var maintenanceTask: Task<Void, Never>?
+    private var maintenanceFinished = false
     let configuration: AppConfiguration
     let youtubeProbe: YouTubeProbe
-    let music: MockMusicStore
-    let playback: MockPlaybackStore
+    #if DEBUG
+    let music = MockMusicStore()
+    let playback = MockPlaybackStore()
+    #endif
     let downloads: DownloadManager
-    let settings: MockSettingsStore
     let storage: StorageCoordinator?
     let library: MusicLibraryService
     let youtubeSearch: YouTubeSearchService
@@ -17,8 +23,9 @@ final class AppContainer: ObservableObject {
     let youtubePreferences: YouTubePreferences
     let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
-    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, music: MockMusicStore = MockMusicStore(), playback: MockPlaybackStore = MockPlaybackStore(), audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, settings: MockSettingsStore = MockSettingsStore(), storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard) {
-        self.configuration = configuration; self.music = music; self.playback = playback; self.settings = settings
+    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil) {
+        self.resources = resourceMonitor ?? ResourceMonitor()
+        self.configuration = configuration
         if let storage { self.storage = storage } else { self.storage = try? StorageCoordinator(paths: AppStoragePaths()) }
         let transport = YouTubeURLSessionTransport()
         let web = YouTubeWebProvider(transport: transport)
@@ -34,9 +41,27 @@ final class AppContainer: ObservableObject {
         self.youtubeProbe = youtubeProbe ?? YouTubeKitProbe(resolver: resolver)
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
-        if let storage = self.storage {
-            Task(priority: .utility) { try? await storage.repairYouTubeDurations() }
+        resources.$policy.sink { [weak self] policy in
+            guard let self else { return }
+            audioPlayer.setResourcePolicy(policy)
+            downloads.setResourcePolicy(policy)
+            scheduleMaintenance(policy)
+        }.store(in: &subscriptions)
+    }
+    private func scheduleMaintenance(_ policy: ResourcePolicy) {
+        guard policy.allowsMaintenance, !maintenanceFinished, maintenanceTask == nil, let storage else { return }
+        maintenanceTask = Task(priority: .utility) { [weak self] in
+            let completed = try? await storage.repairYouTubeDurations { @MainActor [weak self] in
+                self?.resources.policy.allowsMaintenance == true
+            }
+            guard let self else { return }
+            maintenanceTask = nil
+            // An I/O failure is retried on the next launch. A pressure deferral
+            // is retried when a subsequent policy update permits maintenance.
+            maintenanceFinished = completed != false
+            if completed == false && resources.policy.allowsMaintenance { scheduleMaintenance(resources.policy) }
         }
     }
+
 }
 

@@ -1,3 +1,5 @@
+import OSLog
+import UIKit
 import AVFoundation
 import Foundation
 
@@ -5,9 +7,12 @@ import Foundation
 final class AudioPlayerService: ObservableObject {
     @Published private(set) var state = AudioPlaybackState()
 
+    private var resourcePolicy = ResourcePolicy()
+    private var foreground = UIApplication.shared.applicationState != .background
+    private var mediaResetObserver: NSObjectProtocol?
     private var libraryTimeline: Double?
     private let player: PlaybackPlayer
-    private let nativePlayer: AVPlayer?
+    private var nativePlayer: AVPlayer?
     private let commandGate = PlaybackCommandGate()
     let diagnostics = PlaybackDiagnostics()
     private var seekRevision = 0
@@ -84,10 +89,17 @@ final class AudioPlayerService: ObservableObject {
         interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: .main) { [weak self] notification in
             Task { @MainActor in self?.handleInterruption(notification) }
         }
+        mediaResetObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleMediaServicesReset() }
+        }
         if let saved = restoration { state.currentTrackID = saved.currentTrackID }
         refreshContext()
         if let saved = restoration, let id = saved.currentTrackID { state.currentTrackID = id; state.elapsedTime = TimeInterval(saved.positionMs) / 1000; context = context.settingCurrent(id); updateSkipAvailability(); let position = state.elapsedTime; Task { @MainActor [weak self] in await self?.restorePausedItem(trackID: id, position: position) } }
         if registerRemoteCommands { remoteCommands.register(service: self) }
+        observeTransport()
+    }
+
+    private func observeTransport() {
         if let native = self.player.nativePlayer {
             transportObserver = native.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
                 Task { @MainActor [weak self] in self?.synchronizeTransport() }
@@ -100,6 +112,7 @@ final class AudioPlayerService: ObservableObject {
         if let timeObserver { nativePlayer?.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        if let mediaResetObserver { NotificationCenter.default.removeObserver(mediaResetObserver) }
         statusObserver?.invalidate(); transportObserver?.invalidate(); remoteCommands.unregister()
     }
 
@@ -120,6 +133,9 @@ final class AudioPlayerService: ObservableObject {
     }
 
     private func selectTrack(_ trackID: String, direction: NavigationDirection = .forward, autoplay: Bool = true, recordNavigation: Bool = true) async throws {
+        let signposter = OSSignposter(subsystem: "com.th07.muzikbelesh", category: "Performance")
+        let interval = signposter.beginInterval("BeginPlayback")
+        defer { signposter.endInterval("BeginPlayback", interval) }
         guard !deletingTrackIDs.contains(trackID) else { throw LibraryError.deletionInProgress }
         guard reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Sleep Timer has expired") }
         do {
@@ -186,7 +202,7 @@ final class AudioPlayerService: ObservableObject {
             }
         }
     }
-    func pause() { record("pause-request"); intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
+    func pause() { synchronizeClock(); record("pause-request"); intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
     func togglePlayback() async { if wantsPlayback { pause() } else { await playFromRemote() } }
     func stop() { record("stop-request"); intentRevision += 1; wantsPlayback = false; itemGeneration += 1; removeItemObservers(); player.pause(); player.replaceCurrentItem(with: nil); item = nil; artworkTask?.cancel(); artworkCachePath = nil; artworkCacheData = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
 
@@ -215,6 +231,7 @@ final class AudioPlayerService: ObservableObject {
     func previous() async {
         guard await beginCommand("previous") else { return }
         defer { endCommand() }
+        synchronizeClock()
         guard reconcileSleepTimer() else { return }
         refreshContext()
         let failed: Bool
@@ -239,8 +256,7 @@ final class AudioPlayerService: ObservableObject {
         let tracks: [StoredTrack]
         do { tracks = try storage?.tracks.all() ?? [] }
         catch { state.lastError = "The playback library could not be read."; return }
-        var ids: [String] = []
-        for track in tracks where track.availability == .available && !deletingTrackIDs.contains(track.id) && !ids.contains(track.id) { ids.append(track.id) }
+        var ids = tracks.filter { $0.availability == .available && !deletingTrackIDs.contains($0.id) }.map(\.id)
         if let snapshot = activeContextTrackIDs {
             let available = Set(ids)
             ids = snapshot.filter { available.contains($0) }
@@ -340,13 +356,73 @@ final class AudioPlayerService: ObservableObject {
         guard let native = player.nativePlayer else { return }
         if let timeObserver { native.removeTimeObserver(timeObserver) }
         let generation = itemGeneration
-        timeObserver = native.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
+        timeObserver = native.addPeriodicTimeObserver(forInterval: CMTime(seconds: resourcePolicy.playbackInterval(foreground: foreground), preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self, generation == self.itemGeneration, !self.state.isSeeking, time.seconds.isFinite else { return }
-                self.state.elapsedTime = max(0, time.seconds)
-                self.updateSkipAvailability(); self.publishCurrent()
-                if abs(self.state.elapsedTime - self.lastSavedPosition) >= 5 { self.lastSavedPosition = self.state.elapsedTime; self.record("clock-sampled"); self.persist() }
+                self.samplePlaybackTime(time.seconds)
             }
+        }
+    }
+
+    func samplePlaybackTime(_ seconds: Double) {
+        guard seconds.isFinite, !state.isSeeking else { return }
+        let position = max(0, seconds)
+        guard position != state.elapsedTime else { return }
+        let crossedPreviousBoundary = (state.elapsedTime > 3) != (position > 3)
+        state.elapsedTime = position
+        if crossedPreviousBoundary { updateSkipAvailability() }
+        if abs(position - lastSavedPosition) >= 5 {
+            do {
+                try storage?.playback.savePosition(trackID: state.currentTrackID, positionMs: Int64(position * 1000))
+                lastSavedPosition = position
+            } catch { state.lastError = "Playback position could not be saved." }
+        }
+    }
+
+    func setResourcePolicy(_ policy: ResourcePolicy) {
+        guard policy != resourcePolicy else { return }
+        resourcePolicy = policy
+        if item != nil { installTimeObserver() }
+    }
+
+    func setForeground(_ active: Bool) {
+        guard active != foreground else { return }
+        foreground = active
+        synchronizeClock()
+        if item != nil { installTimeObserver() }
+        publishCurrent()
+        persist()
+    }
+
+    private func synchronizeClock() {
+        if let seconds = nativePlayer?.currentTime().seconds { samplePlaybackTime(seconds) }
+    }
+
+    func handleMediaServicesReset() {
+        wasPlayingBeforeInterruption = false
+        userPausedDuringInterruption = true
+        // Rebuild native objects paused; only an explicit user Play may resume.
+        intentRevision += 1
+        wantsPlayback = false
+        player.pause()
+        removeItemObservers()
+        player.replaceCurrentItem(with: nil)
+        item = nil
+        if let timeObserver { nativePlayer?.removeTimeObserver(timeObserver); self.timeObserver = nil }
+        transportVerification?.cancel()
+        transportVerification = nil
+        transportObserver?.invalidate()
+        player.resetAfterMediaServicesFailure()
+        nativePlayer = player.nativePlayer
+        observeTransport()
+        session.deactivate()
+        state.status = state.currentTrackID == nil ? .idle : .paused
+        state.lastError = "Audio services restarted. Tap Play to continue."
+        publishCurrent()
+        persist()
+        if let id = state.currentTrackID {
+            let position = state.elapsedTime
+            Task { @MainActor [weak self] in await self?.restorePausedItem(trackID: id, position: position) }
         }
     }
 
@@ -523,11 +599,12 @@ final class AudioPlayerService: ObservableObject {
         return true
     }
     private func endCommand() { record("command-end"); commandGate.release() }
-    private func handleRouteChange(route: String, reason: AVAudioSession.RouteChangeReason) { state.currentOutputRoute = route; if reason == .oldDeviceUnavailable && state.isPlaying { pause() }; publishCurrent() }
+    func handleRouteChange(route: String, reason: AVAudioSession.RouteChangeReason) { state.currentOutputRoute = route; if reason == .oldDeviceUnavailable && (wantsPlayback || wasPlayingBeforeInterruption) { pause() }; publishCurrent() }
     func handleInterruption(_ notification: Notification) {
         guard let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: value) else { return }
         if type == .began {
+            synchronizeClock()
             wasPlayingBeforeInterruption = wantsPlayback
             userPausedDuringInterruption = false
             intentRevision += 1; wantsPlayback = false; player.pause()

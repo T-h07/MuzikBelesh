@@ -1,3 +1,4 @@
+import OSLog
 import AVFoundation
 import CryptoKit
 import Foundation
@@ -43,6 +44,9 @@ final class AudioFileService {
     }
 
     func sha256(url: URL) throws -> String {
+        let signposter = OSSignposter(subsystem: "com.th07.muzikbelesh", category: "Performance")
+        let interval = signposter.beginInterval("AudioHash")
+        defer { signposter.endInterval("AudioHash", interval) }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()
@@ -50,17 +54,20 @@ final class AudioFileService {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    func copyStreaming(from source: URL, to destination: URL) throws {
+    func copyStreaming(from source: URL, to destination: URL,
+                       write: (FileHandle, Data) throws -> Void = { try $0.write(contentsOf: $1) }) throws {
         guard source.resolvingSymlinksInPath().standardizedFileURL != destination.resolvingSymlinksInPath().standardizedFileURL else { throw StorageError.invalidPath }
         let input = try FileHandle(forReadingFrom: source)
         defer { try? input.close() }
         guard !FileManager.default.fileExists(atPath: destination.path), FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw StorageError.exportFailed }
-        let output = try FileHandle(forWritingTo: destination)
-        defer { try? output.close() }
         do {
-            while let data = try input.read(upToCount: 1024 * 1024), !data.isEmpty { try output.write(contentsOf: data) }
+            let output = try FileHandle(forWritingTo: destination)
+            defer { try? output.close() }
+            while let data = try input.read(upToCount: 1024 * 1024), !data.isEmpty {
+                try Task.checkCancellation()
+                try write(output, data)
+            }
         } catch {
-            try? output.close()
             try? FileManager.default.removeItem(at: destination)
             throw error
         }

@@ -1,5 +1,7 @@
 import Foundation
 
+enum RepeatMode: String, CaseIterable, Codable { case off, all, one }
+
 enum PlaybackStatus: Equatable {
     case idle
     case loading

@@ -36,6 +36,7 @@ extension StoredDownloadState {
     private var checkpoints: [String: ProgressCadence] = [:]
     private var samples: [String: TransferRate] = [:]
     private var attempts: [String: UUID] = [:]
+    @Published private(set) var resourcePolicy = ResourcePolicy()
     private var foreground = true
     private var storageFailed = false
     private var staging: URL? { storage?.paths.applicationSupport.appendingPathComponent("DownloadStaging", isDirectory: true) }
@@ -96,6 +97,11 @@ extension StoredDownloadState {
         }
         schedule()
     }
+    func setResourcePolicy(_ policy: ResourcePolicy) {
+        guard policy != resourcePolicy else { return }
+        resourcePolicy = policy
+        schedule()
+    }
     func setForeground(_ active: Bool) {
         foreground = active
         if active {
@@ -116,6 +122,7 @@ extension StoredDownloadState {
         if job.state == .downloading, job.transferSession == BackgroundTransfers.wifi, !wifi {
             return "Waiting for Wi-Fi"
         }
+        if job.state.pending && resourcePolicy.defersNewWork { return "Waiting for device to cool" }
         return job.state.label
     }
     func job(for videoID: String) -> StoredDownloadJob? { jobs.first { $0.sourceIdentifier == videoID } }
@@ -142,14 +149,14 @@ extension StoredDownloadState {
         do { try storage.downloads.save(job); jobs.append(job); schedule() } catch { failStorage() }
     }
     private func schedule() {
-        guard !storageFailed, foreground, !reconciling else { return }
+        guard !storageFailed, foreground, !reconciling, !resourcePolicy.defersNewWork else { return }
         let waiting = preferences.wifiOnly && !wifi
         for job in jobs where job.state.pending {
             let staged = UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
             let desired: StoredDownloadState = waiting && !staged ? .waitingForWiFi : .queued
             if job.state != desired { update(job.id) { $0.state = desired } }
             let slots = workers.count + jobs.filter { $0.transferGeneration != nil && workers[$0.id] == nil }.count
-            guard staged || (!waiting && connected), slots < preferences.simultaneous, workers[job.id] == nil else { continue }
+            guard staged || (!waiting && connected), slots < resourcePolicy.downloadLimit(preferences.simultaneous), workers[job.id] == nil else { continue }
             guard update(job.id, { $0.state = staged ? .verifying : .resolving }) else { return }
             workers[job.id] = Task { await run(job) }
         }
@@ -173,6 +180,10 @@ extension StoredDownloadState {
                     let request = try await preparer.prepare(video: video, quality: quality)
                     try Task.checkCancellation()
                     video = request.metadata
+                    guard !resourcePolicy.defersNewWork else {
+                        update(job.id) { $0.state = .queued }
+                        return
+                    }
                     if let system {
                         let generation = UUID().uuidString
                         let task = try system.create(url: request.stream.url, job: job.id, generation: generation, strict: preferences.wifiOnly)

@@ -1,3 +1,4 @@
+import OSLog
 import Foundation
 import Combine
 
@@ -32,6 +33,9 @@ struct LibrarySearchResults: Equatable, Sendable {
 enum LibrarySearchEngine {
     static func normalizedQuery(_ query: String) -> String { String(LibraryIdentity.search(query).prefix(500)) }
     static func search(_ query: String, in snapshot: LibrarySnapshot) -> LibrarySearchResults {
+        let signposter = OSSignposter(subsystem: "com.th07.muzikbelesh", category: "Performance")
+        let interval = signposter.beginInterval("LibrarySearch")
+        defer { signposter.endInterval("LibrarySearch", interval) }
         let term = normalizedQuery(query)
         func matches(_ text: String) -> Bool { term.isEmpty || LibraryIdentity.search(text).contains(term) }
         let artists = Dictionary(uniqueKeysWithValues: snapshot.artists.map { ($0.id, $0.name) })

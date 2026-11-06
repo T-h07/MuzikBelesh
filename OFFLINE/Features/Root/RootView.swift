@@ -37,7 +37,7 @@ private struct RootTabsView: View {
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
         .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .inactive { container.downloads.setForeground(phase == .active) }
+            if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
             if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
             else { searchFocus = nil }
         }
@@ -115,6 +115,8 @@ private struct TabContent<Content: View>: View {
     }
 }
 
+// Retained only for the original Phase 1 fixture tests.
+#if DEBUG
 struct TrackRow: View {
     @EnvironmentObject private var container: AppContainer
     let track: MockTrack
@@ -157,6 +159,8 @@ struct PlaylistCard: View {
     var body: some View { VStack(alignment: .leading, spacing: AppSpacing.sm) { ArtworkView(name: playlist.id, size: 148); Text(playlist.name).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text("\(playlist.trackIDs.count) tracks").font(.caption).foregroundStyle(AppColors.textSecondary) }.frame(width: 148, alignment: .leading) }
 }
 
+#endif
+
 struct SearchBar: View {
     @Binding var text: String
     let placeholder: String
@@ -193,7 +197,10 @@ struct MiniPlayer: View {
     }.padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AppRadius.medium)).accessibilityIdentifier("mini-player") } }
 }
 
+#if DEBUG
 struct ProgressRow: View {
     let job: MockDownloadJob
     var body: some View { HStack(spacing: AppSpacing.md) { ArtworkView(name: job.video.artwork, size: 58); VStack(alignment: .leading, spacing: 5) { Text(job.video.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(job.state.rawValue.capitalized).font(.caption).foregroundStyle(job.state == .failed ? AppColors.error : AppColors.textSecondary); ProgressView(value: job.progress).tint(AppColors.accentPrimary) }; Spacer(); Text("\(Int(job.progress * 100))%").font(.caption).foregroundStyle(AppColors.textSecondary) }.padding(.vertical, 6) }
 }
+
+#endif

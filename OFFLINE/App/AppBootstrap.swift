@@ -17,7 +17,7 @@ import Foundation
                     let fixtures = YouTubeUITestFixtures()
                     guard let defaults = UserDefaults(suiteName: "YouTubeUITests-\(identifier)") else { fatalError("Isolated preferences unavailable") }
                     if process.arguments.contains("--reset-ui-library") { defaults.removePersistentDomain(forName: "YouTubeUITests-\(identifier)") }
-                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults)
+                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults, resourceMonitor: ResourceMonitor(observeSystem: false))
                     container.downloads.setPath(connected: true, wifi: !process.arguments.contains("--download-cellular"))
                     if process.arguments.contains("--download-queue-fixtures") {
                         for index in 1...3 {
@@ -27,7 +27,7 @@ import Foundation
                     }
                     return container
                 }
-                return AppContainer(storage: storage)
+                return AppContainer(storage: storage, resourceMonitor: ResourceMonitor(observeSystem: false))
             } catch { fatalError("Could not create the isolated UI test library") }
         }
         #endif

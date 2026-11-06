@@ -79,7 +79,8 @@ extension StorageCoordinator {
         return stored
     }
 
-    func repairYouTubeDurations() async throws {
+    @discardableResult
+    func repairYouTubeDurations(shouldContinue: @Sendable () async -> Bool = { true }) async throws -> Bool {
         let candidates = try await database.dbQueue.read { db in
             try StoredTrack.fetchAll(db, sql: """
                 SELECT DISTINCT t.* FROM tracks t JOIN track_sources s ON s.trackID = t.id
@@ -91,6 +92,7 @@ extension StorageCoordinator {
         }
         for track in candidates {
             try Task.checkCancellation()
+            guard await shouldContinue() else { return false }
             guard let stored = track.durationMs, let url = try? paths.musicURL(relativePath: track.fileRelativePath),
                   let timeline = try? await YouTubeAudioTimeline.inspect(url) else { continue }
             let corrected = timeline.correction(for: Double(stored) / 1000)
@@ -104,5 +106,6 @@ extension StorageCoordinator {
                 try StoredSetting(key: "durationAudit.1." + track.id, value: track.contentSHA256, valueType: "string", dateModified: Date()).save(db)
             }
         }
+        return true
     }
 }

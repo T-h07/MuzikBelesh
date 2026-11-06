@@ -49,7 +49,7 @@ import os, pathlib, plistlib, sys
 app = pathlib.Path(sys.argv[1])
 main = plistlib.loads((app / "Info.plist").read_bytes())
 extension = plistlib.loads((app / "PlugIns/OFFLINEShareExtension.appex/Info.plist").read_bytes())
-assert main["CFBundleShortVersionString"] == extension["CFBundleShortVersionString"] == "0.1.0"
+assert main["CFBundleShortVersionString"] == extension["CFBundleShortVersionString"] == "1.0.0"
 assert main["CFBundleVersion"] == extension["CFBundleVersion"]
 assert extension["CFBundleIdentifier"] == "com.th07.muzikbelesh.share"
 point = extension["NSExtension"]
@@ -61,6 +61,11 @@ assert attributes["NSExtensionActivationRule"] == {
     "NSExtensionActivationSupportsText": True}
 assert (app / "PlugIns/OFFLINEShareExtension.appex" / (attributes["NSExtensionJavaScriptPreprocessingFile"] + ".js")).is_file()
 assert main["CFBundleIcons"]["CFBundlePrimaryIcon"]["CFBundleIconFiles"]
+assert "audio" in main["UIBackgroundModes"]
+for executable in [app / "OFFLINE", app / "PlugIns/OFFLINEShareExtension.appex/OFFLINEShareExtension"]:
+    binary = executable.read_bytes()
+    for fixture in [b"NEKO -", b"Queued fixture", b"--youtube-fixtures", b"MockMusicCatalog"]:
+        assert fixture not in binary, "Test catalog present in device binary"
 expected_build = os.getenv("BUILD_NUMBER") or os.getenv("GITHUB_RUN_NUMBER")
 if expected_build:
     assert main["CFBundleVersion"] == expected_build
@@ -78,7 +83,8 @@ manifest = {"version": info["CFBundleShortVersionString"], "build": info["CFBund
             "embeddedCommit": info["MBBuildCommit"], "sourceSHA": os.getenv("GITHUB_SHA", "local"),
             "bundleID": info["CFBundleIdentifier"], "extensionID": "com.th07.muzikbelesh.share",
             "requestedGroupBothExecutables": "group.com.th07.muzikbelesh.inbox",
-            "signing": "ad-hoc entitlement metadata only; requires device signing", "sha256": hashlib.sha256((output / "OFFLINE-unsigned.ipa").read_bytes()).hexdigest()}
+            "signing": "ad-hoc entitlement metadata only; requires device signing",
+            "candidate": "v1.0.0 release candidate; physical acceptance pending", "sha256": hashlib.sha256((output / "OFFLINE-unsigned.ipa").read_bytes()).hexdigest()}
 (output / "OFFLINE-build-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print(json.dumps(manifest, indent=2))
 PY
