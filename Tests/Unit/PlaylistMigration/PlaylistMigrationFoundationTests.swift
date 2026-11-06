@@ -55,7 +55,7 @@ final class PlaylistMigrationFoundationTests: XCTestCase {
     }
 
     func testFiveHundredEntriesWithDuplicateSourceIdsPreserveOccurrences() throws {
-        let playlist = snapshot((0..<500).map(entry))
+        let playlist = snapshot((0..<500).map { entry($0) })
         XCTAssertNoThrow(try PlaylistMigrationValidation.validate(playlist))
         XCTAssertEqual(playlist.entries.count, 500)
         XCTAssertEqual(Set(playlist.entries.map(\.id)).count, 500)
