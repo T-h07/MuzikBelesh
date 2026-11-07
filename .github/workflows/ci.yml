@@ -13,8 +13,12 @@ on:
       verification_scope:
         description: Focused regression or complete final verification
         type: choice
-        options: [complete, focused, profile]
+        options: [complete, focused, profile, foundation, library-menu, environment-comparison]
         default: complete
+      compare_develop:
+        description: Run the selected diagnostic scope against develop instead of this branch
+        type: boolean
+        default: false
       live_youtube:
         description: Opt-in external YouTube compatibility checks (separate from deterministic gates)
         type: boolean
@@ -24,38 +28,183 @@ on:
         type: string
         default: ''
 concurrency:
-  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ inputs.verification_scope || 'complete' }}-${{ inputs.compare_develop || false }}
   cancel-in-progress: true
 permissions: {contents: read, actions: read}
 jobs:
-  build-and-test:
-    runs-on: ${{ inputs.runner_label || 'macos-15' }}
+  environment-comparison:
+    if: inputs.verification_scope == 'environment-comparison'
+    name: diagnostic-xcode-26.2-ios-26.2-${{ matrix.source }}
+    runs-on: macos-15
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [head, develop]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      COMPARISON_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Pin the control so a moving develop branch cannot change the comparison.
+          ref: ${{ matrix.source == 'develop' && '897f3f7180ad31615df1d20946f0b7521d84afb4' || github.sha }}
+      - name: Validate and record comparison environment
+        run: |
+          mkdir -p build/environment-evidence
+          {
+            git rev-parse HEAD
+            date -u +%Y-%m-%dT%H:%M:%SZ
+            printf 'ImageOS=%s ImageVersion=%s\n' "$ImageOS" "$ImageVersion"
+            uname -m
+            sw_vers
+            xcodebuild -version
+            xcrun --sdk iphonesimulator --show-sdk-version
+            swift --version
+          } | tee build/environment-evidence/provenance.txt
+          test "$(xcodebuild -version | head -1)" = 'Xcode 26.2'
+          xcrun simctl list runtimes --json > build/environment-evidence/runtimes.json
+          xcrun simctl list devices --json > build/environment-evidence/devices-before.json
+          python3 - <<'PY'
+          import json, os
+          runtimes = json.load(open('build/environment-evidence/runtimes.json'))['runtimes']
+          selected = [r for r in runtimes if r['identifier'] == os.environ['COMPARISON_RUNTIME'] and r['isAvailable']]
+          assert len(selected) == 1, 'Required iOS 26.2 runtime unavailable; do not substitute another runtime'
+          print(json.dumps(selected[0], indent=2))
+          PY
+          DEVICE_ID=$(xcrun simctl create "CI-environment-${GITHUB_RUN_ID}" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max "$COMPARISON_RUNTIME")
+          echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          printf 'Simulator=%s Runtime=%s\n' "$DEVICE_ID" "$COMPARISON_RUNTIME" >> build/environment-evidence/provenance.txt
+      - name: Build unchanged comparison tests
+        run: |
+          brew install xcodegen
+          test "$(xcodegen --version)" = 'Version: 2.46.0'
+          xcodegen --version >> build/environment-evidence/provenance.txt
+          xcodegen generate
+          xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -derivedDataPath build/TestProducts build-for-testing CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)" BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" 2>&1 | tee build/environment-evidence/build.log
+      - name: Compare menu synchronization and relaunch once
+        # Bound pathological automation recovery independently of the build budget.
+        timeout-minutes: 8
+        run: |
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
+          test -f "${TEST_RUN_FILES[0]}"
+          START=$(date +%s)
+          date -u +%Y-%m-%dT%H:%M:%SZ > build/environment-evidence/test-start.txt
+          set +e
+          xcodebuild -xctestrun "${TEST_RUN_FILES[0]}" -destination "id=$SIMULATOR_ID" -resultBundlePath build/EnvironmentResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testMetadataSaveCancelAndLocalSearchAcrossAllFields -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/environment-evidence/tests.log
+          RESULT=${PIPESTATUS[0]}
+          printf 'exit_code=%s elapsed_seconds=%s\n' "$RESULT" "$(( $(date +%s) - START ))" | tee build/environment-evidence/test-timing.txt
+          exit "$RESULT"
+      - name: Export comparison diagnostics
+        if: always()
+        run: |
+          if [[ -f build/EnvironmentResults.xcresult/Info.plist ]]; then
+            xcrun xcresulttool get test-results summary --path build/EnvironmentResults.xcresult > build/environment-evidence/summary.json
+            xcrun xcresulttool get test-results tests --path build/EnvironmentResults.xcresult > build/environment-evidence/tests.json
+            xcrun xcresulttool export diagnostics --path build/EnvironmentResults.xcresult --output-path build/environment-evidence/diagnostics
+            xcrun xcresulttool export attachments --path build/EnvironmentResults.xcresult --output-path build/environment-evidence/attachments
+          fi
+      - name: Preserve comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-comparison-${{ matrix.source }}
+          path: |
+            build/environment-evidence
+            build/EnvironmentResults.xcresult
+          if-no-files-found: error
+          retention-days: 30
+      - name: Dispose comparison simulator
+        if: always() && env.SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          xcrun simctl delete "$SIMULATOR_ID"
+  foundation-contracts:
+    if: inputs.verification_scope == 'foundation'
+    name: diagnostic-foundation-contracts
+    runs-on: ${{ inputs.runner_label || 'macos-15' }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate diagnostic scope
+        env:
+          COMPARE_DEVELOP: ${{ inputs.compare_develop }}
+        run: test "$COMPARE_DEVELOP" != true
+      - name: Run unmodified foundation contract tests
+        run: bash Scripts/test-playlist-migration-foundation.sh
+      - name: Upload foundation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-contract-results
+          path: |
+            build/FoundationContracts.log
+            build/FoundationContracts-source.txt
+          if-no-files-found: error
+  build-and-test:
+    if: inputs.verification_scope != 'foundation' && inputs.verification_scope != 'environment-comparison'
+    # A focused diagnostic must never impersonate the full regression gate.
+    name: ${{ inputs.verification_scope == 'library-menu' && format('diagnostic-library-menu-{0}', inputs.compare_develop && 'develop' || 'head') || 'build-and-test' }}
+    runs-on: ${{ inputs.runner_label || 'macos-15' }}
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      CI_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.compare_develop && 'develop' || github.event.pull_request.head.sha || github.sha }}
+      - name: Record verification source
+        env:
+          COMPARE_DEVELOP: ${{ inputs.compare_develop }}
+          SCOPE: ${{ inputs.verification_scope }}
+        run: |
+          git rev-parse HEAD
+          if [[ "$COMPARE_DEVELOP" == true && "$SCOPE" != library-menu ]]; then
+            echo 'The develop comparison is only valid for the library-menu diagnostic.' >&2
+            exit 1
+          fi
       - name: Install XcodeGen
         run: |
           brew install xcodegen
           test "$(xcodegen --version)" = "Version: 2.46.0"
       - name: Toolchain diagnostics
         run: |
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
-          swift --version
-          xcodegen --version
-          xcrun simctl list devices available
+          mkdir -p build/VerificationEvidence
+          {
+            git rev-parse HEAD
+            date -u +%Y-%m-%dT%H:%M:%SZ
+            printf 'ImageOS=%s ImageVersion=%s\n' "$ImageOS" "$ImageVersion"
+            uname -m
+            sw_vers
+            xcodebuild -version
+            xcrun --sdk iphoneos --show-sdk-version
+            swift --version
+            xcodegen --version
+          } | tee build/VerificationEvidence/provenance.txt
+          test "$(xcodebuild -version | head -1)" = 'Xcode 26.2'
+          { xcodebuild -version; xcrun --sdk iphonesimulator --show-sdk-version; uname -m; } > build/product-environment.txt
+          xcrun simctl list runtimes --json > build/VerificationEvidence/runtimes.json
+          xcrun simctl list devices --json > build/VerificationEvidence/devices-before.json
+          python3 - <<'PY'
+          import json, os
+          runtimes = json.load(open('build/VerificationEvidence/runtimes.json'))['runtimes']
+          assert any(r['identifier'] == os.environ['CI_RUNTIME'] and r['isAvailable'] for r in runtimes), 'Required iOS 26.2 runtime unavailable'
+          PY
       - name: Generate project
         run: xcodegen generate
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
-      - name: Select simulator
+      - name: Create pinned regression simulator
         run: |
-          DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone .*Pro Max \(/ {print $2; exit}')
-          test -n "$DEVICE_ID"
-          xcrun simctl list devices available | grep "$DEVICE_ID"
+          DEVICE_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-regression" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max "$CI_RUNTIME")
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          printf 'RegressionSimulator=%s Runtime=%s\n' "$DEVICE_ID" "$CI_RUNTIME" >> build/VerificationEvidence/provenance.txt
       - name: Download compiled test products
         if: inputs.prebuilt_run_id != ''
         uses: actions/download-artifact@v4
@@ -75,29 +224,40 @@ jobs:
         run: |
           if [[ -n "${{ inputs.prebuilt_run_id }}" ]]; then
             test "$(cat build/prebuilt/product-source.txt)" = "$(git rev-parse HEAD)"
+            cmp build/prebuilt/product-environment.txt build/product-environment.txt
             mkdir -p build/TestProducts/Build
             tar -xzf build/prebuilt/test-products.tar.gz -C build/TestProducts/Build
           fi
           TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
           test -f "${TEST_RUN_FILES[0]}"
           echo "TEST_RUN=${TEST_RUN_FILES[0]}" >> "$GITHUB_ENV"
+      - name: Boot pinned regression simulator
+        if: inputs.verification_scope != '' && inputs.verification_scope != 'complete'
+        run: |
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
       - name: Retain compiled products for final verification
-        if: inputs.verification_scope == 'focused'
+        if: inputs.verification_scope == 'focused' || inputs.verification_scope == 'library-menu'
         run: tar -czf build/test-products.tar.gz -C build/TestProducts/Build Products
       - name: Upload compiled test products
-        if: inputs.verification_scope == 'focused'
+        if: inputs.verification_scope == 'focused' || inputs.verification_scope == 'library-menu'
         uses: actions/upload-artifact@v4
         with:
           name: offline-test-products
           path: |
             build/test-products.tar.gz
             build/product-source.txt
+            build/product-environment.txt
           retention-days: 7
           if-no-files-found: error
       - name: Repeatable performance baseline
         if: inputs.verification_scope == 'profile'
         run: |
           xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/PerformanceResults.xcresult -only-testing:OFFLINETests/ReleasePerformanceTests -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Repeat track menu and lifecycle regressions
+        if: inputs.verification_scope == 'library-menu'
+        run: |
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/MenuResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testMetadataSaveCancelAndLocalSearchAcrossAllFields -only-testing:OFFLINEUITests/LibraryManagementUITests/testLikeUnlikeIsSharedWithLikedSongs -only-testing:OFFLINEUITests/LibraryManagementUITests/testRestartRetainsPlaylistMetadataAndLikedState -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -test-iterations 3 -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Focused download, YouTube and keyboard regressions
         if: inputs.verification_scope == 'focused'
         run: |
@@ -109,11 +269,15 @@ jobs:
           python3 Scripts/enable-youtube-live-tests.py "$TEST_RUN" build/Live.xctestrun
           xcodebuild -xctestrun build/Live.xctestrun -destination "id=$SIMULATOR_ID" -resultBundlePath build/YouTubeLiveResults.xcresult -only-testing:OFFLINETests/YouTubeLiveTests -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Compact iPhone library layout
-        if: inputs.verification_scope != 'focused' && inputs.verification_scope != 'profile'
+        if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
         run: |
-          COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
-          test -n "$COMPACT_ID"
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+          COMPACT_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-compact" com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$CI_RUNTIME")
+          echo "COMPACT_SIMULATOR_ID=$COMPACT_ID" >> "$GITHUB_ENV"
+          printf 'CompactSimulator=%s Runtime=%s\n' "$COMPACT_ID" "$CI_RUNTIME" >> build/VerificationEvidence/provenance.txt
+          xcrun simctl boot "$COMPACT_ID"
+          xcrun simctl bootstatus "$COMPACT_ID" -b
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 -parallel-testing-enabled NO test-without-building 2>&1 | tee build/VerificationEvidence/CompactResults.log
+          xcrun simctl shutdown "$COMPACT_ID"
       - name: Export compact screenshots
         if: always()
         run: |
@@ -123,13 +287,19 @@ jobs:
       - name: Standard iPhone accessibility
         if: inputs.verification_scope == 'complete'
         run: |
-          STANDARD_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone 16 \(/ {print $2; exit}')
-          test -n "$STANDARD_ID"
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$STANDARD_ID" -resultBundlePath build/StandardResults.xcresult -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
+          STANDARD_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-standard" com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$CI_RUNTIME")
+          echo "STANDARD_SIMULATOR_ID=$STANDARD_ID" >> "$GITHUB_ENV"
+          printf 'StandardSimulator=%s Runtime=%s\n' "$STANDARD_ID" "$CI_RUNTIME" >> build/VerificationEvidence/provenance.txt
+          xcrun simctl boot "$STANDARD_ID"
+          xcrun simctl bootstatus "$STANDARD_ID" -b
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$STANDARD_ID" -resultBundlePath build/StandardResults.xcresult -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 -parallel-testing-enabled NO test-without-building 2>&1 | tee build/VerificationEvidence/StandardResults.log
+          xcrun simctl shutdown "$STANDARD_ID"
       - name: Complete regression suite
-        if: inputs.verification_scope != 'focused' && inputs.verification_scope != 'profile'
+        if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
         run: |
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 -parallel-testing-enabled NO test-without-building 2>&1 | tee build/VerificationEvidence/TestResults.log
       - name: Export UI screenshots
         if: always()
         run: |
@@ -149,6 +319,17 @@ jobs:
             build/CompactScreenshots
             build/KeyboardScreenshots
           if-no-files-found: ignore
+      - name: Export verification summaries and diagnostics
+        if: always()
+        run: |
+          for BUNDLE in build/*Results.xcresult; do
+            if [[ -f "$BUNDLE/Info.plist" ]]; then
+              NAME=$(basename "$BUNDLE" .xcresult)
+              xcrun xcresulttool get test-results summary --path "$BUNDLE" > "build/VerificationEvidence/$NAME-summary.json"
+              xcrun xcresulttool get test-results tests --path "$BUNDLE" > "build/VerificationEvidence/$NAME-tests.json"
+              xcrun xcresulttool export diagnostics --path "$BUNDLE" --output-path "build/VerificationEvidence/$NAME-diagnostics"
+            fi
+          done
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -161,7 +342,19 @@ jobs:
             build/CompactResults.xcresult
             build/KeyboardResults.xcresult
             build/YouTubeLiveResults.xcresult
+            build/MenuResults.xcresult
+            build/VerificationEvidence
           if-no-files-found: ignore
+          retention-days: 30
+      - name: Dispose verification simulators
+        if: always()
+        run: |
+          for DEVICE_ID in "${SIMULATOR_ID:-}" "${COMPACT_SIMULATOR_ID:-}" "${STANDARD_SIMULATOR_ID:-}"; do
+            if [[ -n "$DEVICE_ID" ]]; then
+              xcrun simctl shutdown "$DEVICE_ID" || true
+              xcrun simctl delete "$DEVICE_ID"
+            fi
+          done
 
       - name: Build verified unsigned device candidate
         if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''
