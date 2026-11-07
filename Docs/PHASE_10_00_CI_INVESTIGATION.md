@@ -251,3 +251,42 @@ the expensive build. The normal CI environment remains unchanged until the
 comparison provides evidence supporting a switch. A failed comparison stops
 further full-suite reruns; a successful comparison is only a prerequisite for
 one complete regression run, not proof of merge readiness.
+
+### Comparison result and full-suite candidate
+
+[Run 42367762796](https://github.com/T-h07/MuzikBelesh/actions/runs/42367762796)
+passed on both sources, without retries:
+
+| Source | Job | Album relaunch | Metadata save/cancel/search | Result |
+| --- | --- | --- | --- | --- |
+| Head `6da871d` (application/tests unchanged from `6a5ea4f`) | [128389337247](https://github.com/T-h07/MuzikBelesh/actions/runs/42367762796/job/128389337247) | 71.249 s | 64.103 s | 2 passed, 0 failed, 0 skipped |
+| Develop `897f3f7` | [128389337469](https://github.com/T-h07/MuzikBelesh/actions/runs/42367762796/job/128389337469) | 85.187 s | 64.500 s | 2 passed, 0 failed, 0 skipped |
+
+Both workers actually used image `20261104.0514.1`, ARM64, macOS 15.8.2
+(`24H232`), Xcode 26.2 (`17C52`), Swift 6.2.3, XcodeGen 2.46.0 and iOS 26.2
+(`23C54`). Their fresh iPhone 16 Pro Max simulator IDs were respectively
+`C7E9B98B-093F-46D2-9B79-6651F49AA3B9` and
+`EF463C04-A955-466A-B094-5FB79385A971`. Test execution totals were 135.352 s
+and 149.688 s; the surrounding xcodebuild invocations took 232 s and 350 s,
+excluding the explicit simulator boot. Startup overhead varies across workers.
+
+Neither exported runner session contains an animation-notification timeout or
+failed termination. The largest gaps between logged test activities were
+18.44 s and 12.59 s, both during app launch, not a 60-second menu-idleness wait.
+Each runner does record the existing five-second `mini-player` lookup expiring;
+the alternative `Open Now Playing` lookup then succeeds, as the unchanged
+assertion permits. These are passing assertions, not suppressed failures.
+
+Evidence artifacts are `environment-comparison-head` (`13572119438`,
+5,178,958 bytes) and `environment-comparison-develop` (`13573160322`,
+5,172,749 bytes), containing complete result bundles plus exported summaries,
+diagnostics, attachments, provenance and logs. Local copies are retained in
+the ignored `build/phase10-ci-evidence/environment-{head,develop}` directories.
+
+This small comparison supports one full regression attempt; it does not prove
+long-term simulator reliability. The full-suite candidate explicitly pins
+Xcode 26.2/iOS 26.2, creates fresh devices of the existing Pro Max/SE/standard
+sizes, and uses serial XCTest execution as in the comparison. Only one device
+is booted at a time. It records provenance and exports summaries/diagnostics
+for every result bundle. Reused products must match source, Xcode build, SDK
+and architecture. No application code, assertion or test allowance changes.
