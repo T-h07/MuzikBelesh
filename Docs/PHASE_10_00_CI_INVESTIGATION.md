@@ -219,3 +219,35 @@ UI suite or increasing deadlines without that evidence is not a remedy.
 The new workflow has passed local YAML parsing, embedded Bash syntax checks,
 and `git diff --check`. XCTest requires the macOS CI runners; it was not run
 on the Windows development host.
+
+## Alternative environment comparison (2026-11-07)
+
+The published [ARM runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md)
+and [Intel runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md)
+list Xcode 16.0, 16.1, 16.2, 16.3, 16.4, 26.0.1, 26.1.1, 26.2 and 26.3.
+Installed iOS runtimes are 18.5, 18.6, 26.0.1, 26.1 and 26.2. SDK availability
+does not imply that the corresponding older simulator runtime is installed.
+
+The bounded candidate is **macos-15 ARM, Xcode 26.2 (17C52), iOS 26.2,
+iPhone 16 Pro Max**. This changes both XCTest and the simulator runtime;
+success would validate the combination, not isolate which component matters.
+The inventory also lists iPhone SE (3rd generation) for this runtime, retaining
+the possibility of the existing compact regression gate. Runtime availability
+and actual toolchain versions must be confirmed on the allocated workers.
+
+The manual `environment-comparison` scope runs the unchanged metadata
+save/cancel/search and album name/artist relaunch tests once each, on both
+the dispatched head and pinned develop `897f3f7180ad31615df1d20946f0b7521d84afb4`.
+Both jobs use the same explicit Xcode path, runtime, device type and fresh-device
+lifecycle. No retry or animation workaround is enabled. Existing 60/120-second
+test allowances remain; the diagnostic test step additionally has an eight-minute
+wall-clock cap to bound lifecycle recovery. Diagnostic check names cannot stand
+in for the complete regression gate.
+
+The jobs retain source SHA, runner image/architecture, OS and toolchain versions,
+runtime inventory, test log/timing, result bundle, exported test summaries and
+XCTest diagnostics/attachments for 30 days. Missing prerequisites fail before
+the expensive build. The normal CI environment remains unchanged until the
+comparison provides evidence supporting a switch. A failed comparison stops
+further full-suite reruns; a successful comparison is only a prerequisite for
+one complete regression run, not proof of merge readiness.
