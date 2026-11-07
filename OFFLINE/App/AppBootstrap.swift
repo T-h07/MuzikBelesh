@@ -1,7 +1,4 @@
 import Foundation
-#if DEBUG
-import UIKit
-#endif
 
 @MainActor enum AppBootstrap {
     static func container() -> AppContainer {
@@ -9,13 +6,6 @@ import UIKit
         let process = ProcessInfo.processInfo
         if process.arguments.contains("--ui-testing") {
             guard let identifier = process.environment["MB_UI_TEST_ID"], UUID(uuidString: identifier) != nil else { fatalError("UI tests require an isolated library identifier") }
-            // Functional library tests exercise the real menu/editor controls.
-            // Xcode 16.4 can wait 60s for a menu animation notification even
-            // after our event loop is idle. Limit this setting to that fixture;
-            // keep XCTest's normal event-loop synchronization and all assertions.
-            if process.environment["MB_UI_TEST_DISABLE_ANIMATIONS"] == "1" {
-                UIView.setAnimationsEnabled(false)
-            }
             do {
                 let parent = FileManager.default.temporaryDirectory.appendingPathComponent("MuzikBeleshUITests", isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
                 let root = parent.appendingPathComponent(identifier, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL

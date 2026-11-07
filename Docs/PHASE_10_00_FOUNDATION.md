@@ -48,3 +48,7 @@ validation of positions and metadata, deterministic fingerprints, Codable round-
 metadata/audio progress semantics.
 
 Phase 10.0 has no effect on released v1.0.0. CI must pass before merging into develop.
+
+For direct foundation verification and isolated track-menu/lifecycle diagnostics,
+see [the CI investigation](PHASE_10_00_CI_INVESTIGATION.md). The `foundation`
+workflow scope runs this phase's tests without the complete UI suite.

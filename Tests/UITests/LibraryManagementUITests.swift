@@ -9,7 +9,6 @@ final class LibraryManagementUITests: XCTestCase {
         identifier = UUID().uuidString
         app = XCUIApplication()
         app.launchEnvironment["MB_UI_TEST_ID"] = identifier
-        app.launchEnvironment["MB_UI_TEST_DISABLE_ANIMATIONS"] = "1"
         app.launchArguments = ["--ui-testing", "--reset-ui-library"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Library"].waitForExistence(timeout: 10))
