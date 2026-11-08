@@ -1,4 +1,5 @@
 name: Library UI repair verification
+# This diagnostic checks four legacy UI cases; it is not a full merge gate.
 on:
   push:
     branches: ['fix/legacy-library-ui-xctest']
