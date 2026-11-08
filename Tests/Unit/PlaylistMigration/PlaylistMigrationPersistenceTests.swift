@@ -336,4 +336,20 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
         XCTAssertEqual(restored.currentOccurrenceID, identities[1])
         XCTAssertEqual(restored.nextID(), f.ids[0]); restored.didStart(f.ids[0]); XCTAssertEqual(restored.currentOccurrenceID, occurrences[2].id)
     }
+
+    @MainActor func testResumeRevalidatesCachedMigrationAudioAfterFileDisappears() async throws {
+        let f = try LibraryFixture(count: 1), repo = f.storage.playlistMigrations, input = source(1)
+        let session = try await repo.createPlaylist(from: input, operationID: "resume")
+        try await repo.associateVerifiedTrack(entryID: input.entries[0].id, trackID: f.ids[0])
+        let occurrences = try repo.rows(playlistID: XCTUnwrap(session.destinationPlaylistID)).playbackOccurrences
+        let (player, transport, _) = f.services()
+        try await player.playMigration(occurrences: occurrences, selected: occurrences[0].id, playlistID: XCTUnwrap(session.destinationPlaylistID), shuffle: false)
+        player.pause()
+        try FileManager.default.removeItem(at: f.file(0))
+        await fails(AudioPlaybackError.missingFile) { try await player.play() }
+        XCTAssertFalse(transport.isPlaying)
+        try repo.recover()
+        let rows = try repo.rows(playlistID: XCTUnwrap(session.destinationPlaylistID))
+        XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0].id, input.entries[0].id); XCTAssertNil(rows[0].playableTrack)
+    }
 }

@@ -208,7 +208,15 @@ final class AudioPlayerService: ObservableObject {
         }
         if case .failed = state.status, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false); return }
         if item == nil, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false); return }
+        try requireAvailableMigrationAudio()
         try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport(); state.lastError = nil; publishCurrent(); persist()
+    }
+
+    private func requireAvailableMigrationAudio() throws {
+        guard activeContextKind == "migrationPlaylist" else { return }
+        guard let id = state.currentTrackID, let storage else { throw AudioPlaybackError.trackNotFound }
+        let resolved = try resolver.resolve(trackID: id)
+        guard MigrationLocalAudio.isAvailable(resolved.track, paths: storage.paths) else { throw AudioPlaybackError.missingFile }
     }
 
     func playFromRemote() async { do { try await play() } catch { handleTransitionFailure(error) } }
@@ -342,6 +350,8 @@ final class AudioPlayerService: ObservableObject {
         defer { endCommand() }
         guard state.currentTrackID == trackID, item == nil else { return }
         guard let resolved = try? resolver.resolve(trackID: trackID) else { fail("The saved track is no longer available"); return }
+        do { try requireAvailableMigrationAudio() }
+        catch { fail("The saved track is no longer available"); return }
         let revision = intentRevision
         let localDuration = await storage?.downloadPlaybackDuration(track: resolved.track, url: resolved.url)
         guard revision == intentRevision, state.currentTrackID == trackID, item == nil else { return }
@@ -637,7 +647,7 @@ final class AudioPlayerService: ObservableObject {
             let value = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let shouldResume = AVAudioSession.InterruptionOptions(rawValue: value).contains(.shouldResume)
             if wasPlayingBeforeInterruption && shouldResume && !userPausedDuringInterruption && reconcileSleepTimer() {
-                do { try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport() }
+                do { try requireAvailableMigrationAudio(); try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport() }
                 catch { handleTransitionFailure(error) }
             } else if state.currentTrackID != nil {
                 wantsPlayback = false; state.status = .paused

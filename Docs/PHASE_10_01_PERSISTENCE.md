@@ -107,6 +107,9 @@ The queue manager resolves identities to real local track IDs before selection;
 placeholders never receive fabricated StoredTrack records. Navigation state and
 the mapping are saved atomically with the existing playback snapshot/explicit queue.
 Explicit Play Next/Add to Queue and ordinary context behavior remain supported.
+Migration contexts also revalidate cached audio when resuming, restoring a paused
+item or returning from an audio interruption, so a missing file cannot bypass the
+selection checks merely because a player item already exists.
 
 ## Phase 10.2 contract and limits
 
