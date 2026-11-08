@@ -1,0 +1,95 @@
+name: Library UI repair verification
+on:
+  push:
+    branches: ['fix/legacy-library-ui-xctest']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  library-ui:
+    name: library-ui-${{ matrix.target }}
+    runs-on: macos-15
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: pro-max
+            device_name: iPhone 16 Pro Max
+          - target: compact
+            device_name: iPhone SE (3rd generation)
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin supported Xcode and simulator runtime
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          xcrun simctl list runtimes
+          test "$(xcodebuild -version | grep -c 'Xcode 26.2')" -eq 1
+          xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=json.load(sys.stdin)["runtimes"]; assert any(x.get("version")=="26.2" and x.get("isAvailable",False) for x in r), "iOS 26.2 runtime unavailable"'
+      - name: Install project tools and generate project
+        run: |
+          brew install xcodegen
+          test "$(xcodegen --version)" = "Version: 2.46.0"
+          xcodegen generate
+          xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+      - name: Create fresh test device
+        env:
+          DEVICE_NAME: ${{ matrix.device_name }}
+        run: |
+          set -euo pipefail
+          DEVICE_TYPE="$(xcrun simctl list devicetypes -j | python3 -c 'import json,sys; n=sys.argv[1]; print(next(d["identifier"] for d in json.load(sys.stdin)["devicetypes"] if d["name"]==n))' "$DEVICE_NAME")"
+          RUNTIME_ID="$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; print(next(r["identifier"] for r in json.load(sys.stdin)["runtimes"] if r.get("version")=="26.2" and r.get("isAvailable",False)))')"
+          SIMULATOR_ID="$(xcrun simctl create "CI-library-repair-${{ matrix.target }}-${{ github.run_id }}" "$DEVICE_TYPE" "$RUNTIME_ID")"
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+      - name: Compile tests for pinned simulator
+        run: |
+          set -euo pipefail
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -derivedDataPath build/TestProducts build-for-testing CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)" BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+      - name: Run only the reported legacy UI failures
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
+          test -f "${TEST_RUN_FILES[0]}"
+          if [[ "$TARGET" == compact ]]; then
+            CASES=(-only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch)
+          else
+            CASES=(
+              -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumAddRemovePlayShuffleAndDeletePreserveMusicAndPlayer
+              -only-testing:OFFLINEUITests/LibraryManagementUITests/testPlaylistCRUDMembershipReorderingAndSafeRemoval
+              -only-testing:OFFLINEUITests/LibraryManagementUITests/testDeletionConfirmationCancelAndConfirm
+            )
+          fi
+          xcodebuild -xctestrun "${TEST_RUN_FILES[0]}" -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/LibraryRepair.xcresult "${CASES[@]}" -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
+      - name: Export result attachments
+        if: always()
+        run: |
+          if [[ -f build/LibraryRepair.xcresult/Info.plist ]]; then
+            xcrun xcresulttool export attachments --path build/LibraryRepair.xcresult --output-path build/LibraryRepairScreenshots
+          fi
+      - name: Upload targeted test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-ui-repair-${{ matrix.target }}
+          path: |
+            build/LibraryRepair.xcresult
+            build/LibraryRepairScreenshots
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Delete only the temporary test simulator
+        if: always()
+        run: |
+          if [[ -n "${SIMULATOR_ID:-}" ]]; then
+            xcrun simctl shutdown "$SIMULATOR_ID" || true
+            xcrun simctl delete "$SIMULATOR_ID" || true
+          fi
