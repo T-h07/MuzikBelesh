@@ -32,6 +32,132 @@ concurrency:
   cancel-in-progress: true
 permissions: {contents: read, actions: read}
 jobs:
+  complete-regression:
+    # Exhaustive gates run on independent fresh simulators: a timeout in one
+    # device cannot terminate unrelated UI suites or consume their time budget.
+    if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
+    name: regression-${{ matrix.scope }}
+    runs-on: macos-15
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {scope: unit-accessibility, device: 'iPhone 16'}
+          - {scope: compact, device: 'iPhone SE (3rd generation)'}
+          - {scope: library, device: 'iPhone 16 Pro Max'}
+          - {scope: other-ui, device: 'iPhone 16 Pro Max'}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      CI_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+      DEVICE_NAME: ${{ matrix.device }}
+      TEST_SCOPE: ${{ matrix.scope }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify pinned toolchain and runtime
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          test -d "$DEVELOPER_DIR"
+          test "$(xcodebuild -version | head -1)" = 'Xcode 26.2'
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          git rev-parse HEAD | tee build/regression-source.txt
+          xcrun simctl list runtimes -j | python3 -c 'import json,sys,os; r=json.load(sys.stdin)["runtimes"]; assert any(x.get("identifier")==os.environ["CI_RUNTIME"] and x.get("isAvailable") for x in r), "Pinned runtime missing"'
+          xcrun simctl list devicetypes -j | python3 -c 'import json,sys,os; r=json.load(sys.stdin)["devicetypes"]; assert any(x["name"]==os.environ["DEVICE_NAME"] for x in r), "Device type missing"'
+      - name: Install XcodeGen and generate project
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          test "$(xcodegen --version)" = 'Version: 2.46.0'
+          xcodegen generate
+          xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+      - name: Create and boot isolated simulator
+        run: |
+          set -euo pipefail
+          TYPE="$(xcrun simctl list devicetypes -j | python3 -c 'import json,sys,os; r=json.load(sys.stdin)["devicetypes"]; print(next(x["identifier"] for x in r if x["name"]==os.environ["DEVICE_NAME"]))')"
+          ID="$(xcrun simctl create "CI-${{ matrix.scope }}-$GITHUB_RUN_ID" "$TYPE" "$CI_RUNTIME")"
+          echo "SIMULATOR_ID=$ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$ID"
+          xcrun simctl bootstatus "$ID" -b
+      - name: Build testing products
+        run: |
+          set -euo pipefail
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -derivedDataPath build/TestProducts build-for-testing CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$(git rev-parse --short=7 HEAD)" BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+      - name: Execute full assigned regression coverage
+        run: |
+          set -euo pipefail
+          TEST_RUN="$(find build/TestProducts/Build/Products -maxdepth 1 -name '*.xctestrun' -print -quit)"
+          test -f "$TEST_RUN"
+          run_suite() {
+            local label="$1" default_allowance="$2"
+            shift 2
+            xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath "build/$label.xcresult" "$@" -test-timeouts-enabled YES -default-test-execution-time-allowance "$default_allowance" -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee "build/$label.log"
+          }
+          case "$TEST_SCOPE" in
+            unit-accessibility)
+              run_suite Units 60 -only-testing:OFFLINETests
+              run_suite StandardAccessibility 60 -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation
+              ;;
+            compact)
+              run_suite Compact 120 \
+                -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts \
+                -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen \
+                -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch \
+                -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch \
+                -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch
+              ;;
+            library)
+              run_suite LibraryUI 60 -only-testing:OFFLINEUITests/LibraryManagementUITests
+              ;;
+            other-ui)
+              run_suite OtherUI 60 -only-testing:OFFLINEUITests -skip-testing:OFFLINEUITests/LibraryManagementUITests
+              ;;
+            *) echo "Unknown regression scope: $TEST_SCOPE" >&2; exit 1 ;;
+          esac
+      - name: Export finalized attachments
+        if: always()
+        run: |
+          mkdir -p build/regression-attachments
+          for result in build/*.xcresult; do
+            [[ -f "$result/Info.plist" ]] || continue
+            name="$(basename "$result" .xcresult)"
+            xcrun xcresulttool export attachments --path "$result" --output-path "build/regression-attachments/$name" || true
+          done
+      - name: Upload independent test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-${{ matrix.scope }}
+          path: |
+            build/regression-source.txt
+            build/*.log
+            build/*.xcresult
+            build/regression-attachments
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Remove this job's simulator
+        if: always() && env.SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          xcrun simctl delete "$SIMULATOR_ID" || true
+
+  full-regression-gate:
+    if: always() && (inputs.verification_scope == '' || inputs.verification_scope == 'complete')
+    name: build-and-test
+    needs: [complete-regression]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every complete-regression shard to pass
+        env:
+          SHARDS: ${{ needs.complete-regression.result }}
+        run: test "$SHARDS" = success
+
   environment-comparison:
     if: inputs.verification_scope == 'environment-comparison'
     name: diagnostic-xcode-26.2-ios-26.2-${{ matrix.source }}
@@ -150,10 +276,9 @@ jobs:
             build/FoundationContracts.log
             build/FoundationContracts-source.txt
           if-no-files-found: error
-  build-and-test:
-    if: inputs.verification_scope != 'foundation' && inputs.verification_scope != 'environment-comparison'
-    # A focused diagnostic must never impersonate the full regression gate.
-    name: ${{ inputs.verification_scope == 'library-menu' && format('diagnostic-library-menu-{0}', inputs.compare_develop && 'develop' || 'head') || 'build-and-test' }}
+  diagnostic-and-legacy:
+    if: inputs.verification_scope == 'focused' || inputs.verification_scope == 'profile' || inputs.verification_scope == 'library-menu'
+    name: ${{ inputs.verification_scope == 'library-menu' && format('diagnostic-library-menu-{0}', inputs.compare_develop && 'develop' || 'head') || 'diagnostic-focused-or-profile' }}
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
     timeout-minutes: 40
     steps:
