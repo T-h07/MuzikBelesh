@@ -1,4 +1,4 @@
-name: Search-field XCTest baseline comparison
+name: Search-field XCTest simulator-motion comparison
 on:
   push:
     branches: ['diagnostic/search-quiescence-20261108']
@@ -12,8 +12,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {source: develop, commit: '12db78752cab4e721f61635660a128e093131e18'}
-          - {source: phase10, commit: '1de632334a15371dfe7e65d200fd977d63570781'}
+          - {source: motion-default, commit: '1de632334a15371dfe7e65d200fd977d63570781', reduce_motion: 'false'}
+          - {source: motion-reduced, commit: '1de632334a15371dfe7e65d200fd977d63570781', reduce_motion: 'true'}
     defaults:
       run:
         shell: bash
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.commit }}
-      - name: Record exact test source and pinned runtime
+      - name: Record exact Phase 10.0 source and pinned runtime
         run: |
           set -euo pipefail
           mkdir -p build/evidence
@@ -49,22 +49,25 @@ jobs:
           echo "SIMULATOR_ID=$ID" >> "$GITHUB_ENV"
           xcrun simctl boot "$ID"
           xcrun simctl bootstatus "$ID" -b
-      - name: Run each problematic test twice without retries
+          if [[ '${{ matrix.reduce_motion }}' == 'true' ]]; then
+            # Experimental simulator setting only; does not alter application.
+            xcrun simctl spawn "$ID" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
+          fi
+          echo "reduce_motion=${{ matrix.reduce_motion }}" | tee build/evidence/simulator-settings.txt
+          xcrun simctl spawn "$ID" defaults read com.apple.Accessibility ReduceMotionEnabled >> build/evidence/simulator-settings.txt 2>&1 || true
+      - name: Repeat failing keyboard focus test three times
         run: |
           set -euo pipefail
           TEST_RUN="$(find build/Products/Build/Products -maxdepth 1 -name '*.xctestrun' -print -quit)"
           test -f "$TEST_RUN"
-          FAILED=0
-          for SPEC in testSearchSubmitDismissesKeyboardAndCanReopen testAlbumYearAndDescriptionSurviveRelaunch; do
-            set +e
-            xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath "build/$SPEC.xcresult" "-only-testing:OFFLINEUITests/LibraryManagementUITests/$SPEC" -test-iterations 2 -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building > "build/evidence/$SPEC.log" 2>&1
-            EXIT=$?
-            set -e
-            printf '%s exit=%s\n' "$SPEC" "$EXIT" | tee -a build/evidence/outcomes.txt
-            grep -E 'App animations complete notification not received|exceeded execution time allowance|Test Case .* (passed|failed)|TEST EXECUTE' "build/evidence/$SPEC.log" | tail -50 || true
-            if (( EXIT != 0 )); then FAILED=1; fi
-          done
-          exit "$FAILED"
+          CASE="testSearchSubmitDismissesKeyboardAndCanReopen"
+          set +e
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath "build/$CASE.xcresult" "-only-testing:OFFLINEUITests/LibraryManagementUITests/$CASE" -test-iterations 3 -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building > "build/evidence/$CASE.log" 2>&1
+          EXIT=$?
+          set -e
+          printf '%s exit=%s\n' "$CASE" "$EXIT" | tee -a build/evidence/outcomes.txt
+          grep -E 'App animations complete notification not received|exceeded execution time allowance|Test Case .* (passed|failed)|TEST EXECUTE' "build/evidence/$CASE.log" | tail -50 || true
+          exit "$EXIT"
       - name: Export diagnostics and test results
         if: always()
         run: |
