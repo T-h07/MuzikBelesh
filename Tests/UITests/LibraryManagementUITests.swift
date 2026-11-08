@@ -77,6 +77,64 @@ final class LibraryManagementUITests: XCTestCase {
         expectation(for: predicate, evaluatedWith: element)
         waitForExpectations(timeout: 8)
     }
+    // SwiftUI confirmationDialog can expose nested Button nodes under one
+    // accessibility identifier on newer iOS runtimes. Choose the innermost
+    // visible actionable node instead of an ambiguous app.buttons[id] lookup.
+    private func tapDeletionConfirmation(_ identifier: String) {
+        let matches = app.descendants(matching: .any).matching(identifier: identifier)
+        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 5))
+        let action = matches.allElementsBoundByIndex.reversed().first {
+            ($0.elementType == .button || $0.elementType == .popUpButton) && $0.isHittable
+        }
+        guard let action else { XCTFail("No visible deletion action for \(identifier)"); return }
+        action.tap()
+    }
+
+    // On iOS 26 the confirmation is presented as a popover with no accessible
+    // Cancel button. Dismissing the popover is the user's non-destructive path.
+    // Check that the dialog actually closes before asserting song preservation.
+    private func cancelTrackDeletion() {
+        let confirm = app.descendants(matching: .any).matching(identifier: "confirm-delete-track").firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        let cancels = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Cancel")).allElementsBoundByIndex
+        if let cancel = cancels.reversed().first(where: {
+            ($0.elementType == .button || $0.elementType == .popUpButton) && $0.isHittable
+        }) {
+            cancel.tap()
+        } else {
+            let popover = app.popovers.firstMatch
+            let dismissRegion = app.otherElements["PopoverDismissRegion"].firstMatch
+            XCTAssertTrue(popover.exists && dismissRegion.exists, "Confirmation requires an accessible popover dismiss region")
+            // iOS 26 exposes the real non-destructive dismissal surface as
+            // PopoverDismissRegion. The status-bar corner is not a reliable hit
+            // target: pick a point on this region outside the popover instead.
+            let popoverFrame = popover.frame
+            let regionFrame = dismissRegion.frame
+            let topGap = popoverFrame.minY - regionFrame.minY
+            let bottomGap = regionFrame.maxY - popoverFrame.maxY
+            let y = topGap >= bottomGap
+                ? regionFrame.minY + topGap / 2
+                : popoverFrame.maxY + bottomGap / 2
+            let normalizedY = (y - regionFrame.minY) / regionFrame.height
+            dismissRegion.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: normalizedY)).tap()
+        }
+        absent(confirm)
+    }
+
+    // List content below the large album header is lazily materialized on SE.
+    // Reveal the real empty-state row instead of weakening its assertion.
+    private func assertEmptyAlbumMessageVisible() {
+        let message = app.staticTexts["This album is empty. Add songs from your Library."]
+        let list = app.collectionViews.firstMatch.exists ? app.collectionViews.firstMatch : app.tables.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5), "Album detail must contain a scrollable list")
+        for _ in 0..<5 {
+            if message.exists && message.isHittable { break }
+            list.swipeUp()
+        }
+        XCTAssertTrue(message.exists && message.isHittable, "The empty album message must be visible after revealing its list section")
+    }
+
     private func screenshot(_ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
     }
@@ -99,13 +157,13 @@ final class LibraryManagementUITests: XCTestCase {
     func testEmptyAlbumCreationAndSearchPersistAfterRelaunch() {
         createAlbum("Empty Album")
         app.staticTexts["Empty Album"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["This album is empty. Add songs from your Library."].waitForExistence(timeout: 5))
+        assertEmptyAlbumMessageVisible()
         app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
         app.tabBars.buttons["Search"].tap()
         change(app.textFields["search-field"], to: "empty album")
         tapVisible(app.staticTexts["Empty Album"].firstMatch)
         absent(app.keyboards.firstMatch)
-        XCTAssertTrue(app.staticTexts["This album is empty. Add songs from your Library."].exists)
+        assertEmptyAlbumMessageVisible()
         screenshot("Empty-Album-Restored")
     }
 
@@ -179,7 +237,7 @@ final class LibraryManagementUITests: XCTestCase {
         actions("ui-track-b"); app.buttons["Remove from Album"].tap()
         absent(app.buttons["track-actions-ui-track-b"])
         app.buttons["album-actions"].tap(); app.buttons["Delete Album"].tap()
-        app.buttons["confirm-delete-album"].tap()
+        tapDeletionConfirmation("confirm-delete-album")
         XCTAssertTrue(app.buttons["Open Now Playing"].waitForExistence(timeout: 5))
         openLibrary("Songs")
         for id in ["ui-track-a", "ui-track-b", "ui-track-c"] { XCTAssertTrue(app.buttons["track-actions-" + id].exists) }
@@ -341,8 +399,7 @@ final class LibraryManagementUITests: XCTestCase {
         actions("ui-track-a"); app.buttons["Remove from Playlist"].tap()
         absent(app.buttons["track-actions-ui-track-a"])
         app.buttons["playlist-actions"].tap(); app.buttons["Delete Playlist"].tap()
-        let confirm = app.buttons["confirm-delete-playlist"]
-        if confirm.waitForExistence(timeout: 2) { confirm.tap() } else { app.buttons["Delete Playlist"].firstMatch.tap() }
+        tapDeletionConfirmation("confirm-delete-playlist")
         XCTAssertTrue(app.staticTexts["No playlists"].waitForExistence(timeout: 8))
         openLibrary()
         for id in ["ui-track-a", "ui-track-b", "ui-track-c"] { XCTAssertTrue(app.buttons["track-actions-" + id].waitForExistence(timeout: 5)) }
@@ -380,11 +437,11 @@ final class LibraryManagementUITests: XCTestCase {
     }
 
     func testDeletionConfirmationCancelAndConfirm() {
-        openLibrary(); actions("ui-track-c"); app.buttons["Delete Song"].tap(); app.buttons["Cancel"].tap()
+        openLibrary(); actions("ui-track-c"); app.buttons["Delete Song"].tap()
+        cancelTrackDeletion()
         XCTAssertTrue(app.buttons["track-actions-ui-track-c"].exists)
         actions("ui-track-c"); app.buttons["Delete Song"].tap()
-        let confirm = app.buttons["confirm-delete-track"]
-        if confirm.waitForExistence(timeout: 2) { confirm.tap() } else { app.buttons["Delete Song"].firstMatch.tap() }
+        tapDeletionConfirmation("confirm-delete-track")
         absent(app.buttons["track-actions-ui-track-c"])
         XCTAssertTrue(app.buttons["track-actions-ui-track-a"].exists); XCTAssertTrue(app.buttons["track-actions-ui-track-b"].exists)
         screenshot("Library-After-Confirmed-Deletion")
