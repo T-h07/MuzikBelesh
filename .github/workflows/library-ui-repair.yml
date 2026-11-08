@@ -1,6 +1,6 @@
 name: Library UI repair verification
 # Bounded follow-up: one unresolved cancellation test on Pro Max.
-# This diagnostic checks four legacy UI cases; it is not a full merge gate.
+# This focused diagnostic is not the full regression merge gate.
 on:
   push:
     branches: ['fix/legacy-library-ui-xctest']
@@ -18,7 +18,7 @@ jobs:
         include:
           - target: pro-max
             device_name: iPhone 16 Pro Max
-   defaults:
+    defaults:
       run:
         shell: bash
     steps:
