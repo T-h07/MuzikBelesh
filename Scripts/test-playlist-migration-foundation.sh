@@ -7,7 +7,9 @@ cd "$(dirname "$0")/.."
 HARNESS=$(mktemp -d "${TMPDIR:-/tmp}/muzik-foundation.XXXXXX")
 trap 'rm -rf "$HARNESS"' EXIT
 mkdir -p "$HARNESS/Sources/OFFLINE" "$HARNESS/Tests/OFFLINETests" build
-cp OFFLINE/PlaylistMigration/*.swift "$HARNESS/Sources/OFFLINE/"
+# The portable foundation gate compiles its actual three contract sources.
+# Phase 10.1 GRDB/audio implementations are verified by the iOS persistence gate.
+cp OFFLINE/PlaylistMigration/{MigrationModels,MigrationContracts,MigrationValidation}.swift "$HARNESS/Sources/OFFLINE/"
 cp Tests/Unit/PlaylistMigration/PlaylistMigrationFoundationTests.swift "$HARNESS/Tests/OFFLINETests/"
 # Fingerprints use the existing LibraryIdentity implementation. Copy its actual
 # declarations (including LibraryError), not a test double. The prefix before

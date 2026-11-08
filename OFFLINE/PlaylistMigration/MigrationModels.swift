@@ -111,6 +111,7 @@ struct PlaylistMigrationSession: Identifiable, Codable, Equatable, Sendable {
     let updatedAt: Date
     var operationID: String? = nil
     var failureInformation: String? = nil
+    var sourceReference: String? = nil
 }
 
 struct PlaylistMigrationEntry: Identifiable, Codable, Equatable, Sendable {

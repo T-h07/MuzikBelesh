@@ -27,3 +27,13 @@ Playback uses the persisted custom order captured at start. Live reorder or play
 deletion leaves the current item/elapsed time and active ordered snapshot intact.
 The next collection start reads the new order. A permanently deleted song is removed
 from that snapshot and its explicit queue occurrences; other songs are preserved.
+
+## Migration-managed playlists
+
+Imported playlists display original ordered source occurrences, including placeholders
+and duplicate recordings. The count includes every source row; Play/Shuffle include
+only validated local occurrences. Unavailable rows show source title, artist, album,
+duration and status. Each row uses its occurrence UUID. Source order and membership
+are preserved in this phase, so legacy Add/Remove/Reorder controls do not apply;
+rename/artwork/delete still work. Deleting local audio retains its placeholders.
+See [Phase 10.1 persistence](PHASE_10_01_PERSISTENCE.md) for ownership and recovery.

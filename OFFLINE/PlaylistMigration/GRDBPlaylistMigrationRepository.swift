@@ -13,12 +13,11 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
     /// One IMMEDIATE GRDB write transaction owns the idempotency check and every insert.
     /// No observer can see importingMetadata or a partially populated playlist.
     func createCommittedPlaylist(from source: PlaylistMigrationSourcePlaylist, operationID: String) throws -> PlaylistMigrationSession {
+        try Task.checkCancellation()
         try PlaylistMigrationValidation.validate(source)
         let operation = operationID.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
         guard !operation.isEmpty, operation.count <= 200,
               operation.rangeOfCharacter(from: .controlCharacters) == nil else { throw PlaylistMigrationStorageError.invalidOperationID }
-        try MigrationPersistentText.validate([operation, source.sourcePlaylistID, source.sourceReference])
-        for entry in source.entries { try MigrationPersistentText.validate([entry.sourceTrackID, entry.sourceURI]) }
         let fingerprint = try PlaylistMigrationValidation.importFingerprint(for: source)
         return try db.write { [self] db in
             if let existing = try MigrationSessionRecord.fetchOne(db, sql: "SELECT * FROM playlist_migrations WHERE operationID = ?", arguments: [operation]) {
@@ -28,16 +27,19 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
             }
             let now = Date(), id = UUID().uuidString, playlistID = UUID().uuidString
             try StoredPlaylist(id: playlistID, name: LibraryIdentity.validatedName(source.name), description: nil, artworkRelativePath: nil, dateAdded: now, dateModified: now).insert(db)
-            var session = MigrationSessionRecord(id: id, destinationPlaylistID: playlistID, operationID: operation, source: source.source.rawValue, sourcePlaylistID: source.sourcePlaylistID, sourcePlaylistName: source.name, importFingerprint: fingerprint, expectedEntryCount: source.entries.count, status: .importingMetadata, createdAt: now, updatedAt: now, failureInformation: nil)
+            var session = MigrationSessionRecord(id: id, destinationPlaylistID: playlistID, operationID: operation, source: source.source.rawValue, sourcePlaylistID: source.sourcePlaylistID, sourceReference: source.sourceReference, sourcePlaylistName: source.name, importFingerprint: fingerprint, expectedEntryCount: source.entries.count, status: .importingMetadata, createdAt: now, updatedAt: now, failureInformation: nil)
             try session.insert(db)
             for sourceEntry in source.entries {
+                try Task.checkCancellation()
                 try MigrationEntryRecord(source: sourceEntry, migrationID: id, now: now).insert(db)
             }
             try Self.verify(session, db: db)
             try PlaylistMigrationValidation.requireSessionTransition(session.status, to: .metadataReady)
             session.status = .metadataReady
             try session.update(db)
-            return try session.model()
+            // Return SQLite's canonical timestamp precision, also used by retries.
+            guard let committed = try MigrationSessionRecord.fetchOne(db, key: id) else { throw PlaylistMigrationStorageError.corruptMetadata }
+            return try committed.model()
         }
     }
 
@@ -241,7 +243,7 @@ private func migrationDecode<T: Decodable>(_ value: String) throws -> T { try JS
 struct MigrationSessionRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "playlist_migrations"
     var id: String, destinationPlaylistID: String, operationID: String, source: String
-    var sourcePlaylistID: String?
+    var sourcePlaylistID: String?, sourceReference: String?
     var sourcePlaylistName: String, importFingerprint: String
     var expectedEntryCount: Int
     var status: PlaylistMigrationStatus
@@ -249,7 +251,7 @@ struct MigrationSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var failureInformation: String?
     func model() throws -> PlaylistMigrationSession {
         guard let provider = PlaylistMigrationSource(rawValue: source) else { throw PlaylistMigrationStorageError.corruptMetadata }
-        return try PlaylistMigrationSession(id: migrationUUID(id), destinationPlaylistID: destinationPlaylistID, source: provider, sourcePlaylistID: sourcePlaylistID, sourcePlaylistName: sourcePlaylistName, importFingerprint: importFingerprint, expectedEntryCount: expectedEntryCount, status: status, createdAt: createdAt, updatedAt: updatedAt, operationID: operationID, failureInformation: failureInformation)
+        return try PlaylistMigrationSession(id: migrationUUID(id), destinationPlaylistID: destinationPlaylistID, source: provider, sourcePlaylistID: sourcePlaylistID, sourcePlaylistName: sourcePlaylistName, importFingerprint: importFingerprint, expectedEntryCount: expectedEntryCount, status: status, createdAt: createdAt, updatedAt: updatedAt, operationID: operationID, failureInformation: failureInformation, sourceReference: sourceReference)
     }
 }
 

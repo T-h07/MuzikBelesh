@@ -262,8 +262,9 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
     @MainActor func testShuffleAndZeroPlayableReadModelNeverFabricateTrackIDs() async throws {
         let f = try LibraryFixture(count: 1), repo = f.storage.playlistMigrations, input = source(3)
         let session = try await repo.createPlaylist(from: input, operationID: "queue")
-        let (_, transport, library) = f.services()
-        await library.playMigration(playlistID: XCTUnwrap(session.destinationPlaylistID)); XCTAssertEqual(transport.replacements, 0)
+        let (player, transport, library) = f.services()
+        await library.playMigration(playlistID: try XCTUnwrap(session.destinationPlaylistID)); XCTAssertEqual(transport.replacements, 0)
+        XCTAssertNil(player.state.currentTrackID)
         for entry in input.entries { try await repo.associateVerifiedTrack(entryID: entry.id, trackID: f.ids[0]) }
         let occurrences = try repo.rows(playlistID: XCTUnwrap(session.destinationPlaylistID)).playbackOccurrences
         let queue = PlaybackQueueManager(storage: f.storage, makeShuffle: { $0 })
@@ -273,5 +274,65 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
         XCTAssertEqual(visited, occurrences.map(\.id))
         try FileManager.default.removeItem(at: f.file(0))
         queue.setContext([f.ids[0]], current: f.ids[0]); XCTAssertNil(queue.nextID()); XCTAssertTrue(queue.contextTrackIDs.isEmpty)
+    }
+
+    @MainActor func testABACAPreservesPositionsAndDeletionReconcilesPersistedShuffle() async throws {
+        let f = try LibraryFixture(count: 3), repo = f.storage.playlistMigrations, input = source(5)
+        let session = try await repo.createPlaylist(from: input, operationID: "abaca")
+        let trackIDs = [f.ids[0], f.ids[1], f.ids[0], f.ids[2], f.ids[0]]
+        for (index, trackID) in trackIDs.enumerated() { try await repo.associateVerifiedTrack(entryID: input.entries[index].id, trackID: trackID) }
+        let rows = try repo.rows(playlistID: XCTUnwrap(session.destinationPlaylistID))
+        XCTAssertEqual(rows.playbackOccurrences.map(\.trackID), trackIDs)
+        let queue = PlaybackQueueManager(storage: f.storage, makeShuffle: { $0 })
+        queue.setMigrationContext(rows.playbackOccurrences, selected: input.entries[0].id.uuidString)
+        queue.didStart(trackIDs[0])
+        for index in 1..<5 {
+            XCTAssertEqual(queue.nextID(), trackIDs[index]); queue.didStart(trackIDs[index])
+            XCTAssertEqual(queue.currentOccurrenceID, input.entries[index].id.uuidString)
+        }
+        queue.toggleShuffle()
+        queue.persistState(currentTrackID: f.ids[0], positionMs: 0, sleepDeadline: nil, sleepTimerDuration: nil, contextKind: "migrationPlaylist", contextSourceID: session.destinationPlaylistID)
+        _ = try ManagedLibraryFiles.deleteTrack(f.ids[0], confirmed: true, paths: f.paths, db: f.storage.database.dbQueue)
+        let restored = PlaybackQueueManager(storage: try StorageCoordinator(paths: f.paths), makeShuffle: { $0 })
+        XCTAssertEqual(restored.contextTrackIDs, [f.ids[1], f.ids[2]])
+        for _ in 0..<4 {
+            let id = try XCTUnwrap(restored.nextID()); XCTAssertTrue([f.ids[1], f.ids[2]].contains(id)); restored.didStart(id)
+        }
+        let preserved = try await repo.entries(migrationID: session.id)
+        XCTAssertEqual(preserved.count, 5); XCTAssertEqual(preserved.map(\.source), input.entries)
+    }
+
+    func testFailureAfterCommitAndCorruptMetadataNeverDiscardOtherSourceEntries() async throws {
+        let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations, input = source(500)
+        enum ClientFailure: Error { case afterCommit }
+        do {
+            _ = try await repo.createPlaylist(from: input, operationID: "committed")
+            throw ClientFailure.afterCommit
+        } catch ClientFailure.afterCommit { }
+        let reopened = try StorageCoordinator(paths: f.paths).playlistMigrations
+        let session = try await reopened.createPlaylist(from: input, operationID: "committed")
+        let entries = try await reopened.entries(migrationID: session.id); XCTAssertEqual(entries.map(\.source), input.entries)
+        try await f.storage.database.dbQueue.write { try $0.execute(sql: "DELETE FROM migration_entries WHERE id = ?", arguments: [input.entries[200].id.uuidString]) }
+        XCTAssertThrowsError(try reopened.recover()) { XCTAssertEqual($0 as? PlaylistMigrationStorageError, .corruptMetadata) }
+        await fails(PlaylistMigrationStorageError.corruptMetadata) { _ = try await reopened.createPlaylist(from: input, operationID: "committed") }
+        XCTAssertEqual(try count("migration_entries", f), 499); XCTAssertEqual(try count("playlists", f), 1)
+    }
+
+    @MainActor func testExplicitQueueKeepsItsOwnIdentitiesAndResumesSourceOccurrenceAfterRestart() async throws {
+        let f = try LibraryFixture(count: 2), repo = f.storage.playlistMigrations, input = source(3)
+        let session = try await repo.createPlaylist(from: input, operationID: "explicit")
+        for entry in input.entries { try await repo.associateVerifiedTrack(entryID: entry.id, trackID: f.ids[0]) }
+        let queue = PlaybackQueueManager(storage: f.storage, makeShuffle: { $0 })
+        let occurrences = try repo.rows(playlistID: XCTUnwrap(session.destinationPlaylistID)).playbackOccurrences
+        queue.setMigrationContext(occurrences, selected: occurrences[1].id); queue.didStart(f.ids[0])
+        queue.addToQueue(trackID: f.ids[1]); queue.addToQueue(trackID: f.ids[1])
+        let identities = queue.entries.map { "queue:" + $0.id }; XCTAssertEqual(Set(identities).count, 2)
+        for identity in identities {
+            XCTAssertEqual(queue.nextID(), f.ids[1]); queue.didStart(f.ids[1]); XCTAssertEqual(queue.currentOccurrenceID, identity)
+        }
+        queue.persistState(currentTrackID: f.ids[1], positionMs: 0, sleepDeadline: nil, sleepTimerDuration: nil, contextKind: "migrationPlaylist", contextSourceID: session.destinationPlaylistID)
+        let restored = PlaybackQueueManager(storage: f.storage, makeShuffle: { $0 })
+        XCTAssertEqual(restored.currentOccurrenceID, identities[1])
+        XCTAssertEqual(restored.nextID(), f.ids[0]); restored.didStart(f.ids[0]); XCTAssertEqual(restored.currentOccurrenceID, occurrences[2].id)
     }
 }

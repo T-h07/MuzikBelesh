@@ -9,7 +9,7 @@ enum MigrationStorageSchema {
                     destinationPlaylistID TEXT NOT NULL UNIQUE REFERENCES playlists(id) ON DELETE CASCADE,
                     operationID TEXT NOT NULL UNIQUE CHECK(length(operationID) BETWEEN 1 AND 200),
                     source TEXT NOT NULL CHECK(source IN ('spotifyAccountExport','exportify','spotifyAPI')),
-                    sourcePlaylistID TEXT, sourcePlaylistName TEXT NOT NULL,
+                    sourcePlaylistID TEXT, sourceReference TEXT, sourcePlaylistName TEXT NOT NULL,
                     importFingerprint TEXT NOT NULL, expectedEntryCount INTEGER NOT NULL CHECK(expectedEntryCount BETWEEN 0 AND 10000),
                     status TEXT NOT NULL CHECK(status IN ('preparing','importingMetadata','metadataReady','matching','awaitingReview','downloading','verifying','completed','partiallyCompleted','paused','cancelled','failed')),
                     createdAt DATETIME NOT NULL, updatedAt DATETIME NOT NULL, failureInformation TEXT

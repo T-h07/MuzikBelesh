@@ -61,7 +61,10 @@ import SwiftUI
         do {
             // Re-read immediately before playback, rather than trusting a rendered row.
             let occurrences = try storage.playlistMigrations.rows(playlistID: playlistID).playbackOccurrences
-            guard let selected = occurrenceID.flatMap({ id in occurrences.first { $0.id == id } }) ?? (shuffle ? occurrences.randomElement() : occurrences.first) else { return }
+            let selection: MigrationPlaybackOccurrence?
+            if let occurrenceID { selection = occurrences.first { $0.id == occurrenceID } }
+            else { selection = shuffle ? occurrences.randomElement() : occurrences.first }
+            guard let selected = selection else { return }
             try await player.playMigration(occurrences: occurrences, selected: selected.id, playlistID: playlistID, shuffle: shuffle)
         } catch { report(error) }
     }
