@@ -26,6 +26,8 @@ final class LibraryRepository {
         result.albums = try StoredAlbum.fetchAll(db)
         result.playlists = try StoredPlaylist.order(Column("dateAdded"), Column("id")).fetchAll(db)
         result.memberships = try PlaylistMembership.order(Column("playlistID"), Column("position")).fetchAll(db)
+        result.migrationSessions = try GRDBPlaylistMigrationRepository.sessions(db)
+        result.migrationEntries = try GRDBPlaylistMigrationRepository.entries(db)
         result.likedIDs = Set(try String.fetchAll(db, sql: "SELECT trackID FROM liked_tracks"))
         result.recentIDs = try String.fetchAll(db, sql: "SELECT trackID FROM playback_history GROUP BY trackID ORDER BY MAX(startedAt) DESC, trackID LIMIT 20")
         return result
@@ -67,6 +69,7 @@ final class LibraryRepository {
     }
     static func replaceMembership(_ ids: [String], playlistID: String, db: Database) throws {
         guard try StoredPlaylist.fetchOne(db, key: playlistID) != nil else { throw LibraryError.notFound }
+        guard try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist_migrations WHERE destinationPlaylistID = ?", arguments: [playlistID]) == 0 else { throw PlaylistMigrationStorageError.managedPlaylist }
         guard Set(ids).count == ids.count else { throw LibraryError.invalidOrder }
         for id in ids { guard try StoredTrack.fetchOne(db, key: id) != nil else { throw LibraryError.notFound } }
         try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlistID = ?", arguments: [playlistID])

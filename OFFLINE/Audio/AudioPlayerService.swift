@@ -122,13 +122,35 @@ final class AudioPlayerService: ObservableObject {
         timerExpired = false
         queue.cancelCandidate()
         let old = (activeContextTrackIDs, activeContextKind, activeContextSourceID)
+        let rollback = queue.selectionRollback()
+        queue.clearMigrationContext()
         activeContextTrackIDs = contextTrackIDs.map { ids in var seen = Set<String>(); return ids.filter { seen.insert($0).inserted } }
         activeContextKind = contextTrackIDs == nil ? nil : (contextKind ?? "library")
         activeContextSourceID = contextSourceID
         do { try await selectTrack(trackID, direction: direction) }
         catch {
             (activeContextTrackIDs, activeContextKind, activeContextSourceID) = old
+            rollback()
             refreshContext(); persist(); throw error
+        }
+    }
+
+    func playMigration(occurrences: [MigrationPlaybackOccurrence], selected: String, playlistID: String, shuffle: Bool) async throws {
+        guard let occurrence = occurrences.first(where: { $0.id == selected }) else { return }
+        guard await beginCommand("select") else { throw AudioPlaybackError.playerFailed("Playback is busy. Try again.") }
+        defer { endCommand() }
+        // Resolve before changing navigation, then selectTrack validates again before AVPlayer.
+        _ = try resolver.resolve(trackID: occurrence.trackID)
+        let old = (activeContextTrackIDs, activeContextKind, activeContextSourceID)
+        let rollback = queue.selectionRollback()
+        timerExpired = false; queue.cancelCandidate()
+        activeContextTrackIDs = occurrences.map(\.trackID); activeContextKind = "migrationPlaylist"; activeContextSourceID = playlistID
+        queue.setMigrationContext(occurrences, selected: selected)
+        if queue.shuffleEnabled != shuffle { queue.toggleShuffle() }
+        do { try await selectTrack(occurrence.trackID) }
+        catch {
+            (activeContextTrackIDs, activeContextKind, activeContextSourceID) = old
+            rollback(); refreshContext(); persist(); throw error
         }
     }
 
@@ -140,6 +162,8 @@ final class AudioPlayerService: ObservableObject {
         guard reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Sleep Timer has expired") }
         do {
             let resolved = try resolver.resolve(trackID: trackID)
+            if activeContextKind == "migrationPlaylist", let storage,
+               !MigrationLocalAudio.isAvailable(resolved.track, paths: storage.paths) { throw AudioPlaybackError.missingFile }
             let revision = intentRevision
             let asset = AVURLAsset(url: resolved.url)
             let duration = try await PlaybackAssetInspection.duration(of: asset)

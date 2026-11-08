@@ -109,6 +109,8 @@ struct PlaylistMigrationSession: Identifiable, Codable, Equatable, Sendable {
     let status: PlaylistMigrationStatus
     let createdAt: Date
     let updatedAt: Date
+    var operationID: String? = nil
+    var failureInformation: String? = nil
 }
 
 struct PlaylistMigrationEntry: Identifiable, Codable, Equatable, Sendable {

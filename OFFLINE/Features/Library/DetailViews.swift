@@ -11,6 +11,7 @@ struct PlaylistDetailView: View {
     @State private var editMode: EditMode = .inactive
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
+    private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
     var body: some View {
         List {
             if let playlist {
@@ -19,12 +20,22 @@ struct PlaylistDetailView: View {
                         ManagedArtworkView(path: playlist.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first, fallbackID: playlist.id, size: 220).frame(maxWidth: .infinity)
                         Text(playlist.name).font(.title.bold()).foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("playlist-detail-name")
                         if let description = playlist.description, !description.isEmpty { Text(description).foregroundStyle(AppColors.textSecondary) }
-                        Text("\(songs.count) songs • \(formatDuration(songs))").font(.caption).foregroundStyle(AppColors.textSecondary)
-                        CollectionPlaybackButtons(tracks: songs, kind: "playlist", sourceID: playlist.id)
-                        Button { showingTracks = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
+                        if migrationManaged {
+                            MigrationPlaylistPlaybackHeader(playlistID: playlistID)
+                        } else {
+                            Text("\(songs.count) songs • \(formatDuration(songs))").font(.caption).foregroundStyle(AppColors.textSecondary)
+                            CollectionPlaybackButtons(tracks: songs, kind: "playlist", sourceID: playlist.id)
+                            Button { showingTracks = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
+                        }
                     }.padding(.vertical, AppSpacing.md)
                 }.listRowBackground(AppColors.backgroundPrimary)
                 Section {
+                    if migrationManaged {
+                        ForEach(library.migrationRows(playlistID)) { row in
+                            MigrationPlaylistOccurrenceRow(row: row, playlistID: playlistID)
+                                .listRowBackground(AppColors.backgroundPrimary)
+                        }
+                    } else {
                     if songs.isEmpty { Text("This playlist is empty. Add songs from your Library.").foregroundStyle(AppColors.textSecondary) }
                     ForEach(songs) { track in
                         Group {
@@ -43,6 +54,7 @@ struct PlaylistDetailView: View {
                         var order = songs.map(\.id); order.move(fromOffsets: source, toOffset: destination)
                         library.perform { try library.reorder(order, playlistID: playlistID) }
                     }
+                    }
                 }
             } else { Text("This playlist was removed.").foregroundStyle(AppColors.textSecondary) }
         }
@@ -50,7 +62,9 @@ struct PlaylistDetailView: View {
         .scrollContentBackground(.hidden).screenBackground().navigationTitle("Playlist").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }.accessibilityIdentifier("playlist-reorder")
+                if !migrationManaged {
+                    Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }.accessibilityIdentifier("playlist-reorder")
+                }
                 Menu {
                     Button("Edit Playlist") { showingEditor = true }
                     Button("Delete Playlist", role: .destructive) { confirmingDelete = true }
@@ -182,7 +196,7 @@ struct AddToPlaylistView: View {
             List {
                 Button("Create Playlist") { creating = true }
                 if let error { Text(error).foregroundStyle(AppColors.error) }
-                ForEach(library.snapshot.playlists) { playlist in
+                ForEach(library.snapshot.playlists.filter { !library.isMigrationPlaylist($0.id) }) { playlist in
                     Button { add(playlist.id) } label: { PlaylistLibraryRow(playlist: playlist) }
                 }
                 if library.snapshot.playlists.isEmpty { Text("Create a playlist to add these songs.").foregroundStyle(AppColors.textSecondary) }

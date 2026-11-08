@@ -1,0 +1,69 @@
+name: Playlist migration verification
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop]
+permissions: {contents: read}
+concurrency:
+  group: playlist-migration-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  persistence:
+    runs-on: macos-15
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Build application and all test products
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          git rev-parse HEAD | tee build/migration-source.txt
+          brew install xcodegen
+          xcodegen generate
+          ID=$(xcrun simctl create "Migration-$GITHUB_RUN_ID" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max com.apple.CoreSimulator.SimRuntime.iOS-26-2)
+          echo "SIMULATOR_ID=$ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$ID"
+          xcrun simctl bootstatus "$ID" -b
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$ID" -derivedDataPath build/Products build-for-testing CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/migration-build.log
+      - name: Foundation persistence and affected regression tests
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUnits.xcresult \
+            -only-testing:OFFLINETests/PlaylistMigrationFoundationTests \
+            -only-testing:OFFLINETests/PlaylistMigrationPersistenceTests \
+            -only-testing:OFFLINETests/Phase2StorageTests \
+            -only-testing:OFFLINETests/Phase4LibraryMigrationTests \
+            -only-testing:OFFLINETests/PlaylistManagementTests \
+            -only-testing:OFFLINETests/LibraryDeletionTests \
+            -only-testing:OFFLINETests/FullLocalLibraryIntegrationTests \
+            -only-testing:OFFLINETests/Phase4PlaybackTests \
+            -only-testing:OFFLINETests/PlaybackPreviousPolicyTests \
+            -only-testing:OFFLINETests/PlaybackServiceAuditTests \
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-units.log
+      - name: Migration playlist UI
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUI.xcresult -only-testing:OFFLINEUITests/PlaylistMigrationUITests -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-ui.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playlist-migration-evidence
+          path: |
+            build/migration-*.txt
+            build/migration-*.log
+            build/*.xcresult
+          retention-days: 14
+      - name: Remove isolated simulator
+        if: always() && env.SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          xcrun simctl delete "$SIMULATOR_ID" || true

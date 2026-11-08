@@ -17,6 +17,9 @@ import SwiftUI
     private var currentID: String?
     private var navigationHistory: [String] = []
     private var navigationHistoryPosition = -1
+    private(set) var migrationContext: MigrationNavigationContext?
+    private var pendingOccurrenceID: String?
+    var currentOccurrenceID: String? { migrationContext == nil ? nil : navigator.currentID }
 
     init(storage: StorageCoordinator?, makeShuffle: @escaping ([String]) -> [String] = { $0.shuffled() }) { self.storage = storage; navigator = PlaybackNavigationEngine(makeShuffle: makeShuffle); restore() }
 
@@ -34,20 +37,60 @@ import SwiftUI
             shuffleOrder = decode(saved.shuffleOrderJSON) ?? []; shufflePosition = saved.shufflePosition ?? 0
             navigationHistory = decode(saved.navigationHistoryJSON) ?? []
             navigationHistoryPosition = saved.navigationHistoryPosition ?? (navigationHistory.isEmpty ? -1 : navigationHistory.count - 1)
+            if let json = saved.migrationContextJSON {
+                migrationContext = try? JSONDecoder().decode(MigrationNavigationContext.self, from: Data(json.utf8))
+            }
         }
         if (try? storage.playback.state()) == nil { repeatMode = .all }
+        if var migration = migrationContext {
+            migration.occurrences.removeAll { !isAvailable($0.trackID) }
+            migrationContext = migration
+        }
         reconcile()
-        navigator.restore(context: contextTrackIDs, currentID: currentID, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode, shuffleOrder: shuffleOrder, shufflePosition: shufflePosition, history: navigationHistory, historyPosition: navigationHistoryPosition, explicitQueue: entries.map(\.trackID))
+        navigator.restore(context: migrationContext?.occurrences.map(\.id) ?? contextTrackIDs, currentID: migrationContext?.currentID ?? currentID, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode, shuffleOrder: shuffleOrder, shufflePosition: shufflePosition, history: navigationHistory, historyPosition: navigationHistoryPosition, explicitQueue: entries.map(\.trackID))
     }
 
-    func setContext(_ ids: [String], current: String?) { let available = (try? storage?.tracks.availableIDs()) ?? []; contextTrackIDs = ids.filter { available.contains($0) }; currentID = current; navigator.setContext(contextTrackIDs, currentID: current); pendingNavigator?.setContext(contextTrackIDs, currentID: current); syncFromNavigator() }
-    func setCurrent(_ id: String?) { currentID = id; navigator.setCurrent(id) }
+    func setMigrationContext(_ occurrences: [MigrationPlaybackOccurrence], selected: String) {
+        migrationContext = MigrationNavigationContext(occurrences: occurrences, currentID: selected)
+        pendingOccurrenceID = selected
+        navigator.setContext(occurrences.map(\.id), currentID: selected)
+        syncFromNavigator()
+    }
+    func clearMigrationContext() {
+        migrationContext = nil; pendingOccurrenceID = nil
+    }
+    func selectionRollback() -> () -> Void {
+        let previousNavigator = navigator.copy(), previousMigration = migrationContext
+        return { [weak self] in
+            guard let self else { return }
+            self.cancelCandidate(); self.navigator = previousNavigator; self.migrationContext = previousMigration; self.syncFromNavigator()
+        }
+    }
+    func setContext(_ ids: [String], current: String?) {
+        if var migration = migrationContext {
+            let available = Set(ids)
+            migration.occurrences.removeAll { !available.contains($0.trackID) || !isAvailable($0.trackID) }
+            migrationContext = migration
+            navigator.setContext(migration.occurrences.map(\.id), currentID: navigator.currentID)
+            pendingNavigator?.setContext(migration.occurrences.map(\.id), currentID: pendingNavigator?.currentID)
+        } else {
+            let available = (try? storage?.tracks.availableIDs()) ?? []
+            contextTrackIDs = ids.filter { available.contains($0) }; currentID = current
+            navigator.setContext(contextTrackIDs, currentID: current); pendingNavigator?.setContext(contextTrackIDs, currentID: current)
+        }
+        syncFromNavigator()
+    }
+    func setCurrent(_ id: String?) {
+        currentID = id
+        if migrationContext == nil { navigator.setCurrent(id) }
+    }
     func didStart(_ id: String, direction: NavigationDirection = .forward) {
         if let pendingNavigator { navigator = pendingNavigator }
         pendingNavigator = nil
         if let pendingQueueEntryID { entries.removeAll { $0.id == pendingQueueEntryID } }
         pendingQueueEntryID = nil
-        navigator.didStart(id, direction: direction); syncFromNavigator()
+        navigator.didStart(pendingOccurrenceID ?? id, direction: direction)
+        pendingOccurrenceID = nil; syncFromNavigator()
         normalizeAndPersist()
     }
     func addToQueue(trackID: String) { insert(trackID: trackID, at: entries.count, origin: .addToQueue) }
@@ -63,17 +106,23 @@ import SwiftUI
         candidate.setExplicitQueue(entries.map(\.trackID))
         pendingNavigator = candidate
         pendingQueueEntryID = entries.first?.id
-        return candidate.next(reason: reason)
+        let identity = candidate.next(reason: reason)
+        pendingOccurrenceID = migrationContext == nil ? nil : identity
+        return identity.map(resolveIdentity)
     }
     func rejectCandidate(_ id: String) {
-        pendingNavigator = nil; pendingQueueEntryID = nil
+        pendingNavigator = nil; pendingQueueEntryID = nil; pendingOccurrenceID = nil
         entries.removeAll { $0.trackID == id }
         setContext(contextTrackIDs.filter { $0 != id }, current: currentID)
         normalizeAndPersist()
     }
     func removeUnavailableEntries() { cancelCandidate(); entries.removeAll { !isAvailable($0.trackID) }; normalizeAndPersist() }
-    func cancelCandidate() { pendingNavigator = nil; pendingQueueEntryID = nil }
-    func previousID() -> String? { navigator.previous() }
+    func cancelCandidate() { pendingNavigator = nil; pendingQueueEntryID = nil; pendingOccurrenceID = nil }
+    func previousID() -> String? {
+        let identity = navigator.previous()
+        pendingOccurrenceID = migrationContext == nil ? nil : identity
+        return identity.map(resolveIdentity)
+    }
     func hasNext(reason: PlaybackAdvanceReason = .automatic) -> Bool { navigator.hasNext(reason: reason, explicitQueue: entries.map(\.trackID)) }
     var navigationDiagnostics: [String: String] {
         ["shuffle": String(shuffleEnabled), "repeat": repeatMode.rawValue,
@@ -85,10 +134,11 @@ import SwiftUI
     }
     func hasPrevious() -> Bool { navigator.hasPrevious() }
     func persistState(currentTrackID: String?, positionMs: Int64, sleepDeadline: Date?, sleepTimerDuration: TimeInterval?, contextKind: String? = nil, contextSourceID: String? = nil) {
-        navigator.setCurrent(currentTrackID)
+        if migrationContext == nil { navigator.setCurrent(currentTrackID) }
         currentID = currentTrackID
         syncFromNavigator()
-        let state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, sleepTimerDurationMs: sleepTimerDuration.map { Int64($0 * 1000) }, navigationHistoryJSON: encode(navigationHistory), navigationHistoryPosition: navigationHistoryPosition, contextKind: contextKind, contextSourceID: contextSourceID, dateModified: Date())
+        var state = StoredPlaybackState(scope: "default", currentTrackID: currentTrackID, positionMs: positionMs, shuffleEnabled: shuffleEnabled, repeatMode: repeatMode.rawValue, contextTrackIDsJSON: encode(contextTrackIDs), shuffleOrderJSON: encode(shuffleOrder), shufflePosition: shufflePosition, sleepTimerDeadlineMs: sleepDeadline.map { Int64($0.timeIntervalSince1970 * 1000) }, sleepTimerDurationMs: sleepTimerDuration.map { Int64($0 * 1000) }, navigationHistoryJSON: encode(navigationHistory), navigationHistoryPosition: navigationHistoryPosition, contextKind: contextKind, contextSourceID: contextSourceID, dateModified: Date())
+        state.migrationContextJSON = migrationContext.flatMap { value in (try? JSONEncoder().encode(value)).map { String(decoding: $0, as: UTF8.self) } }
         do { try storage?.playback.saveSnapshot(state, queue: storedEntries) }
         catch { lastError = "Playback state could not be saved." }
     }
@@ -99,10 +149,20 @@ import SwiftUI
         if let onStateChanged { onStateChanged() }
         else { do { try storage?.playback.replaceQueue(storedEntries) } catch { lastError = "Queue could not be saved." } }
     }
-    private func syncFromNavigator() { contextTrackIDs = navigator.context; currentID = navigator.currentID; shuffleEnabled = navigator.shuffleEnabled; repeatMode = navigator.repeatMode; shuffleOrder = navigator.shuffleOrder; shufflePosition = navigator.shufflePosition; navigationHistory = navigator.history; navigationHistoryPosition = navigator.historyPosition }
+    private func resolveIdentity(_ id: String) -> String { migrationContext?.occurrences.first { $0.id == id }?.trackID ?? id }
+    private func syncFromNavigator() {
+        contextTrackIDs = navigator.context.map(resolveIdentity); currentID = navigator.currentID.map(resolveIdentity)
+        migrationContext?.currentID = navigator.currentID
+        shuffleEnabled = navigator.shuffleEnabled; repeatMode = navigator.repeatMode; shuffleOrder = navigator.shuffleOrder; shufflePosition = navigator.shufflePosition; navigationHistory = navigator.history; navigationHistoryPosition = navigator.historyPosition
+    }
     private func persist() { onStateChanged?() }
     private func encode(_ value: [String]) -> String? { try? String(data: JSONEncoder().encode(value), encoding: .utf8) }
     private func decode(_ value: String?) -> [String]? { guard let value, let data = value.data(using: .utf8) else { return nil }; return try? JSONDecoder().decode([String].self, from: data) }
     private func reconcile() { entries = entries.filter { isAvailable($0.trackID) }; normalizeAndPersist() }
-    private func isAvailable(_ id: String) -> Bool { guard let storage, let track = (try? storage.tracks.find(id: id)) ?? nil else { return false }; return track.availability == .available }
+    private func isAvailable(_ id: String) -> Bool { guard let storage, let track = (try? storage.tracks.find(id: id)) ?? nil else { return false }; return migrationContext == nil ? track.availability == .available : MigrationLocalAudio.isAvailable(track, paths: storage.paths) }
+}
+
+struct MigrationNavigationContext: Codable {
+    var occurrences: [MigrationPlaybackOccurrence]
+    var currentID: String?
 }

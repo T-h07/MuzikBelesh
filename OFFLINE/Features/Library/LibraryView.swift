@@ -100,7 +100,7 @@ struct PlaylistLibraryRow: View {
             ManagedArtworkView(path: playlist.artworkRelativePath, fallbackID: playlist.id, size: 60)
             VStack(alignment: .leading, spacing: 4) {
                 Text(playlist.name).font(.headline).foregroundStyle(AppColors.textPrimary).lineLimit(1)
-                Text("\(library.playlistTracks(playlist.id).count) songs").font(.caption).foregroundStyle(AppColors.textSecondary)
+                Text("\(library.playlistEntryCount(playlist.id)) songs").font(.caption).foregroundStyle(AppColors.textSecondary)
                 if let description = playlist.description, !description.isEmpty { Text(description).font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1) }
             }
             Spacer(); Image(systemName: "chevron.right").foregroundStyle(AppColors.textTertiary)

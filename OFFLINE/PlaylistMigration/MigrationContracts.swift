@@ -1,6 +1,6 @@
 import Foundation
 
-/// Contracts only: persistence is implemented in Phase 10.1.
+/// Atomic metadata creation and read contracts shared with Phase 10.0 clients.
 protocol PlaylistMigrationPersisting {
     /// Must atomically create the playlist, migration and all occurrences.
     /// Retrying the same operation identity must return the existing session.
@@ -11,6 +11,21 @@ protocol PlaylistMigrationPersisting {
     func candidates(entryID: UUID) async throws -> [PlaylistMigrationCandidate]
     func issues(migrationID: UUID) async throws -> [PlaylistMigrationIssue]
     func progress(migrationID: UUID) async throws -> PlaylistMigrationProgress
+}
+
+/// Mutable persistent lifecycle operations; file parsing and acquisition remain separate.
+protocol PlaylistMigrationStatePersisting: PlaylistMigrationPersisting {
+    func incompleteSessions() async throws -> [PlaylistMigrationSession]
+    func updateStatus(migrationID: UUID, to status: PlaylistMigrationStatus, failureInformation: String?) async throws
+    func updateEntryStatus(entryID: UUID, to status: PlaylistMigrationEntryStatus) async throws
+    func associateVerifiedTrack(entryID: UUID, trackID: String) async throws
+    func removeLocalAssociation(entryID: UUID) async throws
+    func saveCandidate(_ value: PlaylistMigrationCandidate) async throws
+    func updateCandidate(id: UUID, decision: PlaylistMigrationCandidateDecision) async throws
+    func saveIssue(_ value: PlaylistMigrationIssue) async throws
+    func resolveIssue(id: UUID, resolution: PlaylistMigrationIssueResolution) async throws
+    func recover() throws
+    func deleteSession(id: UUID) async throws
 }
 
 /// Implementations are introduced in Phase 10.2, not in the Foundation.
