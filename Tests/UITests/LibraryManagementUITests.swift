@@ -103,9 +103,21 @@ final class LibraryManagementUITests: XCTestCase {
         }) {
             cancel.tap()
         } else {
-            XCTAssertTrue(app.popovers.firstMatch.exists, "No Cancel action or dismissible confirmation popover")
-            // Status-bar corner is outside the popover; never tap its delete row.
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.03)).tap()
+            let popover = app.popovers.firstMatch
+            let dismissRegion = app.otherElements["PopoverDismissRegion"].firstMatch
+            XCTAssertTrue(popover.exists && dismissRegion.exists, "Confirmation requires an accessible popover dismiss region")
+            // iOS 26 exposes the real non-destructive dismissal surface as
+            // PopoverDismissRegion. The status-bar corner is not a reliable hit
+            // target: pick a point on this region outside the popover instead.
+            let popoverFrame = popover.frame
+            let regionFrame = dismissRegion.frame
+            let topGap = popoverFrame.minY - regionFrame.minY
+            let bottomGap = regionFrame.maxY - popoverFrame.maxY
+            let y = topGap >= bottomGap
+                ? regionFrame.minY + topGap / 2
+                : popoverFrame.maxY + bottomGap / 2
+            let normalizedY = (y - regionFrame.minY) / regionFrame.height
+            dismissRegion.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: normalizedY)).tap()
         }
         absent(confirm)
     }
