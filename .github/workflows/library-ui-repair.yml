@@ -1,4 +1,5 @@
 name: Library UI repair verification
+# Bounded follow-up: one unresolved cancellation test on Pro Max.
 # This diagnostic checks four legacy UI cases; it is not a full merge gate.
 on:
   push:
@@ -17,9 +18,7 @@ jobs:
         include:
           - target: pro-max
             device_name: iPhone 16 Pro Max
-          - target: compact
-            device_name: iPhone SE (3rd generation)
-    defaults:
+   defaults:
       run:
         shell: bash
     steps:
@@ -61,15 +60,7 @@ jobs:
           set -euo pipefail
           TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
           test -f "${TEST_RUN_FILES[0]}"
-          if [[ "$TARGET" == compact ]]; then
-            CASES=(-only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch)
-          else
-            CASES=(
-              -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumAddRemovePlayShuffleAndDeletePreserveMusicAndPlayer
-              -only-testing:OFFLINEUITests/LibraryManagementUITests/testPlaylistCRUDMembershipReorderingAndSafeRemoval
-              -only-testing:OFFLINEUITests/LibraryManagementUITests/testDeletionConfirmationCancelAndConfirm
-            )
-          fi
+          CASES=(-only-testing:OFFLINEUITests/LibraryManagementUITests/testDeletionConfirmationCancelAndConfirm)
           xcodebuild -xctestrun "${TEST_RUN_FILES[0]}" -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/LibraryRepair.xcresult "${CASES[@]}" -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Export result attachments
         if: always()
