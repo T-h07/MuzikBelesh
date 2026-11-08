@@ -37,6 +37,10 @@ jobs:
     name: diagnostic-xcode-26.2-ios-26.2-${{ matrix.source }}
     runs-on: macos-15
     timeout-minutes: 40
+    defaults:
+      run:
+        # Explicit bash enables -e -o pipefail; tee must not hide build failures.
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -152,9 +156,6 @@ jobs:
     name: ${{ inputs.verification_scope == 'library-menu' && format('diagnostic-library-menu-{0}', inputs.compare_develop && 'develop' || 'head') || 'build-and-test' }}
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
     timeout-minutes: 40
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
-      CI_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -175,36 +176,21 @@ jobs:
           test "$(xcodegen --version)" = "Version: 2.46.0"
       - name: Toolchain diagnostics
         run: |
-          mkdir -p build/VerificationEvidence
-          {
-            git rev-parse HEAD
-            date -u +%Y-%m-%dT%H:%M:%SZ
-            printf 'ImageOS=%s ImageVersion=%s\n' "$ImageOS" "$ImageVersion"
-            uname -m
-            sw_vers
-            xcodebuild -version
-            xcrun --sdk iphoneos --show-sdk-version
-            swift --version
-            xcodegen --version
-          } | tee build/VerificationEvidence/provenance.txt
-          test "$(xcodebuild -version | head -1)" = 'Xcode 26.2'
-          { xcodebuild -version; xcrun --sdk iphonesimulator --show-sdk-version; uname -m; } > build/product-environment.txt
-          xcrun simctl list runtimes --json > build/VerificationEvidence/runtimes.json
-          xcrun simctl list devices --json > build/VerificationEvidence/devices-before.json
-          python3 - <<'PY'
-          import json, os
-          runtimes = json.load(open('build/VerificationEvidence/runtimes.json'))['runtimes']
-          assert any(r['identifier'] == os.environ['CI_RUNTIME'] and r['isAvailable'] for r in runtimes), 'Required iOS 26.2 runtime unavailable'
-          PY
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          swift --version
+          xcodegen --version
+          xcrun simctl list devices available
       - name: Generate project
         run: xcodegen generate
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
-      - name: Create pinned regression simulator
+      - name: Select simulator
         run: |
-          DEVICE_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-regression" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max "$CI_RUNTIME")
+          DEVICE_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone .*Pro Max \(/ {print $2; exit}')
+          test -n "$DEVICE_ID"
+          xcrun simctl list devices available | grep "$DEVICE_ID"
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
-          printf 'RegressionSimulator=%s Runtime=%s\n' "$DEVICE_ID" "$CI_RUNTIME" >> build/VerificationEvidence/provenance.txt
       - name: Download compiled test products
         if: inputs.prebuilt_run_id != ''
         uses: actions/download-artifact@v4
@@ -213,6 +199,25 @@ jobs:
           path: build/prebuilt
           run-id: ${{ inputs.prebuilt_run_id }}
           github-token: ${{ github.token }}
+      - name: Isolate diagnostic simulator
+        if: inputs.verification_scope == 'library-menu'
+        run: |
+          # A new device keeps diagnostic runs independent of earlier UI sessions.
+          xcrun simctl list devices --json > /tmp/ci-devices.json
+          read -r DEVICE_TYPE RUNTIME < <(python3 - "$SIMULATOR_ID" <<'PY'
+          import json, sys
+          for runtime, devices in json.load(open('/tmp/ci-devices.json'))['devices'].items():
+              for device in devices:
+                  if device['udid'] == sys.argv[1]:
+                      print(device['deviceTypeIdentifier'], runtime)
+          PY
+          )
+          test -n "$DEVICE_TYPE" && test -n "$RUNTIME"
+          DEVICE_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$DEVICE_TYPE" "$RUNTIME")
+          echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          echo "DIAGNOSTIC_SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
       - name: Build all test products once
         if: inputs.prebuilt_run_id == ''
         run: |
@@ -224,18 +229,12 @@ jobs:
         run: |
           if [[ -n "${{ inputs.prebuilt_run_id }}" ]]; then
             test "$(cat build/prebuilt/product-source.txt)" = "$(git rev-parse HEAD)"
-            cmp build/prebuilt/product-environment.txt build/product-environment.txt
             mkdir -p build/TestProducts/Build
             tar -xzf build/prebuilt/test-products.tar.gz -C build/TestProducts/Build
           fi
           TEST_RUN_FILES=(build/TestProducts/Build/Products/*.xctestrun)
           test -f "${TEST_RUN_FILES[0]}"
           echo "TEST_RUN=${TEST_RUN_FILES[0]}" >> "$GITHUB_ENV"
-      - name: Boot pinned regression simulator
-        if: inputs.verification_scope != '' && inputs.verification_scope != 'complete'
-        run: |
-          xcrun simctl boot "$SIMULATOR_ID"
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
       - name: Retain compiled products for final verification
         if: inputs.verification_scope == 'focused' || inputs.verification_scope == 'library-menu'
         run: tar -czf build/test-products.tar.gz -C build/TestProducts/Build Products
@@ -247,7 +246,6 @@ jobs:
           path: |
             build/test-products.tar.gz
             build/product-source.txt
-            build/product-environment.txt
           retention-days: 7
           if-no-files-found: error
       - name: Repeatable performance baseline
@@ -271,42 +269,32 @@ jobs:
       - name: Compact iPhone library layout
         if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
         run: |
-          COMPACT_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-compact" com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$CI_RUNTIME")
-          echo "COMPACT_SIMULATOR_ID=$COMPACT_ID" >> "$GITHUB_ENV"
-          printf 'CompactSimulator=%s Runtime=%s\n' "$COMPACT_ID" "$CI_RUNTIME" >> build/VerificationEvidence/provenance.txt
-          xcrun simctl boot "$COMPACT_ID"
-          xcrun simctl bootstatus "$COMPACT_ID" -b
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 -parallel-testing-enabled NO test-without-building 2>&1 | tee build/VerificationEvidence/CompactResults.log
-          xcrun simctl shutdown "$COMPACT_ID"
+          COMPACT_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone SE \(3rd generation\)/ {print $4; exit}')
+          test -n "$COMPACT_ID"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$COMPACT_ID" -resultBundlePath build/CompactResults.xcresult -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumNameAndArtistSurviveRelaunch -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Export compact screenshots
         if: always()
         run: |
-          if [[ -d build/CompactResults.xcresult ]]; then
+          if [[ -f build/CompactResults.xcresult/Info.plist ]]; then
             xcrun xcresulttool export attachments --path build/CompactResults.xcresult --output-path build/CompactScreenshots
           fi
       - name: Standard iPhone accessibility
         if: inputs.verification_scope == 'complete'
         run: |
-          STANDARD_ID=$(xcrun simctl create "CI-${GITHUB_RUN_ID}-standard" com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$CI_RUNTIME")
-          echo "STANDARD_SIMULATOR_ID=$STANDARD_ID" >> "$GITHUB_ENV"
-          printf 'StandardSimulator=%s Runtime=%s\n' "$STANDARD_ID" "$CI_RUNTIME" >> build/VerificationEvidence/provenance.txt
-          xcrun simctl boot "$STANDARD_ID"
-          xcrun simctl bootstatus "$STANDARD_ID" -b
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$STANDARD_ID" -resultBundlePath build/StandardResults.xcresult -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 -parallel-testing-enabled NO test-without-building 2>&1 | tee build/VerificationEvidence/StandardResults.log
-          xcrun simctl shutdown "$STANDARD_ID"
+          STANDARD_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone 16 \(/ {print $2; exit}')
+          test -n "$STANDARD_ID"
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$STANDARD_ID" -resultBundlePath build/StandardResults.xcresult -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building
       - name: Complete regression suite
         if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
         run: |
-          xcrun simctl boot "$SIMULATOR_ID"
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
-          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 -parallel-testing-enabled NO test-without-building 2>&1 | tee build/VerificationEvidence/TestResults.log
+          xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building
       - name: Export UI screenshots
         if: always()
         run: |
-          if [[ -d build/TestResults.xcresult ]]; then
+          if [[ -f build/TestResults.xcresult/Info.plist ]]; then
             xcrun xcresulttool export attachments --path build/TestResults.xcresult --output-path build/UITestScreenshots
           fi
-          if [[ -d build/KeyboardResults.xcresult ]]; then
+          if [[ -f build/KeyboardResults.xcresult/Info.plist ]]; then
             xcrun xcresulttool export attachments --path build/KeyboardResults.xcresult --output-path build/KeyboardScreenshots
           fi
       - name: Upload UI screenshots
@@ -319,17 +307,6 @@ jobs:
             build/CompactScreenshots
             build/KeyboardScreenshots
           if-no-files-found: ignore
-      - name: Export verification summaries and diagnostics
-        if: always()
-        run: |
-          for BUNDLE in build/*Results.xcresult; do
-            if [[ -f "$BUNDLE/Info.plist" ]]; then
-              NAME=$(basename "$BUNDLE" .xcresult)
-              xcrun xcresulttool get test-results summary --path "$BUNDLE" > "build/VerificationEvidence/$NAME-summary.json"
-              xcrun xcresulttool get test-results tests --path "$BUNDLE" > "build/VerificationEvidence/$NAME-tests.json"
-              xcrun xcresulttool export diagnostics --path "$BUNDLE" --output-path "build/VerificationEvidence/$NAME-diagnostics"
-            fi
-          done
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -343,18 +320,12 @@ jobs:
             build/KeyboardResults.xcresult
             build/YouTubeLiveResults.xcresult
             build/MenuResults.xcresult
-            build/VerificationEvidence
           if-no-files-found: ignore
-          retention-days: 30
-      - name: Dispose verification simulators
-        if: always()
+      - name: Dispose diagnostic simulator
+        if: always() && env.DIAGNOSTIC_SIMULATOR_ID != ''
         run: |
-          for DEVICE_ID in "${SIMULATOR_ID:-}" "${COMPACT_SIMULATOR_ID:-}" "${STANDARD_SIMULATOR_ID:-}"; do
-            if [[ -n "$DEVICE_ID" ]]; then
-              xcrun simctl shutdown "$DEVICE_ID" || true
-              xcrun simctl delete "$DEVICE_ID"
-            fi
-          done
+          xcrun simctl shutdown "$DIAGNOSTIC_SIMULATOR_ID"
+          xcrun simctl delete "$DIAGNOSTIC_SIMULATOR_ID"
 
       - name: Build verified unsigned device candidate
         if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''

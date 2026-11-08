@@ -6,6 +6,12 @@ Original source: `ac0d97a0afd4a1b44d8cc6e6acac8af746432ae0`.
 Base: `897f3f7180ad31615df1d20946f0b7521d84afb4`.
 Original run: <https://github.com/T-h07/MuzikBelesh/actions/runs/42262812917>.
 
+**Current status (2026-11-08): not merge-ready.** Xcode 26.2 / iOS 26.2
+passed the bounded head/develop comparison but failed full verification.
+The default-environment promotion has been withdrawn. No further CI reruns
+were launched after that single full attempt. See the final section for
+exact results, retained evidence and the next diagnostic action.
+
 ## Findings from the original artifacts
 
 Both attempts built successfully with Xcode 16.4 (16F6), iOS 18.5 on the
@@ -290,3 +296,100 @@ sizes, and uses serial XCTest execution as in the comparison. Only one device
 is booted at a time. It records provenance and exports summaries/diagnostics
 for every result bundle. Reused products must match source, Xcode build, SDK
 and architecture. No application code, assertion or test allowance changes.
+
+### Full attempt: rejected as a verified CI solution
+
+[Run 42368784944](https://github.com/T-h07/MuzikBelesh/actions/runs/42368784944),
+[job 128392394756](https://github.com/T-h07/MuzikBelesh/actions/runs/42368784944/job/128392394756),
+tested `76af90c35542f7e7f956810edc3fe92f1c7658cf` with the same ARM image,
+Xcode build and runtime as the comparison. This was the only full attempt.
+The job reached its existing 40-minute deadline; it did not complete cleanly.
+
+| Gate | Observed result | XCTest execution time |
+| --- | --- | --- |
+| Unit/integration | 270 passed, 6 existing opt-in live tests skipped, 0 failed | 64.476 s |
+| Phase 10.0 foundation (included above) | 14 passed, 0 skipped, 0 failed | 0.117 s |
+| Compact iPhone SE | **4 passed, 1 failed**, 0 skipped | 277.747 s |
+| Standard iPhone accessibility | 1 passed, 0 failed | 72.443 s |
+| Full UI | Incomplete: retained text log records 12 passes and 3 failures; 10 of 25 cases have no completed result | No finalized total |
+
+The Actions live log has 11 completed UI passes before cancellation; the tee
+child continued briefly during cleanup and its retained log includes the 12th
+pass and the start of the next test. These are partial per-case observations,
+not an overall XCTest suite result. `TestResults.xcresult` lacks `Info.plist`,
+so an overall result cannot be exported. Its raw Data and Staging diagnostics
+were preserved. The compact and standard bundles are complete.
+
+The original metadata case passed in **68.751 s** and album relaunch in
+**44.940 s** on the full-suite Pro Max. The retained UI runner session has no
+matching-animation-notification timeout or failed termination. The app was
+still performing UI actions at cancellation; this is not evidence of an app
+deadlock. The 40-minute cancellation is separate from the assertion failures.
+
+New failures, all in unchanged pre-Phase-10.0 UI tests:
+
+- `testAlbumAddRemovePlayShuffleAndDeletePreserveMusicAndPlayer`, line 182:
+  `confirm-delete-album` matches nested parent/child Button nodes with the same
+  identifier in the `Delete Album?` popover. It fails in 51.292 s.
+- `testPlaylistCRUDMembershipReorderingAndSafeRemoval`, line 345: the same
+  duplicated-node problem for `confirm-delete-playlist`; failure at 66.996 s.
+- `testDeletionConfirmationCancelAndConfirm`, line 383: the deletion popover
+  exposes two `confirm-delete-track` nodes but no `Cancel` Button; failure at
+  25.681 s. XCTest also reports legacy Button versus modern PopUpButton type
+  mismatches around these dialog queries. The evidence establishes selector
+  incompatibility with the observed accessibility tree, not an app hang.
+- Compact `testEmptyAlbumCreationAndSearchPersistAfterRelaunch`, line 102:
+  the initial empty-album message lookup fails in 25.052 s. Its failure image
+  shows the correct Empty Album detail with zero songs; the accessibility tree
+  shows a two-page collection at 0% scroll and no empty-message cell. Production
+  source places that message in the following list section. This supports an
+  offscreen/lazy-cell hypothesis requiring a scroll/reveal diagnostic; it does
+  not prove a database or navigation failure. The same case passes on Pro Max
+  in 38.185 s. The compact failure has not been reproduced on develop with this
+  new runtime, so it is not claimed to be a verified baseline failure.
+
+Actions timings (UTC, 2026-11-07): build 11:38:02–11:39:44 (1m42s), compact
+step including boot/setup/shutdown 11:39:45–11:52:15 (12m30s), standard step
+11:52:22–11:58:31 (6m09s), full step 11:58:31–12:15:22 (16m51s, cancelled).
+The job started at 11:35:04; cleanup ended at 12:17:45. Simulator startup and
+automation setup consume substantial time beyond the individual tests.
+
+There was also a verified CI reporting defect introduced with the candidate's
+new `xcodebuild | tee` logging: the implicit runner shell used `/bin/bash -e`,
+without `pipefail`, so the compact test failure was incorrectly shown as a
+successful Actions step. The `.xcresult` and test log correctly show failure.
+The retained comparison job explicitly selects `shell: bash`, which uses
+`-e -o pipefail` per the [GitHub shell documentation](https://docs.github.com/en/enterprise-server%403.22/actions/reference/workflows-and-actions/workflow-syntax#defaultsrunshell).
+The failed full-suite candidate's logging pipelines were removed with its rollback.
+A local shell probe reproduced the old exit code 0 and verified exit code 1
+with pipefail, preventing the next command from running. No assertion is
+suppressed. Screenshot exports now require a finalized bundle's `Info.plist`
+instead of attempting to read an incomplete bundle after cancellation.
+
+The unvalidated regular-CI environment change in `76af90c` was withdrawn;
+the explicit 26.2 pairing remains available only in the bounded comparison
+job. Retained changes are that diagnostic path, strict pipeline failure
+propagation, finalized-bundle export guards, and this report. Local YAML/Bash
+syntax checks passed for 28 embedded run steps plus the foundation harness;
+`git diff --check` passed. Production code, UI test source, assertions, test
+allowances, main and release branches remain unchanged.
+
+Evidence: [playback-test-results artifact](https://github.com/T-h07/MuzikBelesh/actions/runs/42368784944/artifacts/13574325447)
+is 202,200,033 bytes, SHA-256
+`83a1bcd0cdab4adf8463c81523d707bea425be53b112ca623ffbecbaa9f88832`,
+retained through 2026-12-07. It includes provenance, runtimes, complete compact
+and standard bundles, incomplete full bundle, logs and available diagnostics.
+[Screenshots and compact failure tree](https://github.com/T-h07/MuzikBelesh/actions/runs/42368784944/artifacts/13574181084)
+are also retained. Downloaded copies live under ignored
+`build/phase10-ci-evidence/environment-full` and `environment-full-screenshots`.
+
+**Stop point and next action:** no additional expensive rerun and no merge.
+The next bounded investigation should compare only the three deletion-dialog
+cases on Pro Max and the empty-album case on SE, on develop and head under this
+same toolchain. Validate a unique dialog-scoped actionable node, the actual
+popover cancellation mechanism, and revealing the offscreen message before
+changing test synchronization. Preserve all deletion/cancellation/persistence
+assertions. Separately profile cold simulator boot/setup before choosing how
+to partition verification within the existing time budget. Neither increasing
+timeouts nor another blind full-suite run is justified. A complete regression
+pass remains required before PR #13 is safe to merge.
