@@ -39,7 +39,10 @@ import SwiftUI
     func artistName(_ id: String?) -> String { id.flatMap { artistNames[$0] } ?? "Unknown Artist" }
     func albumTitle(_ id: String?) -> String { id.flatMap { albumNames[$0] } ?? "Unknown Album" }
     func tracks(_ ids: [String]) -> [StoredTrack] { ids.compactMap { tracksByID[$0] } }
-    func playlistTracks(_ id: String) -> [StoredTrack] { tracks(playlistTrackIDs[id] ?? []) }
+    func playlistTracks(_ id: String) -> [StoredTrack] {
+        if isMigrationPlaylist(id) { return migrationRows(id).compactMap(\.playableTrack) }
+        return tracks(playlistTrackIDs[id] ?? [])
+    }
     func isMigrationPlaylist(_ id: String) -> Bool { snapshot.migrationSessions.contains { $0.destinationPlaylistID == id } }
     func playlistEntryCount(_ id: String) -> Int {
         if let session = snapshot.migrationSessions.first(where: { $0.destinationPlaylistID == id }) {

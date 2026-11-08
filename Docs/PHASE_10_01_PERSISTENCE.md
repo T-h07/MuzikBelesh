@@ -133,3 +133,21 @@ errors, evidence/issue restoration, file loss, deletion ownership and mixed play
 `PlaylistMigrationUITests` covers 500 placeholders across relaunch and mixed rows.
 The focused workflow also runs unchanged foundation and affected library/playback
 regressions. Full repository gates remain separate and are not waived or weakened.
+
+Focused verification on `e12db32` passed in
+[run 42485666387](https://github.com/T-h07/MuzikBelesh/actions/runs/42485666387):
+
+- Application and all test targets built with Xcode 26.2 / iOS 26.2.
+- 14 unchanged portable foundation tests passed; the same tests also passed on iOS.
+- 127 selected iOS unit/integration tests passed with zero failures, including all
+  18 persistence tests and 95 existing affected storage/library/playback tests.
+- Both migration UI tests passed, including 500 placeholders across relaunch.
+- Integrity output reported 500/500 and 1,000/1,000 ordered, distinct occurrences,
+  with zero playable audio. Rollback, eight concurrent connections, restart,
+  A–B–A–C–A, mixed 500/10 playback and explicit-queue restoration tests passed.
+
+The first [build attempt](https://github.com/T-h07/MuzikBelesh/actions/runs/42485060578)
+compiled the application but failed the new test target due to a missing `try` in
+one test. This was fixed before the successful focused run. No test was disabled
+or weakened. Full PR checks are tracked in the pull request; a focused pass alone
+does not establish that the complete legacy UI gate passed.

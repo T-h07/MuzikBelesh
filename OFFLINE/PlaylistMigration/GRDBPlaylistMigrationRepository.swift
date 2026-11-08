@@ -19,7 +19,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
         guard !operation.isEmpty, operation.count <= 200,
               operation.rangeOfCharacter(from: .controlCharacters) == nil else { throw PlaylistMigrationStorageError.invalidOperationID }
         let fingerprint = try PlaylistMigrationValidation.importFingerprint(for: source)
-        return try db.write { [self] db in
+        return try db.write { db in
             if let existing = try MigrationSessionRecord.fetchOne(db, sql: "SELECT * FROM playlist_migrations WHERE operationID = ?", arguments: [operation]) {
                 guard existing.importFingerprint == fingerprint else { throw PlaylistMigrationStorageError.operationConflict }
                 try Self.verify(existing, db: db)
@@ -56,7 +56,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
     }
     func session(id: UUID) async throws -> PlaylistMigrationSession? { try await db.read { try MigrationSessionRecord.fetchOne($0, key: id.uuidString)?.model() } }
     func entries(migrationID: UUID) async throws -> [PlaylistMigrationEntry] {
-        try await db.read { [self] db in
+        try await db.read { db in
             _ = try Self.requiredSession(migrationID, db: db)
             return try Self.entries(db, migrationID: migrationID.uuidString)
         }
@@ -69,7 +69,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
     }
     func incompleteSessions() async throws -> [PlaylistMigrationSession] {
         try recover()
-        return try await db.read { [self] db in
+        return try await db.read { db in
             try Self.sessions(db).filter { session in
                 let entries = try Self.entries(db, migrationID: session.id.uuidString)
                 return !session.status.isTerminal || entries.contains { $0.status != .ready }
@@ -121,7 +121,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
         }
     }
     func removeLocalAssociation(entryID: UUID) async throws {
-        try await db.write { [self] db in
+        try await db.write { db in
             var record = try Self.requiredEntry(entryID, db: db)
             if record.status == .ready {
                 try PlaylistMigrationValidation.requireEntryTransition(record.status, to: .unavailable)
@@ -176,7 +176,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
     }
 
     func candidates(entryID: UUID) async throws -> [PlaylistMigrationCandidate] {
-        try await db.read { [self] db in
+        try await db.read { db in
             _ = try Self.requiredEntry(entryID, db: db)
             return try MigrationCandidateRecord.filter(Column("entryID") == entryID.uuidString).order(Column("createdAt"), Column("id")).fetchAll(db).map { try $0.model() }
         }
@@ -185,7 +185,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
         guard !value.provider.isEmpty, !value.title.isEmpty, value.confidence.map({ $0.isFinite && (0...1).contains($0) }) ?? true,
               value.durationMs.map({ $0 >= 0 }) ?? true else { throw PlaylistMigrationStorageError.invalidCandidate }
         try MigrationPersistentText.validate([value.provider, value.providerTrackID, value.title, value.artist] + value.evidence.flatMap { [$0.key, $0.value] })
-        try await db.write { [self] db in
+        try await db.write { db in
             _ = try Self.requiredEntry(value.entryID, db: db)
             let old = try MigrationCandidateRecord.fetchOne(db, key: value.id.uuidString)
             guard old == nil || old?.entryID == value.entryID.uuidString else { throw PlaylistMigrationStorageError.invalidCandidate }
@@ -193,20 +193,20 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
         }
     }
     func updateCandidate(id: UUID, decision: PlaylistMigrationCandidateDecision) async throws {
-        try await db.write { [self] db in
+        try await db.write { db in
             guard var value = try MigrationCandidateRecord.fetchOne(db, key: id.uuidString) else { throw PlaylistMigrationStorageError.notFound }
             value.decision = decision; value.updatedAt = Date(); try value.update(db)
         }
     }
     func issues(migrationID: UUID) async throws -> [PlaylistMigrationIssue] {
-        try await db.read { [self] db in
+        try await db.read { db in
             _ = try Self.requiredSession(migrationID, db: db)
             return try MigrationIssueRecord.filter(Column("migrationID") == migrationID.uuidString).order(Column("createdAt"), Column("id")).fetchAll(db).map { try $0.model() }
         }
     }
     func saveIssue(_ value: PlaylistMigrationIssue) async throws {
         try MigrationPersistentText.validate([value.code, value.message, value.technicalDetails])
-        try await db.write { [self] db in
+        try await db.write { db in
             _ = try Self.requiredSession(value.migrationID, db: db)
             if let id = value.entryID {
                 guard try Self.requiredEntry(id, db: db).migrationID == value.migrationID.uuidString else { throw PlaylistMigrationStorageError.invalidCandidate }
@@ -218,7 +218,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
         }
     }
     func resolveIssue(id: UUID, resolution: PlaylistMigrationIssueResolution) async throws {
-        try await db.write { [self] db in
+        try await db.write { db in
             guard var value = try MigrationIssueRecord.fetchOne(db, key: id.uuidString) else { throw PlaylistMigrationStorageError.notFound }
             value.resolution = resolution; value.updatedAt = Date(); value.resolvedAt = resolution == .open ? nil : value.updatedAt
             try value.update(db)
@@ -227,7 +227,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
     /// Session ownership includes its destination. Delete the destination to cascade
     /// metadata; tracks and ordinary playlists are never owned by this operation.
     func deleteSession(id: UUID) async throws {
-        try await db.write { [self] db in
+        try await db.write { db in
             let session = try Self.requiredSession(id, db: db)
             _ = try StoredPlaylist.deleteOne(db, key: session.destinationPlaylistID)
         }

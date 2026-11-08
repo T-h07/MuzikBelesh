@@ -247,6 +247,7 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
         XCTAssertEqual(occurrences.map(\.id), stride(from: 0, to: 500, by: 50).map { input.entries[$0].id.uuidString })
         let (player, _, library) = f.services()
         XCTAssertEqual(library.playlistEntryCount(try XCTUnwrap(session.destinationPlaylistID)), 500)
+        XCTAssertEqual(library.playlistTracks(try XCTUnwrap(session.destinationPlaylistID)).count, 10)
         try await player.playMigration(occurrences: occurrences, selected: occurrences[0].id, playlistID: XCTUnwrap(session.destinationPlaylistID), shuffle: false)
         XCTAssertEqual(player.queue.currentOccurrenceID, occurrences[0].id)
         for occurrence in occurrences.dropFirst() { await player.next(); XCTAssertEqual(player.queue.currentOccurrenceID, occurrence.id); XCTAssertEqual(player.state.currentTrackID, f.ids[0]) }
