@@ -13,7 +13,7 @@ on:
       verification_scope:
         description: Focused regression or complete final verification
         type: choice
-        options: [complete, focused, profile, foundation, library-menu, environment-comparison]
+        options: [complete, focused, profile, foundation, migration, library-menu, environment-comparison]
         default: complete
       compare_develop:
         description: Run the selected diagnostic scope against develop instead of this branch
@@ -32,6 +32,9 @@ concurrency:
   cancel-in-progress: true
 permissions: {contents: read, actions: read}
 jobs:
+  migration-persistence:
+    if: inputs.verification_scope == 'migration'
+    uses: ./.github/workflows/playlist-migration.yml
   complete-regression:
     # Exhaustive gates run on independent fresh simulators: a timeout in one
     # device cannot terminate unrelated UI suites or consume their time budget.

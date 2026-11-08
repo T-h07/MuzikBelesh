@@ -39,9 +39,40 @@ import SwiftUI
     func artistName(_ id: String?) -> String { id.flatMap { artistNames[$0] } ?? "Unknown Artist" }
     func albumTitle(_ id: String?) -> String { id.flatMap { albumNames[$0] } ?? "Unknown Album" }
     func tracks(_ ids: [String]) -> [StoredTrack] { ids.compactMap { tracksByID[$0] } }
-    func playlistTracks(_ id: String) -> [StoredTrack] { tracks(playlistTrackIDs[id] ?? []) }
+    func playlistTracks(_ id: String) -> [StoredTrack] {
+        if isMigrationPlaylist(id) { return migrationRows(id).compactMap(\.playableTrack) }
+        return tracks(playlistTrackIDs[id] ?? [])
+    }
+    func isMigrationPlaylist(_ id: String) -> Bool { snapshot.migrationSessions.contains { $0.destinationPlaylistID == id } }
+    func playlistEntryCount(_ id: String) -> Int {
+        if let session = snapshot.migrationSessions.first(where: { $0.destinationPlaylistID == id }) {
+            return snapshot.migrationEntries.filter { $0.migrationID == session.id }.count
+        }
+        return playlistTracks(id).count
+    }
+    func migrationRows(_ id: String) -> [MigrationPlaylistRow] {
+        guard let storage, let session = snapshot.migrationSessions.first(where: { $0.destinationPlaylistID == id }) else { return [] }
+        var valid: [String: StoredTrack] = [:]
+        let entries = snapshot.migrationEntries.filter { $0.migrationID == session.id }.sorted { $0.position < $1.position }
+        for id in Set(entries.compactMap(\.localTrackID)) {
+            if let track = tracksByID[id], MigrationLocalAudio.isAvailable(track, paths: storage.paths) { valid[id] = track }
+        }
+        return entries.map { MigrationPlaylistRow(entry: $0, playableTrack: $0.status == .ready ? $0.localTrackID.flatMap { valid[$0] } : nil) }
+    }
+    func playMigration(playlistID: String, occurrenceID: String? = nil, shuffle: Bool = false) async {
+        guard let storage, let player else { return }
+        do {
+            // Re-read immediately before playback, rather than trusting a rendered row.
+            let occurrences = try storage.playlistMigrations.rows(playlistID: playlistID).playbackOccurrences
+            let selection: MigrationPlaybackOccurrence?
+            if let occurrenceID { selection = occurrences.first { $0.id == occurrenceID } }
+            else { selection = shuffle ? occurrences.randomElement() : occurrences.first }
+            guard let selected = selection else { return }
+            try await player.playMigration(occurrences: occurrences, selected: selected.id, playlistID: playlistID, shuffle: shuffle)
+        } catch { report(error) }
+    }
     func report(_ error: Error) { self.error = Self.message(error) }
-    static func message(_ error: Error) -> String { (error as? LibraryError)?.localizedDescription ?? (error as? StorageError)?.localizedDescription ?? (error as? AudioPlaybackError)?.localizedDescription ?? LibraryError.operationFailed.localizedDescription }
+    static func message(_ error: Error) -> String { (error as? PlaylistMigrationStorageError)?.localizedDescription ?? (error as? LibraryError)?.localizedDescription ?? (error as? StorageError)?.localizedDescription ?? (error as? AudioPlaybackError)?.localizedDescription ?? LibraryError.operationFailed.localizedDescription }
     func perform(_ operation: () throws -> Void) { do { try operation(); error = nil } catch { report(error) } }
     private func requiredRepository() throws -> LibraryRepository { guard let repository else { throw LibraryError.operationFailed }; return repository }
     func setSort(_ sort: LibrarySort) throws { try requiredRepository().setSort(sort) }

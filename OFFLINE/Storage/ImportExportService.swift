@@ -14,6 +14,7 @@ final class StorageCoordinator: ObservableObject {
     let settings: GRDBSettingsRepository
     let playback: GRDBPlaybackRepository
     let downloads: GRDBDownloadJobRepository
+    let playlistMigrations: GRDBPlaylistMigrationRepository
     let audio = AudioFileService()
     let mutations = LibraryMutationGate()
     @Published private(set) var library: [StoredTrack] = []
@@ -27,11 +28,13 @@ final class StorageCoordinator: ObservableObject {
         settings = GRDBSettingsRepository(db: database.dbQueue)
         playback = GRDBPlaybackRepository(db: database.dbQueue)
         downloads = GRDBDownloadJobRepository(db: database.dbQueue)
+        playlistMigrations = GRDBPlaylistMigrationRepository(db: database.dbQueue, paths: paths)
         try downloads.markInterrupted()
         try? PreparedAudioExport.cleanupAbandoned(in: paths.exports)
         do { try ManagedLibraryFiles.recover(paths: paths, db: database.dbQueue) }
         catch { lastError = "A pending file operation needs recovery. Existing recovery copies were retained." }
         try reconcileMissingFiles()
+        try playlistMigrations.recover()
         reload()
     }
 
