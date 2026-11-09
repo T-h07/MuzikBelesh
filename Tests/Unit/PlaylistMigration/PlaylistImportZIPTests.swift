@@ -81,7 +81,7 @@ final class PlaylistImportZIPTests: XCTestCase {
 
     func testDirectoryEntriesAndUTF8Names() throws {
         let archive = try Archive(data: Data(), accessMode: .create)
-        try archive.addEntry(with: "Music/", type: .directory, uncompressedSize: 0) { _, _ in Data() }
+        try archive.addEntry(with: "Music/", type: .directory, uncompressedSize: Int64(0), provider: { _, _ in Data() })
         let content = F.csv(1)
         try archive.addEntry(with: "Music/Été.csv", type: .file, uncompressedSize: Int64(content.count)) { position, count in
             content.subdata(in: Int(position)..<(Int(position) + count))
