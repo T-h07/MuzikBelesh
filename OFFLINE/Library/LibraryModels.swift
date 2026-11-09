@@ -102,6 +102,8 @@ struct LibrarySnapshot: Equatable, Sendable {
     var memberships: [PlaylistMembership] = []
     var migrationSessions: [PlaylistMigrationSession] = []
     var migrationEntries: [PlaylistMigrationEntry] = []
+    var migrationIssues: [PlaylistMigrationIssue] = []
+    var migrationPresentations: [String: MigrationPlaylistPresentation] = [:]
     var likedIDs: Set<String> = []
     var recentIDs: [String] = []
     var sort: LibrarySort = .newest

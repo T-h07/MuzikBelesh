@@ -29,6 +29,7 @@ struct PlaylistDetailView: View {
                         }
                     }.padding(.vertical, AppSpacing.md)
                 }.listRowBackground(AppColors.backgroundPrimary)
+                if migrationManaged { MigrationPlaylistDashboard(playlistID: playlistID) }
                 Section {
                     if migrationManaged {
                         ForEach(library.migrationRows(playlistID)) { row in

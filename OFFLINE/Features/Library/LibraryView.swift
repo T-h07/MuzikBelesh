@@ -37,8 +37,8 @@ struct LibraryView: View {
         .onDisappear { searchFocus = nil }
         .onChange(of: coordinator.libraryFilter) { _, _ in searchFocus = nil }
         .sheet(isPresented: $showingPlaylistEditor) { PlaylistEditorView() }
-        .sheet(isPresented: $showingPlaylistImporter) {
-            if let storage = container.storage { PlaylistImportView(storage: storage) }
+        .sheet(isPresented: $showingPlaylistImporter, onDismiss: { container.playlistImport?.presentationClosed() }) {
+            if let model = container.playlistImport { PlaylistImportView(model: model) }
         }
         .sheet(isPresented: $showingAlbumEditor) { AlbumEditorView() }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.audio, .supportedAudio], allowsMultipleSelection: true) { result in
@@ -72,7 +72,7 @@ struct LibraryView: View {
                 .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-album")
         }
         if coordinator.libraryFilter == "Playlists" {
-            Button { searchFocus = nil; showingPlaylistImporter = true } label: { Label("Import Spotify Playlist", systemImage: "square.and.arrow.down") }
+            Button { searchFocus = nil; showingPlaylistImporter = true } label: { Label("Import Playlist", systemImage: "square.and.arrow.down") }
                 .tint(AppColors.accentPrimary).disabled(container.storage == nil).accessibilityIdentifier("import-spotify-playlist")
             Button { searchFocus = nil; showingPlaylistEditor = true } label: { Label("Create Playlist", systemImage: "plus.circle.fill") }
                 .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-playlist")
