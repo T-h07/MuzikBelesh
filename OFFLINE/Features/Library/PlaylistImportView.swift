@@ -32,7 +32,7 @@ import UniformTypeIdentifiers
                 progress = "Review the playlists before importing."
             } catch is CancellationError { error = "Reading cancelled. Nothing was imported." }
             catch let problem as PlaylistImportProblem { error = problem.localizedDescription }
-            catch { error = "Unable to prepare the import review. Check file access and local database availability, then retry." }
+            catch { self.error = "Unable to prepare the import review. Check file access and local database availability, then retry." }
         }
     }
 
