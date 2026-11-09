@@ -28,7 +28,7 @@ final class LibraryRepository {
         result.memberships = try PlaylistMembership.order(Column("playlistID"), Column("position")).fetchAll(db)
         result.migrationSessions = try GRDBPlaylistMigrationRepository.sessions(db)
         result.migrationEntries = try GRDBPlaylistMigrationRepository.entries(db)
-        result.migrationIssues = try MigrationIssueRecord.order(Column("createdAt"), Column("id")).fetchAll(db).map { try $0.model() }
+        result.migrationIssues = try GRDBPlaylistMigrationRepository.issues(db)
         result.likedIDs = Set(try String.fetchAll(db, sql: "SELECT trackID FROM liked_tracks"))
         result.recentIDs = try String.fetchAll(db, sql: "SELECT trackID FROM playback_history GROUP BY trackID ORDER BY MAX(startedAt) DESC, trackID LIMIT 20")
         return result
