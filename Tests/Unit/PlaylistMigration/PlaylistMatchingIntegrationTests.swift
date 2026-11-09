@@ -181,7 +181,7 @@ final class PlaylistMatchingIntegrationTests: XCTestCase {
         let owner2 = try await repo.beginMatching(migrationID: second.id)
         let entry2 = try await repo.entries(migrationID: second.id)[0]
         let claim2 = try await repo.claimMatchingEntry(entry2, session: owner2), lease2 = try XCTUnwrap(claim2)
-        try fixture.storage.database.dbQueue.write { db in
+        try await fixture.storage.database.dbQueue.write { db in
             var competitor = local.track; competitor.id = "competitor"; competitor.fileRelativePath = "competitor.wav"
             competitor.contentSHA256 = "another-hash"
             try competitor.insert(db)
