@@ -1,0 +1,144 @@
+import Foundation
+
+struct SongMatchingProgress: Sendable {
+    var total = 0
+    var processed = 0
+    var alreadyLocal = 0
+    var localMatches = 0
+    var recommended = 0
+    var review = 0
+    var noMatch = 0
+    var message: String? = nil
+}
+
+/// One app-owned worker, one in-flight provider call, incremental atomic commits.
+/// This service has no playback, download, stream resolver or track-creation dependency.
+actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
+    let repository: GRDBPlaylistMigrationRepository
+    let providers: [any ExternalCandidateDiscovery]
+    let scoring: CandidateScoringEngine
+    let policy: MatchDecisionPolicy
+    private var running = false
+    init(repository: GRDBPlaylistMigrationRepository, providers: [any ExternalCandidateDiscovery],
+         configuration: SongMatchingConfiguration = .standard) {
+        self.repository = repository; self.providers = Array(providers.prefix(3))
+        scoring = CandidateScoringEngine(configuration: configuration)
+        policy = MatchDecisionPolicy(configuration: configuration)
+    }
+
+    /// Read-only protocol adapter. Lifecycle callers use run() so decisions are
+    /// checked and persisted at the transaction boundary.
+    func candidates(for entry: PlaylistMigrationEntry) async throws -> [PlaylistMigrationCandidate] {
+        let index = try await repository.matchingLibrary()
+        let local = index.candidates(for: entry.source)
+        var scores = local.values.map { scoring.score(source: entry.source, candidate: $0) }
+        if policy.decide(scores, truncated: local.truncated).outcome != .local {
+            for provider in providers {
+                let result = try await provider.discover(entry.source)
+                scores += result.recordings.prefix(20).map { scoring.score(source: entry.source, candidate: $0) }
+            }
+        }
+        let previous = try await repository.candidates(entryID: entry.id)
+        return policy.decide(scores).ranked.prefix(40).map { score in
+            let old = previous.first { $0.provider == score.recording.provider && $0.providerTrackID == score.recording.identity }
+            return PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: entry.id, provider: score.recording.provider,
+                providerTrackID: score.recording.identity, title: score.recording.title, artist: score.recording.artist,
+                durationMs: score.recording.durationMs, confidence: score.score / 100, evidence: score.evidence, decision: old?.decision ?? .pending)
+        }
+    }
+
+    func run(migrationID: UUID, progress: @escaping @Sendable (SongMatchingProgress) async -> Void) async throws {
+        guard !running else { throw SongMatchingError.busy }
+        running = true
+        defer { running = false }
+        let session = try await repository.beginMatching(migrationID: migrationID)
+        do {
+            let entries = try await repository.entries(migrationID: migrationID)
+            let index = try await repository.matchingLibrary()
+            var report = SongMatchingProgress(total: entries.count)
+            var disabledProviders = Set<Int>()
+            await progress(report)
+            for entry in entries {
+                try Task.checkCancellation()
+                guard let lease = try await repository.claimMatchingEntry(entry, session: session) else {
+                    report.processed += 1
+                    if entry.status == .ready { report.alreadyLocal += 1 }
+                    await progress(report); continue
+                }
+                if lease.previousCandidates.count >= 60 {
+                    let decision = SongMatchDecision(outcome: .review, ranked: [], explanation: "Saved candidate history limit reached. Review existing alternatives before further discovery.", margin: 0)
+                    try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
+                    report.processed += 1; report.review += 1; await progress(report); continue
+                }
+                let rejected = Set(lease.previousCandidates.filter { $0.decision == .rejected }.map { $0.provider + ":" + ($0.providerTrackID ?? "") })
+                let local = index.candidates(for: entry.source)
+                var scores = local.values.filter { !rejected.contains($0.provider + ":" + $0.identity) }
+                    .map { scoring.score(source: entry.source, candidate: $0) }
+                var decision = policy.decide(scores, truncated: local.truncated)
+                var issue: String?
+                var acceptedLocal: MatchingLocalRecording?
+                if decision.outcome == .local, let best = decision.ranked.first {
+                    acceptedLocal = index.recordings[best.recording.identity]
+                } else {
+                    var truncated = local.truncated
+                    var seen = Set(scores.map { $0.recording.provider + ":" + $0.recording.identity })
+                    for (number, provider) in providers.enumerated() where !disabledProviders.contains(number) {
+                        try Task.checkCancellation()
+                        do {
+                            let found = try await provider.discover(entry.source)
+                            try Task.checkCancellation()
+                            truncated = truncated || found.truncated
+                            for recording in found.recordings.prefix(20) {
+                                let identity = recording.provider + ":" + recording.identity
+                                guard !rejected.contains(identity), seen.insert(identity).inserted else { continue }
+                                scores.append(scoring.score(source: entry.source, candidate: recording))
+                            }
+                            if !found.failures.isEmpty {
+                                issue = "External discovery interrupted. Completed local matches are preserved. Retry later."
+                                report.message = found.failures.first
+                                disabledProviders.insert(number)
+                            }
+                        } catch {
+                            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                            disabledProviders.insert(number)
+                            issue = "External discovery failed. Retry later; existing local audio is preserved."
+                            report.message = issue
+                        }
+                    }
+                    if disabledProviders.count == providers.count && !providers.isEmpty && issue == nil {
+                        issue = "External discovery deferred after a provider failure. Retry later."
+                    }
+                    decision = policy.decide(scores, truncated: truncated)
+                    // Local uncertainty must never be promoted by remote ranking.
+                    if decision.outcome == .local {
+                        decision = SongMatchDecision(outcome: .review, ranked: decision.ranked, explanation: "Local identity needs review after external comparison.", margin: decision.margin)
+                    }
+                }
+                do {
+                    try await repository.commitMatching(lease, decision: decision, local: acceptedLocal, librarySnapshot: index.snapshot, issue: issue)
+                } catch PlaylistMigrationStorageError.invalidLocalTrack {
+                    // Never try the runner-up after failed file verification.
+                    decision = .init(outcome: .review, ranked: decision.ranked,
+                        explanation: "Managed local audio failed verification. No alternate recording was selected.", margin: decision.margin)
+                    try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
+                }
+                switch decision.outcome {
+                case .local: report.localMatches += 1
+                case .recommended: report.recommended += 1
+                case .review: report.review += 1
+                case .noMatch: report.noMatch += 1
+                }
+                report.processed += 1
+                await progress(report)
+            }
+            try Task.checkCancellation()
+            try await repository.finishMatching(session, paused: false)
+        } catch {
+            // A separate non-cancelled cleanup task closes only this lease. If a
+            // newer run/user action owns the session, its revision wins.
+            let repository = repository
+            _ = await Task.detached { try? await repository.finishMatching(session, paused: true) }.value
+            throw error
+        }
+    }
+}

@@ -16,6 +16,7 @@ final class AppContainer: ObservableObject {
     let storage: StorageCoordinator?
     let library: MusicLibraryService
     let playlistImport: PlaylistImportViewModel?
+    let playlistMatching: PlaylistMatchingViewModel?
     let youtubeSearch: YouTubeSearchService
     let youtubeMetadata: any YouTubeMetadataProvider
     let youtubeResolver: any YouTubeAudioResolver
@@ -43,6 +44,10 @@ final class AppContainer: ObservableObject {
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
+        if let storage = self.storage {
+            self.playlistMatching = PlaylistMatchingViewModel(service: PlaylistMigrationMatchingService(
+                repository: storage.playlistMigrations, providers: [YouTubeSearchProviderAdapter(search: self.youtubeSearch, metadata: self.youtubeMetadata)]))
+        } else { self.playlistMatching = nil }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)

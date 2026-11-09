@@ -1,0 +1,47 @@
+name: Focused song matching tests
+on:
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: playlist-matching-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  matching:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Focused matching and existing persistence contracts
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          ID=$(xcrun simctl create "Matching-$GITHUB_RUN_ID" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max com.apple.CoreSimulator.SimRuntime.iOS-26-2)
+          echo "SIMULATOR_ID=$ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$ID"
+          xcrun simctl bootstatus "$ID" -b
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$ID" -derivedDataPath build/MatchingProducts \
+            -parallel-testing-enabled NO -resultBundlePath build/Matching.xcresult \
+            -only-testing:OFFLINETests/SongMatchingPolicyTests \
+            -only-testing:OFFLINETests/MatchingDiscoveryTests \
+            -only-testing:OFFLINETests/PlaylistMatchingIntegrationTests \
+            -only-testing:OFFLINETests/PlaylistMigrationPersistenceTests \
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 \
+            CODE_SIGNING_ALLOWED=NO test 2>&1 | tee build/matching-tests.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: song-matching-test-evidence
+          path: |
+            build/matching-tests.log
+            build/Matching.xcresult
+      - name: Remove test simulator
+        if: always() && env.SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          xcrun simctl delete "$SIMULATOR_ID" || true

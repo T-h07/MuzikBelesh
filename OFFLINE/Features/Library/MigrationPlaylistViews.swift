@@ -96,6 +96,7 @@ struct MigrationSourceMetadataView: View {
 
 struct MigrationPlaylistDashboard: View {
     @EnvironmentObject private var library: MusicLibraryService
+    @EnvironmentObject private var container: AppContainer
     let playlistID: String
     @State private var expanded = false
     var body: some View {
@@ -110,6 +111,9 @@ struct MigrationPlaylistDashboard: View {
                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
                 MigrationProgressOverview(progress: value.progress)
+                if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
+                    PlaylistMatchingControls(model: model, session: value.session, repository: repository)
+                }
                 if expanded {
                     LabeledContent("Original playlist", value: value.session.sourcePlaylistName)
                     LabeledContent("Source provider", value: value.session.source.displayName)
@@ -169,6 +173,9 @@ struct MigrationOccurrenceDetailView: View {
                     Text(row.effectiveStatus.displayName).accessibilityIdentifier("migration-inspector-status")
                     Text(row.playableTrack == nil ? "No verified local audio available" : "Verified local audio associated and available")
                     if let id = row.entry.localTrackID { Text("Associated recording: \(id)").font(.caption) }
+                }
+                if let repository = library.storage?.playlistMigrations {
+                    MigrationCandidateInspection(entry: row.entry, repository: repository)
                 }
                 Section("Entry Issues") {
                     let issues = value.issuesByEntry[occurrenceID] ?? []
