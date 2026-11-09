@@ -75,10 +75,17 @@ enum RecordingVersionClassifier {
         })
         // A word in a song name (for example "Live Forever") is not a version
         // declaration. Retain the risk indicator but also mark identity unknown.
-        let qualified = title.range(of: "[()\\[\\]]|\\s[-–—]\\s", options: .regularExpression) != nil
-        let supporting = SongMetadataNormalizer.words((album ?? "") + " " + (description ?? ""))
-        let supportingTrait = patterns.contains { supporting.range(of: "\\b(" + $0.1 + ")\\b", options: .regularExpression) != nil }
-        if result.isEmpty || (!qualified && !supportingTrait) { result.insert(.unknown) }
+        let expression = try? NSRegularExpression(pattern: "\\([^)]*\\)|\\[[^]]*\\]")
+        let qualifiers = expression?.matches(in: title, range: NSRange(title.startIndex..., in: title)).compactMap {
+            Range($0.range, in: title).map { String(title[$0]) }
+        } ?? []
+        let suffix = title.replacingOccurrences(of: "\\s[-–—]\\s", with: "|", options: .regularExpression)
+            .components(separatedBy: "|").dropFirst().joined(separator: " ")
+        let supporting = SongMetadataNormalizer.words((qualifiers + [suffix, album ?? "", description ?? ""]).joined(separator: " "))
+        let supported = Set(patterns.compactMap { trait, pattern in
+            supporting.range(of: "\\b(" + pattern + ")\\b", options: .regularExpression) == nil ? nil : trait
+        })
+        if result.isEmpty || !result.isSubset(of: supported) { result.insert(.unknown) }
         return result
     }
 }
@@ -153,7 +160,12 @@ struct CandidateScoringEngine: Sendable {
         // Absence of a qualifier is never proof of studio identity. Even matching
         // unlabelled titles, albums and durations require review.
         let knownVersion = !aVersion.contains(.unknown) && !bVersion.contains(.unknown)
-        let versionAgrees = knownVersion && aVersion == bVersion
+        let contradictions: (Set<RecordingVersionTrait>) -> Bool = { traits in
+            (traits.contains(.studio) && !traits.isDisjoint(with: [.live, .remix, .cover, .karaoke, .demo]))
+                || (traits.contains(.radioEdit) && traits.contains(.extended))
+                || (traits.contains(.spedUp) && traits.contains(.slowed))
+        }
+        let versionAgrees = knownVersion && aVersion == bVersion && !contradictions(aVersion) && !contradictions(bVersion)
         if !versionAgrees {
             gates.append(aVersion == bVersion || aVersion == [.unknown] || bVersion == [.unknown]
                          ? "Recording version is uncertain" : "Recording versions conflict")
@@ -172,7 +184,7 @@ struct CandidateScoringEngine: Sendable {
             "titleScore": String(titlePoints), "artistScore": String(artistPoints),
             "featuredArtistScore": String(featurePoints), "durationScore": String(durationPoints),
             "versionScore": String(versionPoints), "albumScore": String(albumPoints),
-            "durationDifferenceMs": difference.map { String(Int64($0)) } ?? "Unknown",
+            "durationDifferenceMs": difference.map { String(format: "%.0f", $0) } ?? "Unknown",
             "sourceVersion": aVersion.map(\.rawValue).sorted().joined(separator: ", "),
             "candidateVersion": bVersion.map(\.rawValue).sorted().joined(separator: ", "),
             "versionCompatibility": versionAgrees ? "Compatible explicit traits" : "Not established",

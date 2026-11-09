@@ -21,6 +21,8 @@ final class SongMatchingPolicyTests: XCTestCase {
         let decision = outcome(source("Song One"), recording("Song One"))
         XCTAssertEqual(decision.outcome, .review)
         XCTAssertTrue(decision.ranked[0].gates.contains("Recording version is uncertain"))
+        XCTAssertTrue(RecordingVersionClassifier.traits(title: "Live Forever (Official Audio)").contains(.unknown))
+        XCTAssertNotEqual(outcome(source("Song (Studio Live)"), recording("Song (Studio Live)")).outcome, .local)
     }
     func testPrimaryArtistCannotBeOverriddenByScoreOrFeatures() {
         for artist in ["Artist B", "Artist B feat. Artist A", "", "Unknown Artist"] {
@@ -55,6 +57,7 @@ final class SongMatchingPolicyTests: XCTestCase {
         }
         XCTAssertNotEqual(outcome(source(duration: 2000), recording(duration: 3500)).outcome, .local)
         XCTAssertEqual(outcome(source(), recording(duration: 182000)).outcome, .local)
+        XCTAssertNotEqual(outcome(source(duration: Int64.max), recording(duration: 1)).outcome, .local)
     }
     func testCommonWordMissingWordsAndWordOrderCannotAutoMatch() {
         for title in ["Song", "One Song (Studio)", "Song Two (Studio)", "One (Studio)"] {

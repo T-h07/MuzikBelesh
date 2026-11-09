@@ -53,6 +53,13 @@ protocol ExternalCandidateDiscovery: Sendable {
 struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
     let search: any YouTubeSearchProvider
     var metadata: (any YouTubeMetadataProvider)? = nil
+    private static func credits(_ title: String) -> (title: String, artist: String?) {
+        for separator in [" - ", " – ", " — "] {
+            let parts = title.components(separatedBy: separator)
+            if parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty { return (parts[1], parts[0]) }
+        }
+        return (title, nil)
+    }
     static func queries(_ source: PlaylistMigrationSourceTrack) -> [String] {
         let base = YouTubeSearchService.normalize((source.primaryArtist ?? "") + " " + source.title)
         guard !base.isEmpty else { return [] }
@@ -70,12 +77,9 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     guard YouTubeURLValidator.isValidID(video.id), seen.insert(video.id).inserted,
                           ![.live, .upcoming, .unavailable].contains(video.availability),
                           !video.isShort, !video.title.isEmpty, video.title.count <= 500 else { continue }
-                    let parts = video.title.components(separatedBy: " - ")
-                    let enDash = video.title.components(separatedBy: " – ")
-                    let credits = parts.count == 2 ? parts : enDash
-                    let hasCredit = credits.count == 2 && !credits[0].isEmpty
-                    let title = hasCredit ? credits[1] : video.title
-                    let artist = hasCredit ? credits[0] : nil
+                    let credits = Self.credits(video.title)
+                    let hasCredit = credits.artist != nil
+                    let title = credits.title, artist = credits.artist
                     let duration = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil }
                     let recording = SongRecording(provider: "youtube", identity: video.id, title: title, artist: artist,
                                                   durationMs: duration, performerEstablished: hasCredit,
@@ -113,10 +117,11 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     guard video.id == result.recordings[index].identity else { continue }
                     // Keep title/credits from the evaluated search response. If the
                     // watch title changes, it needs review instead of combining identities.
-                    let split = video.title.components(separatedBy: " - ")
-                    let watchTitle = split.count == 2 ? split[1] : video.title
-                    let sameTitle = SongMetadataNormalizer.cleanTitle(watchTitle) == SongMetadataNormalizer.cleanTitle(result.recordings[index].title)
-                    let sameArtist = split.count == 2 && SongMetadataNormalizer.artist(split[0]).0 == SongMetadataNormalizer.artist(result.recordings[index].artist).0
+                    let watch = Self.credits(video.title)
+                    let sameTitle = SongMetadataNormalizer.cleanTitle(watch.title) == SongMetadataNormalizer.cleanTitle(result.recordings[index].title)
+                    let watchArtist = SongMetadataNormalizer.artist(watch.artist)
+                    let searchArtist = SongMetadataNormalizer.artist(result.recordings[index].artist)
+                    let sameArtist = watch.artist != nil && watchArtist.0 == searchArtist.0 && watchArtist.1 == searchArtist.1
                     result.recordings[index].available = sameTitle && sameArtist && video.availability == .available && !video.isShort
                     result.recordings[index].durationMs = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil }
                 } catch {
