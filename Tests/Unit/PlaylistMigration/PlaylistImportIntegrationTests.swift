@@ -36,7 +36,7 @@ final class PlaylistImportIntegrationTests: XCTestCase {
             let reopened = try StorageCoordinator(paths: fixture.paths)
             let restored = try await reopened.playlistMigrations.entries(migrationID: session.id)
             XCTAssertEqual(restored, entries)
-            let destination = try reopened.database.dbQueue.read { try StoredPlaylist.fetchOne($0, key: session.destinationPlaylistID) }
+            let destination = try await reopened.database.dbQueue.read { try StoredPlaylist.fetchOne($0, key: session.destinationPlaylistID) }
             XCTAssertEqual(destination?.name, "Reviewed destination")
             XCTAssertEqual(session.sourcePlaylistName, "Source")
             XCTAssertEqual(try fixture.foreignKeys(), 0)
