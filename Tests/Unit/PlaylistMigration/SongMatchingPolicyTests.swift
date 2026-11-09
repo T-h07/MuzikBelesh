@@ -68,6 +68,8 @@ final class SongMatchingPolicyTests: XCTestCase {
         let score = CandidateScoringEngine().score(source: source(), candidate: recording())
         XCTAssertEqual(MatchDecisionPolicy().decide([score, score]).outcome, .review)
         XCTAssertEqual(MatchDecisionPolicy().decide([score], truncated: true).outcome, .review)
+        let permissive = try! SongMatchingConfiguration(margin: 0)
+        XCTAssertEqual(MatchDecisionPolicy(configuration: permissive).decide([score, score]).outcome, .review)
     }
     func testExternalProposalNeverMeansLocalAcceptanceAndChannelIsNotPerformer() {
         var remote = recording(); remote.local = false

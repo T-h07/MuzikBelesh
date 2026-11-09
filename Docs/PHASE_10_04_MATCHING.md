@@ -176,10 +176,46 @@ reset are part of this phase.
   the new tests in the explicit `matching_only` mode of `playlist-migration.yml`.
   The existing workflow's default regression/UI checks are unchanged.
 
-Verification results are recorded after execution below. Static parsing is not
-Swift type checking; device compilation is not functional acceptance. Full CI is
-not automatically dispatched; implementation commits use `[skip ci]` to suppress
-the repository's push-triggered full regression workflow.
+Verification handoff: the user owns further CI, IPA compilation and device
+acceptance. No further remote verification is dispatched or monitored by this
+implementation task. Implementation commits use `[skip ci]` to suppress the
+repository's push-triggered full regression workflow.
+
+| Check | Result |
+| --- | --- |
+| Tree-sitter Swift syntax parsing of all 11 changed/new Swift files | PASS |
+| Project YAML, workflow YAML and recursive source/test inclusion | PASS |
+| Git whitespace checks and unchanged database migration definitions | PASS |
+| New matching XCTest suites on the final implementation | NOT RUN — handed to user |
+| Final unsigned IPA compilation/packaging | NOT RUN — handed to user |
+| Physical iPhone scenarios P0–P15 | NOT RUN |
+
+Before that handoff, device packaging of initial implementation `800f27a` passed.
+An earlier focused test-product build found a missing `await` in an integration
+test's GRDB write; commit `27d41a1` fixes it. These earlier results do not establish
+test or compilation success for the final revision. Static parsing is not Swift
+type checking and device compilation is not functional acceptance.
+
+## File manifest
+
+Created:
+
+- `OFFLINE/PlaylistMigration/Matching/SongMatchingPolicy.swift`
+- `OFFLINE/PlaylistMigration/Matching/MatchingDiscovery.swift`
+- `OFFLINE/PlaylistMigration/Matching/PlaylistMigrationMatchingService.swift`
+- `OFFLINE/Features/Library/PlaylistMatchingViewModel.swift`
+- `Tests/Unit/PlaylistMigration/SongMatchingPolicyTests.swift`
+- `Tests/Unit/PlaylistMigration/MatchingDiscoveryTests.swift`
+- `Tests/Unit/PlaylistMigration/PlaylistMatchingIntegrationTests.swift`
+- `Docs/PHASE_10_04_MATCHING.md`
+
+Modified:
+
+- `OFFLINE/PlaylistMigration/GRDBPlaylistMigrationRepository.swift`
+- `OFFLINE/App/AppContainer.swift`
+- `OFFLINE/Features/Library/MigrationPlaylistViews.swift`
+- `OFFLINE/Features/Root/RootView.swift`
+- `.github/workflows/playlist-migration.yml` (optional focused dispatch mode only)
 
 ## Unsigned IPA and in-place update
 

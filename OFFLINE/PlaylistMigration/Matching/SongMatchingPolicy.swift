@@ -223,7 +223,7 @@ struct MatchDecisionPolicy: Sendable {
         if truncated { outcome = .review; reason = "Candidate limit reached; uniqueness cannot be established." }
         else if top.score < configuration.review { outcome = .noMatch; reason = "Candidates have insufficient supporting evidence." }
         else if !top.gates.isEmpty { outcome = .review; reason = top.gates.joined(separator: "; ") }
-        else if margin < configuration.margin { outcome = .review; reason = "Multiple near-equal candidates require review." }
+        else if ranked.count > 1 && (margin <= 0 || margin < configuration.margin) { outcome = .review; reason = "Multiple near-equal candidates require review." }
         else if top.score < configuration.high { outcome = .review; reason = "Confidence is below the automatic threshold." }
         else { outcome = top.recording.local ? .local : .recommended; reason = top.recording.local ? "Unique identity; managed audio verification required before acceptance." : "Recommended external proposal. Acceptance and acquisition remain pending." }
         return .init(outcome: outcome, ranked: ranked, explanation: reason, margin: margin)
