@@ -21,7 +21,7 @@ import SwiftUI
         self.storage = storage; self.player = player
         guard let storage else { error = "Local library storage is unavailable."; return }
         error = storage.lastError
-        observation = ValueObservation.tracking { db in try LibraryRepository.snapshot(db) }.start(in: storage.database.dbQueue, scheduling: .immediate, onError: { [weak self] _ in
+        observation = ValueObservation.tracking { db in try LibraryRepository.observedSnapshot(db, paths: storage.paths) }.start(in: storage.database.dbQueue, scheduling: .immediate, onError: { [weak self] _ in
             self?.error = "Library updates could not be read. Try refreshing."
         }, onChange: { [weak self] value in self?.apply(value) })
     }
@@ -43,21 +43,15 @@ import SwiftUI
         if isMigrationPlaylist(id) { return migrationRows(id).compactMap(\.playableTrack) }
         return tracks(playlistTrackIDs[id] ?? [])
     }
-    func isMigrationPlaylist(_ id: String) -> Bool { snapshot.migrationSessions.contains { $0.destinationPlaylistID == id } }
+    func isMigrationPlaylist(_ id: String) -> Bool { snapshot.migrationPresentations[id] != nil }
     func playlistEntryCount(_ id: String) -> Int {
-        if let session = snapshot.migrationSessions.first(where: { $0.destinationPlaylistID == id }) {
-            return snapshot.migrationEntries.filter { $0.migrationID == session.id }.count
+        if let presentation = snapshot.migrationPresentations[id] {
+            return presentation.rows.count
         }
         return playlistTracks(id).count
     }
     func migrationRows(_ id: String) -> [MigrationPlaylistRow] {
-        guard let storage, let session = snapshot.migrationSessions.first(where: { $0.destinationPlaylistID == id }) else { return [] }
-        var valid: [String: StoredTrack] = [:]
-        let entries = snapshot.migrationEntries.filter { $0.migrationID == session.id }.sorted { $0.position < $1.position }
-        for id in Set(entries.compactMap(\.localTrackID)) {
-            if let track = tracksByID[id], MigrationLocalAudio.isAvailable(track, paths: storage.paths) { valid[id] = track }
-        }
-        return entries.map { MigrationPlaylistRow(entry: $0, playableTrack: $0.status == .ready ? $0.localTrackID.flatMap { valid[$0] } : nil) }
+        snapshot.migrationPresentations[id]?.rows ?? []
     }
     func playMigration(playlistID: String, occurrenceID: String? = nil, shuffle: Bool = false) async {
         guard let storage, let player else { return }

@@ -28,11 +28,29 @@ final class LibraryRepository {
         result.memberships = try PlaylistMembership.order(Column("playlistID"), Column("position")).fetchAll(db)
         result.migrationSessions = try GRDBPlaylistMigrationRepository.sessions(db)
         result.migrationEntries = try GRDBPlaylistMigrationRepository.entries(db)
+        result.migrationIssues = try GRDBPlaylistMigrationRepository.issues(db)
         result.likedIDs = Set(try String.fetchAll(db, sql: "SELECT trackID FROM liked_tracks"))
         result.recentIDs = try String.fetchAll(db, sql: "SELECT trackID FROM playback_history GROUP BY trackID ORDER BY MAX(startedAt) DESC, trackID LIMIT 20")
         return result
     }
     func snapshot() throws -> LibrarySnapshot { try db.read(Self.snapshot) }
+    /// Runs on GRDB's observation queue, never from a SwiftUI row body.
+    static func observedSnapshot(_ db: Database, paths: AppStoragePaths) throws -> LibrarySnapshot {
+        var value = try snapshot(db)
+        let tracks = value.trackByID
+        let associated = Set(value.migrationEntries.compactMap(\.localTrackID))
+        let available = tracks.filter { associated.contains($0.key) && MigrationLocalAudio.isAvailable($0.value, paths: paths) }
+        let entries = Dictionary(grouping: value.migrationEntries, by: \.migrationID)
+        let issues = Dictionary(grouping: value.migrationIssues, by: \.migrationID)
+        for session in value.migrationSessions {
+            guard let id = session.destinationPlaylistID else { continue }
+            let rows = (entries[session.id] ?? []).map { entry in
+                MigrationPlaylistRow(entry: entry, playableTrack: entry.status == .ready ? entry.localTrackID.flatMap { available[$0] } : nil)
+            }
+            value.migrationPresentations[id] = MigrationPlaylistPresentation(session: session, rows: rows, issues: issues[session.id] ?? [])
+        }
+        return value
+    }
     func setSort(_ sort: LibrarySort) throws {
         try db.write { try StoredSetting(key: "librarySort", value: sort.rawValue, valueType: "string", dateModified: Date()).save($0) }
     }

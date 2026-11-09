@@ -80,6 +80,10 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
     static func sessions(_ db: Database) throws -> [PlaylistMigrationSession] {
         try MigrationSessionRecord.order(Column("createdAt"), Column("id")).fetchAll(db).map { try $0.model() }
     }
+    /// Snapshot-only read access; the database row type remains private to this repository.
+    static func issues(_ db: Database) throws -> [PlaylistMigrationIssue] {
+        try MigrationIssueRecord.order(Column("createdAt"), Column("id")).fetchAll(db).map { try $0.model() }
+    }
     func incompleteSessions() async throws -> [PlaylistMigrationSession] {
         try recover()
         return try await db.read { db in

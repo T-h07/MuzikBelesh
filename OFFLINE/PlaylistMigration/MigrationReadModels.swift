@@ -31,6 +31,29 @@ struct MigrationPlaybackOccurrence: Identifiable, Codable, Equatable, Sendable {
     let trackID: String
 }
 
+/// One derived value per playlist per observed transaction. No persistent cache.
+struct MigrationPlaylistPresentation: Equatable, Sendable {
+    let session: PlaylistMigrationSession
+    let rows: [MigrationPlaylistRow]
+    let issues: [PlaylistMigrationIssue]
+    let progress: PlaylistMigrationProgress
+    let statusCounts: [PlaylistMigrationEntryStatus: Int]
+    let rowsByID: [UUID: MigrationPlaylistRow]
+    let issuesByEntry: [UUID: [PlaylistMigrationIssue]]
+
+    init(session: PlaylistMigrationSession, rows: [MigrationPlaylistRow], issues: [PlaylistMigrationIssue]) {
+        self.session = session; self.rows = rows; self.issues = issues
+        let states = rows.map(\.effectiveStatus)
+        // Atomic imports expose only complete source snapshots. Lifecycle status
+        // may subsequently be paused/failed/cancelled without losing metadata.
+        let committed = rows.count == session.expectedEntryCount && rows.enumerated().allSatisfy { $0.offset == $0.element.entry.position }
+        progress = PlaylistMigrationProgress(expected: session.expectedEntryCount, states: states, metadataCommitted: committed)
+        statusCounts = Dictionary(grouping: states, by: { $0 }).mapValues(\.count)
+        rowsByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        issuesByEntry = Dictionary(grouping: issues.filter { $0.entryID != nil }, by: { $0.entryID! })
+    }
+}
+
 extension Array where Element == MigrationPlaylistRow {
     var playbackOccurrences: [MigrationPlaybackOccurrence] {
         compactMap { row in row.playableTrack.map { MigrationPlaybackOccurrence(id: row.id.uuidString, trackID: $0.id) } }

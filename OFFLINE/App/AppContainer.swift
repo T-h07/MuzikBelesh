@@ -15,6 +15,7 @@ final class AppContainer: ObservableObject {
     let downloads: DownloadManager
     let storage: StorageCoordinator?
     let library: MusicLibraryService
+    let playlistImport: PlaylistImportViewModel?
     let youtubeSearch: YouTubeSearchService
     let youtubeMetadata: any YouTubeMetadataProvider
     let youtubeResolver: any YouTubeAudioResolver
@@ -41,6 +42,7 @@ final class AppContainer: ObservableObject {
         self.youtubeProbe = youtubeProbe ?? YouTubeKitProbe(resolver: resolver)
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
+        self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)
