@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
+final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, PlaylistImportPersisting {
     let db: DatabaseQueue
     let paths: AppStoragePaths
     init(db: DatabaseQueue, paths: AppStoragePaths) { self.db = db; self.paths = paths }
@@ -10,23 +10,36 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting {
         try createCommittedPlaylist(from: source, operationID: operationID)
     }
 
+    func createPlaylist(from source: PlaylistMigrationSourcePlaylist, operationID: String, destinationName: String) async throws -> PlaylistMigrationSession {
+        try createCommittedPlaylist(from: source, operationID: operationID, destinationName: destinationName)
+    }
+
+    func importSessions() async throws -> [PlaylistMigrationSession] {
+        try await db.read { try Self.sessions($0) }
+    }
+
     /// One IMMEDIATE GRDB write transaction owns the idempotency check and every insert.
     /// No observer can see importingMetadata or a partially populated playlist.
-    func createCommittedPlaylist(from source: PlaylistMigrationSourcePlaylist, operationID: String) throws -> PlaylistMigrationSession {
+    func createCommittedPlaylist(from source: PlaylistMigrationSourcePlaylist, operationID: String, destinationName: String? = nil) throws -> PlaylistMigrationSession {
         try Task.checkCancellation()
         try PlaylistMigrationValidation.validate(source)
         let operation = operationID.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
         guard !operation.isEmpty, operation.count <= 200,
               operation.rangeOfCharacter(from: .controlCharacters) == nil else { throw PlaylistMigrationStorageError.invalidOperationID }
         let fingerprint = try PlaylistMigrationValidation.importFingerprint(for: source)
+        let displayName = try LibraryIdentity.validatedName(destinationName ?? source.name)
         return try db.write { db in
             if let existing = try MigrationSessionRecord.fetchOne(db, sql: "SELECT * FROM playlist_migrations WHERE operationID = ?", arguments: [operation]) {
                 guard existing.importFingerprint == fingerprint else { throw PlaylistMigrationStorageError.operationConflict }
                 try Self.verify(existing, db: db)
                 return try existing.model()
             }
+            if PlaylistImportIdentity.parts(source.sourceReference) != nil,
+               PlaylistImportIdentity.status(source: source, operation: operation, sessions: try Self.sessions(db)) == .ambiguous {
+                throw PlaylistImportProblem(location: "Import identity", reason: PlaylistImportDuplicate.ambiguous.message)
+            }
             let now = Date(), id = UUID().uuidString, playlistID = UUID().uuidString
-            try StoredPlaylist(id: playlistID, name: LibraryIdentity.validatedName(source.name), description: nil, artworkRelativePath: nil, dateAdded: now, dateModified: now).insert(db)
+            try StoredPlaylist(id: playlistID, name: displayName, description: nil, artworkRelativePath: nil, dateAdded: now, dateModified: now).insert(db)
             var session = MigrationSessionRecord(id: id, destinationPlaylistID: playlistID, operationID: operation, source: source.source.rawValue, sourcePlaylistID: source.sourcePlaylistID, sourceReference: source.sourceReference, sourcePlaylistName: source.name, importFingerprint: fingerprint, expectedEntryCount: source.entries.count, status: .importingMetadata, createdAt: now, updatedAt: now, failureInformation: nil)
             try session.insert(db)
             for sourceEntry in source.entries {
