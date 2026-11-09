@@ -1,5 +1,8 @@
 # Phase 10.1 — Playlist persistence and occurrences
 
+The file import layer that builds on this storage is documented in
+[Phase 10.2 — Offline playlist metadata import](PHASE_10_02_IMPORT_ENGINE.md).
+
 Phase 10.0 PR #13 merged as `3064868584b1e3ddd9ed2de7db7082e887986a81`.
 Implementation uses the existing `feature/phase-10-01-persistence` branch. No
 Spotify connectivity, source parsing, discovery, acquisition or scheduling is added.

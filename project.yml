@@ -6,6 +6,9 @@ options:
   createIntermediateGroups: true
   defaultConfig: Debug
 packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    exactVersion: 0.9.20
   YouTubeKit:
     url: https://github.com/alexeichhorn/YouTubeKit.git
     exactVersion: 0.4.10
@@ -58,6 +61,7 @@ targets:
         Release: {SWIFT_OPTIMIZATION_LEVEL: -O}
     dependencies:
       - package: YouTubeKit
+      - package: ZIPFoundation
       - package: GRDB
         product: GRDB
       - target: OFFLINEShareExtension
@@ -68,6 +72,7 @@ targets:
     sources: [Tests/Unit, Tests/Fixtures]
     dependencies:
       - target: OFFLINE
+      - package: ZIPFoundation
       - package: YouTubeKit
       - package: GRDB
         product: GRDB
