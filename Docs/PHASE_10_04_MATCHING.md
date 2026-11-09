@@ -173,7 +173,8 @@ reset are part of this phase.
   ownership, catalog changes, unsafe-evidence rollback, cancellation, 0/1/500/1,000
   entries, and absence of new tracks/download jobs/queue entries/files.
 - Existing PlaylistMigrationPersistenceTests remain unchanged and run alongside
-  the new tests in the manual-only `playlist-matching.yml` workflow.
+  the new tests in the explicit `matching_only` mode of `playlist-migration.yml`.
+  The existing workflow's default regression/UI checks are unchanged.
 
 Verification results are recorded after execution below. Static parsing is not
 Swift type checking; device compilation is not functional acceptance. Full CI is
@@ -193,7 +194,7 @@ Do not delete the installed app or recreate its library.
 
 ```sh
 gh workflow run build-ipa.yml --ref feature/phase-10-04-matching -f build_number=75
-gh workflow run playlist-matching.yml --ref feature/phase-10-04-matching
+gh workflow run playlist-migration.yml --ref feature/phase-10-04-matching -f matching_only=true
 ```
 
 For any later build, replace 75 with a number above the most recently installed

@@ -2,6 +2,11 @@ name: Playlist migration verification
 on:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      matching_only:
+        description: Run only Phase 10.4 matching and existing persistence unit contracts
+        type: boolean
+        default: false
   pull_request:
     branches: [develop]
 permissions: {contents: read}
@@ -36,6 +41,7 @@ jobs:
           xcrun simctl bootstatus "$ID" -b
           xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$ID" -derivedDataPath build/Products build-for-testing CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/migration-build.log
       - name: Foundation persistence and affected regression tests
+        if: inputs.matching_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
@@ -51,7 +57,19 @@ jobs:
             -only-testing:OFFLINETests/PlaybackPreviousPolicyTests \
             -only-testing:OFFLINETests/PlaybackServiceAuditTests \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-units.log
+      - name: Focused song matching and persistence tests
+        if: inputs.matching_only == true
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MatchingUnits.xcresult \
+            -only-testing:OFFLINETests/SongMatchingPolicyTests \
+            -only-testing:OFFLINETests/MatchingDiscoveryTests \
+            -only-testing:OFFLINETests/PlaylistMatchingIntegrationTests \
+            -only-testing:OFFLINETests/PlaylistMigrationPersistenceTests \
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-matching.log
       - name: Migration playlist UI
+        if: inputs.matching_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
