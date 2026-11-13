@@ -46,7 +46,7 @@ final class AppContainer: ObservableObject {
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
         if let storage = self.storage {
             self.playlistMatching = PlaylistMatchingViewModel(service: PlaylistMigrationMatchingService(
-                repository: storage.playlistMigrations, providers: [YouTubeSearchProviderAdapter(search: self.youtubeSearch, metadata: self.youtubeMetadata)]))
+                repository: storage.playlistMigrations, providers: [YouTubeSearchProviderAdapter(search: self.youtubeSearch, metadata: self.youtubeMetadata)]), repository: storage.playlistMigrations)
         } else { self.playlistMatching = nil }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }

@@ -46,7 +46,8 @@ targets:
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        UIBackgroundModes: [audio]
+        UIBackgroundModes: [audio, processing]
+        BGTaskSchedulerPermittedIdentifiers: ['com.th07.muzikbelesh.matching.*']
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh

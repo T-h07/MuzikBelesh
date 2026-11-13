@@ -49,6 +49,7 @@ private struct RootTabsView: View {
         } message: { Text(library.error ?? "") }
         .task(id: "\(scenePhase)-\(shareRevision)") {
             guard scenePhase == .active else { return }
+            await container.playlistMatching?.restoreIfNeeded()
             do {
                 guard let share = try await coordinator.shareHandoff.next() else { return }
                 // A library editor, document picker, or nested sheet may own the presentation.
