@@ -13,8 +13,8 @@ private actor MidwayDiscovery: ExternalCandidateDiscovery {
             fullTitle: "Artist - " + source.title, channel: "Uploader")
         if source.position == 100 && !failed {
             failed = true
-            return .init(recordings: partial ? [recording] : [], failures: [YouTubeError.searchUnavailable.localizedDescription],
-                         failure: .searchUnavailable, pauseDiscovery: true)
+            return .init(recordings: partial ? [recording] : [], failures: [YouTubeError.rateLimited.localizedDescription],
+                         failure: .rateLimited, pauseDiscovery: true, searchFailed: true)
         }
         return .init(recordings: [recording])
     }
@@ -68,7 +68,7 @@ final class MatchingReliabilityTests: XCTestCase {
         XCTAssertTrue(try YouTubeWebParser.search(YTFixture.initial([["messageRenderer": ["text": ["simpleText": "No results found"]]]])).videos.isEmpty)
     }
     func testRestrictionsAndSchemaFailuresAreNotRetriedAutomatically() async throws {
-        for error in [YouTubeError.accessRestricted, .rateLimited, .searchUnavailable] {
+        for error in [YouTubeError.accessRestricted, .rateLimited] {
             let search = YTSearchStub([.failure(error)])
             let result = try await YouTubeSearchProviderAdapter(search: search).discover(MatchingCorrectionTests.source(1).entries[0])
             let calls = await search.calls

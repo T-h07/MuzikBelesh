@@ -91,7 +91,7 @@ final class PlaylistMatchingIntegrationTests: XCTestCase {
         try await PlaylistMigrationMatchingService(repository: repo, providers: [provider]).run(migrationID: session.id) { _ in }
         let entries = try await repo.entries(migrationID: session.id)
         XCTAssertEqual(entries.filter { $0.status == .ready }.count, 2)
-        let calls = await provider.calls; XCTAssertEqual(calls, 1)
+        let calls = await provider.calls; XCTAssertEqual(calls, 2)
         try FileManager.default.removeItem(at: fixture.file(0))
         let missing = try await create(source(["Song (Studio)"]), fixture)
         try await PlaylistMigrationMatchingService(repository: repo, providers: []).run(migrationID: missing.id) { _ in }
@@ -218,7 +218,7 @@ final class PlaylistMatchingIntegrationTests: XCTestCase {
             try await PlaylistMigrationMatchingService(repository: repo, providers: [provider]).run(migrationID: session.id) { _ in }
             let entries = try await repo.entries(migrationID: session.id)
             let calls = await provider.calls
-            XCTAssertEqual(calls, size == 0 ? 0 : 1); XCTAssertEqual(entries.map(\.source), input.entries)
+            XCTAssertEqual(calls, min(size, 3)); XCTAssertEqual(entries.map(\.source), input.entries)
             XCTAssertEqual(try count("tracks", fixture), 0); XCTAssertEqual(try count("download_jobs", fixture), 0)
         }
     }

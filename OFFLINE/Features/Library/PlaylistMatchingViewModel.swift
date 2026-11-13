@@ -147,6 +147,7 @@ struct PlaylistMatchingControls: View {
             }
             if let message = progress.message { Text(message).foregroundStyle(AppColors.error) }
             if let readError { Text(readError).foregroundStyle(AppColors.error) }
+            MatchingDeveloperDiagnosticsView()
             Text("Discovery only. External candidates are not available offline. Background matching continues while iOS permits. Interrupted work resumes when the app reopens.")
                 .foregroundStyle(AppColors.textSecondary)
         }.font(.caption).tint(AppColors.accentPrimary)
@@ -218,6 +219,16 @@ struct MigrationCandidateInspection: View {
         case "hardGateFailures": return "Automatic selection blocked"
         case "acceptance": return "Acceptance"
         default: return "Algorithm"
+        }
+    }
+}
+
+private struct MatchingDeveloperDiagnosticsView: View {
+    @ObservedObject private var diagnostics = YouTubeDiagnosticModel.shared
+    var body: some View {
+        DisclosureGroup("Developer diagnostics") {
+            Text(diagnostics.summary).font(.caption.monospaced()).textSelection(.enabled)
+            Text("Last failure across YouTube requests; retained after restart.").font(.caption2)
         }
     }
 }

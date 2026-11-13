@@ -63,6 +63,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             var report = SongMatchingProgress(total: entries.count)
             report.candidates = try await repository.matchingSummary(migrationID: migrationID).candidates
             report.deferred = entries.filter { [.pending, .matching].contains($0.status) }.count
+            var failures = MatchingDiscoveryFailurePolicy()
             await progress(report)
             for entry in entries {
                 try Task.checkCancellation()
@@ -101,6 +102,9 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                             do {
                                 let found = try await provider.discover(entry.source)
                                 try Task.checkCancellation()
+                                let shouldPause = failures.observe(provider: number, entry: entry.id,
+                                    searchFailed: found.searchFailed,
+                                    restricted: found.pauseDiscovery && MatchingDiscoveryFailurePolicy.immediate(found.failure))
                                 truncated = truncated || found.truncated
                                 for recording in found.recordings.prefix(20) {
                                     let identity = recording.provider + ":" + recording.identity
@@ -117,15 +121,14 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                     if let failure = found.failure {
                                         MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: "youtube")
                                     }
-                                    if found.pauseDiscovery { report.discoveryPaused = true; break }
+                                    if shouldPause { report.discoveryPaused = true; break }
                                 }
                             } catch {
                                 if Task.isCancelled || error is CancellationError { throw CancellationError() }
                                 MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: "provider-" + String(number))
                                 discoveryFailed = true
-                                if let failure = error as? YouTubeError {
-                                    report.discoveryPaused = [.rateLimited, .networkUnavailable, .requestTimeout, .searchUnavailable, .accessRestricted].contains(failure)
-                                } else { report.discoveryPaused = true }
+                                report.discoveryPaused = failures.observe(provider: number, entry: entry.id,
+                                    searchFailed: true, restricted: MatchingDiscoveryFailurePolicy.immediate(error as? YouTubeError))
                                 let reason = (error as? YouTubeError) == .accessRestricted
                                     ? "YouTube search requires access or verification."
                                     : (error as? YouTubeError)?.localizedDescription ?? "YouTube discovery is unavailable."

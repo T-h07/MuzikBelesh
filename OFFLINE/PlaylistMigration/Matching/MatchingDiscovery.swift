@@ -46,10 +46,26 @@ struct MatchingDiscoveryResult: Sendable {
     var truncated = false
     var failure: YouTubeError? = nil
     var pauseDiscovery = false
+    var searchFailed = false
 }
 protocol ExternalCandidateDiscovery: Sendable {
     /// Providers must honor cancellation and return bounded metadata only.
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult
+}
+
+/// Count failed occurrences, never the retries within one occurrence. Successful
+/// searches reset the streak; individual watch failures do not trip the breaker.
+struct MatchingDiscoveryFailurePolicy {
+    private var streaks: [Int: Set<UUID>] = [:]
+    static func immediate(_ error: YouTubeError?) -> Bool {
+        error == .rateLimited || error == .accessRestricted
+    }
+    mutating func observe(provider: Int, entry: UUID, searchFailed: Bool, restricted: Bool) -> Bool {
+        if restricted { return true }
+        if searchFailed { streaks[provider, default: []].insert(entry) }
+        else { streaks[provider] = [] }
+        return (streaks[provider]?.count ?? 0) >= 3
+    }
 }
 
 /// One shared monotonic request budget for matching, including retries and watch reads.
@@ -94,9 +110,9 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
         try await pacer.wait()
         do { return try await search.search(query: query, continuationToken: nil) }
         catch {
-            // Only transient transport failures get one delayed retry. Never retry
-            // access restrictions, rate limits or an unknown response schema here.
-            guard let failure = error as? YouTubeError, [.networkUnavailable, .requestTimeout].contains(failure) else { throw error }
+            // One paced retry for ambiguous search/transport failures. Access
+            // restrictions and rate limits are never retried here.
+            guard let failure = error as? YouTubeError, [.networkUnavailable, .requestTimeout, .searchUnavailable].contains(failure) else { throw error }
             try await Task.sleep(for: .seconds(1))
             try await pacer.wait()
             return try await search.search(query: query, continuationToken: nil)
@@ -135,7 +151,8 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                 let failure = YouTubeError.map(error, fallback: .searchUnavailable)
                 result.failures.append(failure.localizedDescription)
                 result.failure = failure
-                result.pauseDiscovery = true // Search access/schema failure is provider-wide.
+                result.searchFailed = true
+                result.pauseDiscovery = MatchingDiscoveryFailurePolicy.immediate(failure)
                 break // No immediate retry after timeout/rate limiting/offline failure.
             }
             if result.recordings.count >= 20 { break }
@@ -181,7 +198,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     result.recordings[index].available = false
                     let error = YouTubeError.map(error, fallback: .metadataUnavailable)
                     result.failures.append(error.localizedDescription); result.failure = error
-                    if [.networkUnavailable, .requestTimeout, .rateLimited].contains(error) {
+                    if error == .rateLimited {
                         result.pauseDiscovery = true
                         break
                     }
