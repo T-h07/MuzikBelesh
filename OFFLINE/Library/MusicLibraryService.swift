@@ -27,37 +27,51 @@ import SwiftUI
     }
     private func apply(_ value: LibrarySnapshot) {
         guard value != snapshot else { return }
+        func associated(_ entries: [PlaylistMigrationEntry]) -> [MigrationPlaybackOccurrence] {
+            entries.compactMap { entry in
+                guard entry.status == .ready, let id = entry.localTrackID else { return nil }
+                return MigrationPlaybackOccurrence(id: entry.id.uuidString, trackID: id)
+            }
+        }
+        let playbackChanged = value.tracks != snapshot.tracks || value.artists != snapshot.artists || value.albums != snapshot.albums
+            || value.memberships != snapshot.memberships || value.localOccurrences != snapshot.localOccurrences
+            || associated(value.migrationEntries) != associated(snapshot.migrationEntries)
         tracksByID = value.trackByID
         playlistTrackIDs = Dictionary(grouping: value.memberships, by: \.playlistID).mapValues { $0.sorted { $0.position < $1.position }.map(\.trackID) }
         artistNames = Dictionary(uniqueKeysWithValues: value.artists.map { ($0.id, $0.name) })
         albumNames = Dictionary(uniqueKeysWithValues: value.albums.map { ($0.id, $0.title) })
         artistGroups = value.artistGroups; albumGroups = value.albumGroups
         snapshot = value; revision += 1
-        player?.libraryDidChange()
+        // Candidate/status-only writes do not rescan a playing hybrid playlist.
+        if playbackChanged { player?.libraryDidChange() }
     }
     func track(_ id: String?) -> StoredTrack? { id.flatMap { tracksByID[$0] } }
     func artistName(_ id: String?) -> String { id.flatMap { artistNames[$0] } ?? "Unknown Artist" }
     func albumTitle(_ id: String?) -> String { id.flatMap { albumNames[$0] } ?? "Unknown Album" }
     func tracks(_ ids: [String]) -> [StoredTrack] { ids.compactMap { tracksByID[$0] } }
     func playlistTracks(_ id: String) -> [StoredTrack] {
-        if isMigrationPlaylist(id) { return migrationRows(id).compactMap(\.playableTrack) }
+        if isMigrationPlaylist(id) { return migrationRows(id).compactMap(\.playableTrack) + manualRows(id).filter(\.available).map(\.track) }
         return tracks(playlistTrackIDs[id] ?? [])
     }
     func isMigrationPlaylist(_ id: String) -> Bool { snapshot.migrationPresentations[id] != nil }
     func playlistEntryCount(_ id: String) -> Int {
         if let presentation = snapshot.migrationPresentations[id] {
-            return presentation.rows.count
+            return presentation.rows.count + manualRows(id).count
         }
         return playlistTracks(id).count
     }
     func migrationRows(_ id: String) -> [MigrationPlaylistRow] {
         snapshot.migrationPresentations[id]?.rows ?? []
     }
+    func manualRows(_ id: String) -> [LocalPlaylistRow] { snapshot.localPlaylistRows[id] ?? [] }
+    func removeManualOccurrence(_ id: String, playlistID: String) throws {
+        try requiredRepository().removeManualOccurrence(id, playlistID: playlistID)
+    }
     func playMigration(playlistID: String, occurrenceID: String? = nil, shuffle: Bool = false) async {
         guard let storage, let player else { return }
         do {
             // Re-read immediately before playback, rather than trusting a rendered row.
-            let occurrences = try storage.playlistMigrations.rows(playlistID: playlistID).playbackOccurrences
+            let occurrences = try storage.playlistMigrations.hybridPlaybackOccurrences(playlistID: playlistID)
             let selection: MigrationPlaybackOccurrence?
             if let occurrenceID { selection = occurrences.first { $0.id == occurrenceID } }
             else { selection = shuffle ? occurrences.randomElement() : occurrences.first }

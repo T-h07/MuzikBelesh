@@ -285,6 +285,13 @@ final class AudioPlayerService: ObservableObject {
 
     func refreshContext() {
         let currentID = state.currentTrackID
+        if activeContextKind == "migrationPlaylist", let id = activeContextSourceID, let storage {
+            do {
+                let occurrences = try storage.playlistMigrations.hybridPlaybackOccurrences(playlistID: id)
+                queue.refreshMigrationOccurrences(occurrences)
+                activeContextTrackIDs = occurrences.map(\.trackID)
+            } catch { state.lastError = "Playlist occurrences could not be refreshed."; return }
+        }
         let tracks: [StoredTrack]
         do { tracks = try storage?.tracks.all() ?? [] }
         catch { state.lastError = "The playback library could not be read."; return }

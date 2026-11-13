@@ -44,6 +44,10 @@ import SwiftUI
         }
         if (try? storage.playback.state()) == nil { repeatMode = .all }
         if var migration = migrationContext {
+            if let saved = savedResult ?? nil, saved.contextKind == "migrationPlaylist", let id = saved.contextSourceID {
+                do { migration.occurrences = try storage.playlistMigrations.hybridPlaybackOccurrences(playlistID: id) }
+                catch { lastError = "Playlist occurrences could not be restored."; migration.occurrences = [] }
+            }
             migration.occurrences.removeAll { !isAvailable($0.trackID) }
             migrationContext = migration
         }
@@ -60,6 +64,13 @@ import SwiftUI
     }
     func clearMigrationContext() {
         migrationContext = nil; pendingOccurrenceID = nil
+    }
+    func refreshMigrationOccurrences(_ occurrences: [MigrationPlaybackOccurrence]) {
+        guard migrationContext != nil, migrationContext?.occurrences != occurrences else { return }
+        migrationContext?.occurrences = occurrences
+        navigator.setContext(occurrences.map(\.id), currentID: navigator.currentID)
+        pendingNavigator?.setContext(occurrences.map(\.id), currentID: pendingNavigator?.currentID)
+        syncFromNavigator()
     }
     func selectionRollback() -> () -> Void {
         let previousNavigator = navigator.copy(), previousMigration = migrationContext

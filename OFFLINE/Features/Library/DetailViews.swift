@@ -22,6 +22,7 @@ struct PlaylistDetailView: View {
                         if let description = playlist.description, !description.isEmpty { Text(description).foregroundStyle(AppColors.textSecondary) }
                         if migrationManaged {
                             MigrationPlaylistPlaybackHeader(playlistID: playlistID)
+                            Button { showingTracks = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
                         } else {
                             Text("\(songs.count) songs • \(formatDuration(songs))").font(.caption).foregroundStyle(AppColors.textSecondary)
                             CollectionPlaybackButtons(tracks: songs, kind: "playlist", sourceID: playlist.id)
@@ -35,6 +36,22 @@ struct PlaylistDetailView: View {
                         ForEach(library.migrationRows(playlistID)) { row in
                             MigrationPlaylistOccurrenceRow(row: row, playlistID: playlistID)
                                 .listRowBackground(AppColors.backgroundPrimary)
+                        }
+                        ForEach(library.manualRows(playlistID)) { row in
+                            HStack {
+                                StoredArtworkView(track: row.track, size: 44)
+                                VStack(alignment: .leading) {
+                                    Text(row.track.title)
+                                    Text("Manually added • " + library.artistName(row.track.artistID)).font(.caption)
+                                }
+                                Spacer()
+                                Button { Task { await library.playMigration(playlistID: playlistID, occurrenceID: row.occurrence.playbackID) } } label: {
+                                    Image(systemName: "play.circle.fill").frame(width: 44, height: 44)
+                                }.buttonStyle(.borderless).disabled(!row.available).accessibilityLabel("Play " + row.track.title)
+                            }.listRowBackground(AppColors.backgroundPrimary)
+                                .swipeActions { Button("Remove Added Song", role: .destructive) {
+                                    library.perform { try library.removeManualOccurrence(row.id, playlistID: playlistID) }
+                                } }
                         }
                     } else {
                     if songs.isEmpty { Text("This playlist is empty. Add songs from your Library.").foregroundStyle(AppColors.textSecondary) }
@@ -143,7 +160,7 @@ struct AddTracksToPlaylistView: View {
     @State private var selected: Set<String> = []
     @State private var error: String?
     private var existing: Set<String> {
-        if let playlistID { return Set(library.playlistTracks(playlistID).map(\.id)) }
+        if let playlistID { return library.isMigrationPlaylist(playlistID) ? [] : Set(library.playlistTracks(playlistID).map(\.id)) }
         if let albumID { return Set(library.albumGroups.first { $0.id == albumID }?.trackIDs ?? []) }
         return []
     }
@@ -151,6 +168,9 @@ struct AddTracksToPlaylistView: View {
         NavigationStack {
             List {
                 TextField("Search title, artist or album", text: $query).accessibilityIdentifier("playlist-track-search")
+                if let playlistID, library.isMigrationPlaylist(playlistID) {
+                    Text("Add independent local occurrences after the imported entries. Adding a song again creates another occurrence; it does not resolve a Spotify placeholder.").font(.caption)
+                }
                 if albumID != nil || onSelection != nil { Text("Songs can have one primary album. Adding a song moves it from its previous album; playlists and audio files stay intact.").font(.caption).foregroundStyle(AppColors.textSecondary) }
                 if let error { Text(error).foregroundStyle(AppColors.error) }
                 ForEach(query.isEmpty ? library.snapshot.tracks : results) { track in
@@ -197,7 +217,7 @@ struct AddToPlaylistView: View {
             List {
                 Button("Create Playlist") { creating = true }
                 if let error { Text(error).foregroundStyle(AppColors.error) }
-                ForEach(library.snapshot.playlists.filter { !library.isMigrationPlaylist($0.id) }) { playlist in
+                ForEach(library.snapshot.playlists) { playlist in
                     Button { add(playlist.id) } label: { PlaylistLibraryRow(playlist: playlist) }
                 }
                 if library.snapshot.playlists.isEmpty { Text("Create a playlist to add these songs.").foregroundStyle(AppColors.textSecondary) }

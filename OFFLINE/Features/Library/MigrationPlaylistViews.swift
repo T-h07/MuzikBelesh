@@ -6,9 +6,10 @@ struct MigrationPlaylistPlaybackHeader: View {
     let playlistID: String
     var body: some View {
         let rows = library.migrationRows(playlistID)
-        let ready = library.snapshot.migrationPresentations[playlistID]?.progress.ready ?? 0
+        let manual = library.manualRows(playlistID)
+        let ready = (library.snapshot.migrationPresentations[playlistID]?.progress.ready ?? 0) + manual.filter(\.available).count
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("\(rows.count) songs • \(ready) available offline")
+            Text("\(rows.count) imported • \(manual.count) manually added • \(rows.count + manual.count) total • \(ready) available offline")
                 .font(.caption).foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("migration-playlist-count")
             HStack {
                 Button { Task { await library.playMigration(playlistID: playlistID) } } label: {
@@ -165,6 +166,7 @@ struct MigrationOccurrenceDetailView: View {
     @EnvironmentObject private var library: MusicLibraryService
     let playlistID: String
     let occurrenceID: UUID
+    @State private var resolving: PlaylistMigrationEntry?
     var body: some View {
         List {
             if let value = library.snapshot.migrationPresentations[playlistID], let row = value.rowsByID[occurrenceID] {
@@ -173,6 +175,10 @@ struct MigrationOccurrenceDetailView: View {
                     Text(row.effectiveStatus.displayName).accessibilityIdentifier("migration-inspector-status")
                     Text(row.playableTrack == nil ? "No verified local audio available" : "Verified local audio associated and available")
                     if let id = row.entry.localTrackID { Text("Associated recording: \(id)").font(.caption) }
+                    if row.entry.localTrackID == nil && [.pending, .matching, .needsReview, .unavailable, .failed].contains(row.entry.status) {
+                        Button("Resolve Existing Placeholder") { resolving = row.entry }.frame(minHeight: 44)
+                        Text("Choose and confirm an existing local recording for this Spotify occurrence. To append a separate occurrence, use Add Songs in the playlist.").font(.caption)
+                    }
                 }
                 if let repository = library.storage?.playlistMigrations {
                     MigrationCandidateInspection(entry: row.entry, repository: repository)
@@ -185,6 +191,7 @@ struct MigrationOccurrenceDetailView: View {
             } else { Text("This migration entry is no longer available.") }
         }.scrollContentBackground(.hidden).screenBackground()
             .navigationTitle("Source Entry").navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $resolving) { ResolveMigrationPlaceholderView(entry: $0) }
     }
 }
 

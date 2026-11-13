@@ -26,6 +26,7 @@ final class LibraryRepository {
         result.albums = try StoredAlbum.fetchAll(db)
         result.playlists = try StoredPlaylist.order(Column("dateAdded"), Column("id")).fetchAll(db)
         result.memberships = try PlaylistMembership.order(Column("playlistID"), Column("position")).fetchAll(db)
+        result.localOccurrences = try LocalPlaylistOccurrence.order(Column("playlistID"), Column("position")).fetchAll(db)
         result.migrationSessions = try GRDBPlaylistMigrationRepository.sessions(db)
         result.migrationEntries = try GRDBPlaylistMigrationRepository.entries(db)
         result.migrationIssues = try GRDBPlaylistMigrationRepository.issues(db)
@@ -39,7 +40,12 @@ final class LibraryRepository {
         var value = try snapshot(db)
         let tracks = value.trackByID
         let associated = Set(value.migrationEntries.compactMap(\.localTrackID))
+            .union(value.localOccurrences.map(\.trackID))
         let available = tracks.filter { associated.contains($0.key) && MigrationLocalAudio.isAvailable($0.value, paths: paths) }
+        value.localPlaylistRows = Dictionary(grouping: value.localOccurrences.compactMap { occurrence -> LocalPlaylistRow? in
+            guard let track = tracks[occurrence.trackID] else { return nil }
+            return LocalPlaylistRow(occurrence: occurrence, track: track, available: available[track.id] != nil)
+        }, by: { $0.occurrence.playlistID })
         let entries = Dictionary(grouping: value.migrationEntries, by: \.migrationID)
         let issues = Dictionary(grouping: value.migrationIssues, by: \.migrationID)
         for session in value.migrationSessions {
@@ -98,6 +104,10 @@ final class LibraryRepository {
     }
     func addTracks(_ ids: [String], playlistID: String) throws {
         try db.write { db in
+            if try MigrationSessionRecord.filter(Column("destinationPlaylistID") == playlistID).fetchOne(db) != nil {
+                try Self.appendManualOccurrences(ids, playlistID: playlistID, db: db)
+                return
+            }
             var order = try String.fetchAll(db, sql: "SELECT trackID FROM playlist_tracks WHERE playlistID = ? ORDER BY position", arguments: [playlistID])
             for id in ids where !order.contains(id) { order.append(id) }
             try Self.replaceMembership(order, playlistID: playlistID, db: db)
