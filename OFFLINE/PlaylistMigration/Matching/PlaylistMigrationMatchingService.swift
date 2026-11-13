@@ -8,6 +8,7 @@ struct SongMatchingProgress: Sendable {
     var recommended = 0
     var review = 0
     var noMatch = 0
+    var failed = 0
     var message: String? = nil
 }
 
@@ -54,7 +55,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
         let session = try await repository.beginMatching(migrationID: migrationID)
         do {
             let entries = try await repository.entries(migrationID: migrationID)
-            let index = try await repository.matchingLibrary()
+            var index = try await repository.matchingLibrary()
             var report = SongMatchingProgress(total: entries.count)
             var disabledProviders = Set<Int>()
             await progress(report)
@@ -63,8 +64,14 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                 guard let lease = try await repository.claimMatchingEntry(entry, session: session) else {
                     report.processed += 1
                     if entry.status == .ready { report.alreadyLocal += 1 }
+                    else if entry.status == .needsReview {
+                        let prior = try await repository.candidates(entryID: entry.id)
+                        if prior.contains(where: { $0.evidence["currentAttempt"] == "true" && $0.evidence["outcome"] == "recommended" && $0.decision == .pending }) { report.recommended += 1 }
+                        else { report.review += 1 }
+                    }
                     await progress(report); continue
                 }
+                do {
                 if lease.previousCandidates.count >= 60 {
                     let decision = SongMatchDecision(outcome: .review, ranked: [], explanation: "Saved candidate history limit reached. Review existing alternatives before further discovery.", margin: 0)
                     try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
@@ -96,11 +103,15 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                             if !found.failures.isEmpty {
                                 issue = "External discovery interrupted. Completed local matches are preserved. Retry later."
                                 report.message = found.failures.first
-                                disabledProviders.insert(number)
+                                if let failure = found.failure {
+                                    MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: "youtube")
+                                    if [.rateLimited, .networkUnavailable, .requestTimeout].contains(failure) { disabledProviders.insert(number) }
+                                }
                             }
                         } catch {
                             if Task.isCancelled || error is CancellationError { throw CancellationError() }
-                            disabledProviders.insert(number)
+                            MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: "provider-" + String(number))
+                            if let failure = error as? YouTubeError, [.rateLimited, .networkUnavailable, .requestTimeout].contains(failure) { disabledProviders.insert(number) }
                             issue = "External discovery failed. Retry later; existing local audio is preserved."
                             report.message = issue
                         }
@@ -128,6 +139,15 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                 case .review: report.review += 1
                 case .noMatch: report.noMatch += 1
                 }
+                } catch {
+                    if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                    let category = MatchingFailureCategory.classify(error)
+                    MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "occurrence")
+                    guard category != .storageFatal else { throw error }
+                    try await repository.recordMatchingFailure(lease, category: category)
+                    report.failed += 1; report.message = category.message
+                    if category == .changedRecords { index = try await repository.matchingLibrary() }
+                }
                 report.processed += 1
                 await progress(report)
             }
@@ -137,7 +157,9 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             // A separate non-cancelled cleanup task closes only this lease. If a
             // newer run/user action owns the session, its revision wins.
             let repository = repository
-            _ = await Task.detached { try? await repository.finishMatching(session, paused: true) }.value
+            MatchingDiagnostics.record(error, session: migrationID, entry: nil, stage: "job")
+            do { try await Task.detached { try await repository.finishMatching(session, paused: true) }.value }
+            catch { MatchingDiagnostics.record(error, session: migrationID, entry: nil, stage: "cleanup") }
             throw error
         }
     }

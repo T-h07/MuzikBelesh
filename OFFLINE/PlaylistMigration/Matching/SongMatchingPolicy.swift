@@ -103,6 +103,9 @@ struct SongRecording: Sendable, Equatable {
     var performerEstablished = true
     var available = true
     var local = false
+    var fullTitle: String? = nil
+    var channel: String? = nil
+    var thumbnailURL: URL? = nil
 }
 
 struct SongMatchScore: Sendable {

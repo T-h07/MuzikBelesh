@@ -44,6 +44,7 @@ struct MatchingDiscoveryResult: Sendable {
     var recordings: [SongRecording] = []
     var failures: [String] = []
     var truncated = false
+    var failure: YouTubeError? = nil
 }
 protocol ExternalCandidateDiscovery: Sendable {
     /// Providers must honor cancellation and return bounded metadata only.
@@ -83,7 +84,9 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     let duration = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil }
                     let recording = SongRecording(provider: "youtube", identity: video.id, title: title, artist: artist,
                                                   durationMs: duration, performerEstablished: hasCredit,
-                                                  available: video.availability == .available)
+                                                  available: video.availability == .available,
+                                                  fullTitle: video.title, channel: video.channel,
+                                                  thumbnailURL: MatchingCandidateArtwork.safe(video.thumbnailURL))
                     // Obviously unrelated titles have no review value.
                     let sourceWords = Set(SongMetadataNormalizer.cleanTitle(source.title).split(separator: " "))
                     let candidateWords = Set(SongMetadataNormalizer.cleanTitle(title).split(separator: " "))
@@ -96,6 +99,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                 // Typed messages only: no raw transport errors, URLs or credentials.
                 let failure = YouTubeError.map(error, fallback: .searchUnavailable)
                 result.failures.append(failure.localizedDescription)
+                result.failure = failure
                 break // No immediate retry after timeout/rate limiting/offline failure.
             }
             if result.recordings.count >= 20 { break }
@@ -129,7 +133,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     result.recordings[index].available = false
                     let error = YouTubeError.map(error, fallback: .metadataUnavailable)
                     if [.networkUnavailable, .requestTimeout, .rateLimited].contains(error) {
-                        result.failures.append(error.localizedDescription); break
+                        result.failures.append(error.localizedDescription); result.failure = error; break
                     }
                 }
             }

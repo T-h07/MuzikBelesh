@@ -227,6 +227,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
         try await db.write { db in
             guard var value = try MigrationCandidateRecord.fetchOne(db, key: id.uuidString) else { throw PlaylistMigrationStorageError.notFound }
             value.decision = decision; value.updatedAt = Date(); try value.update(db)
+            try MatchingCheckpoint.deleteOne(db, key: value.entryID)
         }
     }
     func issues(migrationID: UUID) async throws -> [PlaylistMigrationIssue] {
@@ -278,6 +279,35 @@ struct MatchingEntryLease: Sendable {
 }
 
 extension GRDBPlaylistMigrationRepository {
+    /// Explicit resolution is different from adding an independent playlist item.
+    /// The user has inspected both sets of metadata and acknowledged uncertainty.
+    func confirmLocalRecording(for expected: PlaylistMigrationEntry, trackID: String) async throws {
+        let track = try await verifiedMatchingAudio(trackID: trackID)
+        try await db.write { [self] db in
+            var entry = try Self.requiredEntry(expected.id, db: db)
+            guard try entry.model() == expected, entry.localTrackID == nil,
+                  [.pending, .matching, .needsReview, .failed, .unavailable].contains(entry.status) else { throw SongMatchingError.staleAttempt }
+            try validateMatchingAudio(track, db: db)
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            guard !previous.contains(where: { $0.decision == .accepted }),
+                  !previous.contains(where: { $0.provider == "local" && $0.providerTrackID == trackID && $0.decision == .rejected }) else { throw PlaylistMigrationStorageError.invalidCandidate }
+            if entry.status != .matching {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .ready)
+            let artist = try track.artistID.flatMap { try StoredArtist.fetchOne(db, key: $0)?.name }
+            guard [track.title, artist ?? ""].allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else { throw PlaylistMigrationStorageError.unsafeDiagnostics }
+            let old = previous.first { $0.provider == "local" && $0.providerTrackID == trackID }
+            let candidate = PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: expected.id, provider: "local", providerTrackID: trackID,
+                title: track.title, artist: artist, durationMs: track.durationMs, confidence: nil,
+                evidence: ["matchingAlgorithmVersion": "manual-10.4", "sourceOccurrenceID": entry.id, "acceptance": "Explicit user confirmation after metadata inspection",
+                    "selectionExplanation": "The user confirmed this recording. Managed audio decoding and SHA-256 verification passed.",
+                    "confidenceClassification": "User confirmed; no automatic identity claim", "currentAttempt": "true", "rank": "1"], decision: .accepted)
+            try MigrationCandidateRecord(candidate, createdAt: Date()).save(db)
+            entry.status = .ready; entry.localTrackID = trackID; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false, outcome: "local", updatedAt: Date()).save(db)
+        }
+    }
     private static func nextMatchingRevision(_ old: Date) -> Date { max(Date(), old.addingTimeInterval(0.01)) }
     private static func matchingCandidates(_ id: UUID, db: Database) throws -> [PlaylistMigrationCandidate] {
         try MigrationCandidateRecord.filter(Column("entryID") == id.uuidString).order(Column("id")).fetchAll(db).map { try $0.model() }
@@ -317,6 +347,9 @@ extension GRDBPlaylistMigrationRepository {
                   current.localTrackID == nil, [.pending, .matching, .needsReview, .unavailable, .failed].contains(current.status) else { return nil }
             let candidates = try Self.matchingCandidates(entry.id, db: db)
             guard !candidates.contains(where: { $0.decision == .accepted }) else { return nil }
+            if let checkpoint = try MatchingCheckpoint.fetchOne(db, key: entry.id.uuidString),
+               checkpoint.algorithm == CandidateScoringEngine.algorithmVersion, !checkpoint.retryable,
+               current.status == .needsReview { return nil }
             try PlaylistMigrationValidation.requireEntryTransition(current.status, to: .matching)
             current.status = .matching; current.updatedAt = Self.nextMatchingRevision(current.updatedAt); try current.update(db)
             return try MatchingEntryLease(session: session, entry: Self.requiredEntry(entry.id, db: db).model(), previousCandidates: candidates)
@@ -367,6 +400,7 @@ extension GRDBPlaylistMigrationRepository {
                 // Explicit decisions are immutable to discovery, including rejected rows.
                 if let old, old.decision != .pending { continue }
                 var evidence = score.evidence
+                evidence.removeValue(forKey: "thumbnailURL")
                 evidence["selectionExplanation"] = decision.explanation
                 evidence["topCandidateMargin"] = String(decision.margin)
                 evidence["evaluatedAt"] = ISO8601DateFormatter().string(from: Date())
@@ -375,12 +409,20 @@ extension GRDBPlaylistMigrationRepository {
                 evidence["rank"] = String(index + 1)
                 evidence["currentAttempt"] = "true"
                 evidence["acceptance"] = index == 0 && verifiedTrack != nil ? "Automatic verified local association" : "Pending review"
+                if let channel = item.channel { evidence["channel"] = channel }
+                if let thumbnail = MatchingCandidateArtwork.safe(item.thumbnailURL) { evidence["thumbnailURL"] = thumbnail.absoluteString }
                 let candidate = PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: lease.entry.id, provider: item.provider,
-                    providerTrackID: item.identity, title: item.title, artist: item.artist, durationMs: item.durationMs,
+                    providerTrackID: item.identity, title: item.fullTitle ?? item.title, artist: item.artist, durationMs: item.durationMs,
                     confidence: score.score / 100, evidence: evidence, decision: index == 0 && verifiedTrack != nil ? .accepted : .pending)
                 guard candidate.confidence.map({ $0.isFinite && (0...1).contains($0) }) == true,
                       !candidate.title.isEmpty, candidate.durationMs.map({ $0 >= 0 }) ?? true else { throw PlaylistMigrationStorageError.invalidCandidate }
-                try MigrationPersistentText.validate([candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist] + evidence.flatMap { [$0.key, $0.value] })
+                // Display metadata is not diagnostic text. A song named "Secret"
+                // must not be rejected as a credential; credential syntax still is.
+                let metadata = [candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist].compactMap { $0 }
+                    + evidence.filter { $0.key != "thumbnailURL" }.flatMap { [$0.key, $0.value] }
+                guard metadata.allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else {
+                    throw PlaylistMigrationStorageError.unsafeDiagnostics
+                }
                 let created = try MigrationCandidateRecord.fetchOne(db, key: candidate.id.uuidString)?.createdAt ?? Date()
                 try MigrationCandidateRecord(candidate, createdAt: created).save(db)
             }
@@ -388,6 +430,8 @@ extension GRDBPlaylistMigrationRepository {
             try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: next)
             entry.status = next; entry.localTrackID = verifiedTrack?.id; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt)
             try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion,
+                retryable: issue != nil || decision.outcome == .noMatch, outcome: decision.outcome.rawValue, updatedAt: Date()).save(db)
             // One reusable attempt issue per occurrence; historical candidates remain intact.
             let oldIssue = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt").fetchOne(db)
             let message = issue ?? (decision.outcome == .noMatch ? decision.explanation : nil)
@@ -399,6 +443,25 @@ extension GRDBPlaylistMigrationRepository {
             } else if var oldIssue {
                 oldIssue.resolution = .resolved; oldIssue.resolvedAt = Date(); oldIssue.updatedAt = Date(); try oldIssue.update(db)
             }
+        }
+    }
+    /// An occurrence failure is recoverable only while this session still owns
+    /// the job. Never overwrite a concurrent user decision or a newer worker.
+    func recordMatchingFailure(_ lease: MatchingEntryLease, category: MatchingFailureCategory) async throws {
+        try await db.write { db in
+            _ = try Self.requireMatchingSession(lease.session, db: db)
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: lease.entry.id.uuidString) else { return }
+            let unchanged = try entry.model() == lease.entry && Self.matchingCandidates(lease.entry.id, db: db) == lease.previousCandidates
+            if unchanged && entry.status == .matching && entry.localTrackID == nil {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .failed)
+                entry.status = .failed; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+                try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: true,
+                    outcome: category.rawValue, updatedAt: Date()).save(db)
+            }
+            let old = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt").fetchOne(db)
+            try MigrationIssueRecord(PlaylistMigrationIssue(id: old.flatMap { UUID(uuidString: $0.id) } ?? UUID(), migrationID: lease.session.id,
+                entryID: lease.entry.id, code: "matching-attempt", message: category.message, technicalDetails: "Category: " + category.rawValue,
+                severity: .warning, resolution: .open, createdAt: old?.createdAt ?? Date(), resolvedAt: nil)).save(db)
         }
     }
     func finishMatching(_ lease: MatchingSessionLease, paused: Bool) async throws {
@@ -433,8 +496,11 @@ extension GRDBPlaylistMigrationRepository {
                 } else if entry.status == .needsReview {
                     if recommendedIDs.contains(entry.id) { result.recommended += 1 } else { result.review += 1 }
                 } else if entry.status == .unavailable { result.noMatch += 1 }
+                else if entry.status == .failed { result.failed += 1 }
                 if ![.pending, .matching].contains(entry.status) { result.processed += 1 }
             }
+            result.message = try MigrationIssueRecord.filter(Column("migrationID") == migrationID.uuidString && Column("code") == "matching-attempt" && Column("resolution") == "open")
+                .order(Column("updatedAt").desc).fetchOne(db)?.message
             return result
         }
     }
