@@ -67,6 +67,7 @@ jobs:
             -only-testing:OFFLINETests/MatchingDiscoveryTests \
             -only-testing:OFFLINETests/PlaylistMatchingIntegrationTests \
             -only-testing:OFFLINETests/MatchingCorrectionTests \
+            -only-testing:OFFLINETests/MatchingReliabilityTests \
             -only-testing:OFFLINETests/MatchingLifecycleTests \
             -only-testing:OFFLINETests/MatchingArtworkTests \
             -only-testing:OFFLINETests/HybridPlaylistTests \

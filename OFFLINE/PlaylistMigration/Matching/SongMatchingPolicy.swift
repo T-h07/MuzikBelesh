@@ -40,16 +40,23 @@ enum SongMetadataNormalizer {
         return folded.replacingOccurrences(of: "[^\\p{L}\\p{N}]+", with: " ", options: .regularExpression)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
+    static func withoutTrackNumber(_ value: String) -> String {
+        value.replacingOccurrences(of: "^\\s*\\d{1,3}[.)-]\\s+", with: "", options: .regularExpression)
+    }
     static func cleanTitle(_ value: String) -> String {
         // Remove presentation labels only. Version words and unknown qualifiers survive.
-        let clean = value.replacingOccurrences(of: "(?i)\\b(official (audio|music video|video|lyric video)|lyrics video|lyric video)\\b", with: "", options: .regularExpression)
+        let clean = withoutTrackNumber(value).replacingOccurrences(of: "(?i)\\b(official (audio|music video|video|lyric video)|lyrics video|lyric video)\\b", with: "", options: .regularExpression)
         return words(splitFeature(clean).0)
     }
     static func splitFeature(_ value: String) -> (String, [String]) {
-        guard let range = value.range(of: "(?i)\\b(feat\\.?|ft\\.?|featuring)\\s+", options: .regularExpression) else { return (value, []) }
-        let guests = String(value[range.upperBound...]).replacingOccurrences(of: "[()\\[\\]]", with: "", options: .regularExpression)
-        return (String(value[..<range.lowerBound]), artists(guests))
+        let pattern = "(?i)[(\\[]\\s*(?:feat\\.?|ft\\.?|featuring)\\s+([^)\\]]+)[)\\]]|\\b(?:feat\\.?|ft\\.?|featuring)\\s+([^(\\[]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+              let range = Range(match.range, in: value),
+              let guestRange = Range(match.range(at: match.range(at: 1).location == NSNotFound ? 2 : 1), in: value) else { return (value, []) }
+        return (value.replacingCharacters(in: range, with: " "), artists(String(value[guestRange])))
     }
+
     static func artists(_ value: String) -> [String] {
         value.replacingOccurrences(of: "(?i)\\s+(and|x)\\s+|[,&;/]", with: "|", options: .regularExpression)
             .components(separatedBy: "|").map(words).filter { !$0.isEmpty }
@@ -217,6 +224,11 @@ struct CandidateScoringEngine: Sendable {
 struct MatchDecisionPolicy: Sendable {
     let configuration: SongMatchingConfiguration
     init(configuration: SongMatchingConfiguration = .standard) { self.configuration = configuration }
+    static func plausible(sourceTitle: String, candidate: SongRecording) -> Bool {
+        let source = Set(sourceTitle.split(separator: " "))
+        let title = Set(SongMetadataNormalizer.cleanTitle(candidate.title).split(separator: " "))
+        return !source.isEmpty && Double(source.intersection(title).count) / Double(source.count) >= 0.5
+    }
     func decide(_ scores: [SongMatchScore], truncated: Bool = false) -> SongMatchDecision {
         let ranked = scores.sorted { $0.score == $1.score ? ($0.recording.provider + $0.recording.identity) < ($1.recording.provider + $1.recording.identity) : $0.score > $1.score }
         guard let top = ranked.first else { return .init(outcome: .noMatch, ranked: [], explanation: "No suitable recording found. Retry is available.", margin: 0) }
@@ -224,7 +236,11 @@ struct MatchDecisionPolicy: Sendable {
         let outcome: SongMatchOutcome
         let reason: String
         if truncated { outcome = .review; reason = "Candidate limit reached; uniqueness cannot be established." }
-        else if top.score < configuration.review { outcome = .noMatch; reason = "Candidates have insufficient supporting evidence." }
+        else if top.score < configuration.review {
+            let plausible = ranked.contains { Self.plausible(sourceTitle: $0.evidence["sourceTitleNormalized"] ?? "", candidate: $0.recording) }
+            outcome = plausible ? .review : .noMatch
+            reason = plausible ? "Related candidates have limited evidence. Manual review required." : "Candidates have insufficient supporting evidence."
+        }
         else if !top.gates.isEmpty { outcome = .review; reason = top.gates.joined(separator: "; ") }
         else if ranked.count > 1 && (margin <= 0 || margin < configuration.margin) { outcome = .review; reason = "Multiple near-equal candidates require review." }
         else if top.score < configuration.high { outcome = .review; reason = "Confidence is below the automatic threshold." }

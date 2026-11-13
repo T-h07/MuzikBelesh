@@ -51,11 +51,15 @@ import SwiftUI
                 if stopReason != nil { throw CancellationError() }
                 try await service.run(migrationID: id) { [weak self] value in await self?.update(value) }
                 try Task.checkCancellation()
+                // A provider-paused attempt requires explicit retry, not a relaunch
+                // loop against rate limits. Its unfinished occurrence checkpoints remain.
                 try await repository.setMatchingIntent(id, intent: "completed")
                 let warning = progress.message
                 progress = try await repository.matchingSummary(migrationID: id)
                 if progress.message == nil { progress.message = warning }
-                message = "Matching finished. Proposals remain pending review; failed entries can be retried."
+                message = progress.discoveryPaused
+                    ? "Discovery paused. Saved results are preserved. Retry when YouTube search is available."
+                    : "Matching finished. Processed entries are not necessarily matches; proposals require review."
                 success = true
             } catch {
                 let reason = stopReason ?? MatchingFailureCategory.classify(error)
@@ -128,8 +132,10 @@ struct PlaylistMatchingControls: View {
                 .accessibilityIdentifier("migration-find-matches")
             Text("Source entries: \(progress.total) • Already local: \(progress.alreadyLocal)")
             Text("Verified local matches: \(progress.localMatches)")
+            Text("Processed entries: \(progress.processed) • Saved candidates: \(progress.candidates)")
             Text("Recommended external: \(progress.recommended) • Review: \(progress.review)")
-            Text("No suitable match: \(progress.noMatch) • Failed: \(progress.failed)")
+            Text("Genuine no match: \(progress.noMatch) • Entry errors: \(progress.failed)")
+            Text("Discovery failed: \(progress.discoveryFailed) • Awaiting discovery: \(progress.deferred)")
             if active {
                 ProgressView(value: Double(progress.processed), total: Double(max(1, progress.total)))
                     .accessibilityLabel("Matching progress").accessibilityValue("\(progress.processed) of \(progress.total)")
@@ -157,10 +163,14 @@ struct MigrationCandidateInspection: View {
     let repository: GRDBPlaylistMigrationRepository
     @State private var candidates: [PlaylistMigrationCandidate] = []
     @State private var error: String?
+    @State private var issueMessage: String?
     var body: some View {
         Section("Recording Candidates") {
             if let error { Text(error) }
-            if candidates.isEmpty { Text("No saved candidates. Run Find Matching Recordings from the playlist.") }
+            if let issueMessage { Text(issueMessage).foregroundStyle(AppColors.error) }
+            if candidates.isEmpty {
+                Text(entry.status == .failed ? "Discovery did not produce a saved candidate. Retry Find Matching Recordings from the playlist." : "No saved candidates. Run Find Matching Recordings from the playlist.")
+            }
             ForEach(candidates) { candidate in
                 VStack(alignment: .leading, spacing: 6) {
                     if candidate.provider == "youtube" {
@@ -170,7 +180,9 @@ struct MigrationCandidateInspection: View {
                     Text(candidate.title).font(.headline)
                     Text(candidate.artist ?? "Performer unproven")
                     if let channel = candidate.evidence["channel"] { Text("YouTube channel: \(channel) (uploader)") }
+                    else if candidate.provider == "youtube" { Text("YouTube channel: Unknown uploader") }
                     if let duration = candidate.durationMs { Text("Duration: \(duration / 60000):\(String(format: "%02d", duration / 1000 % 60))") }
+                    else { Text("Duration: Unknown") }
                     if let url = MatchingCandidateArtwork.watchURL(candidate) { Link("Open on YouTube", destination: url).frame(minHeight: 44) }
                     Text("\(candidate.provider) • \(candidate.decision.rawValue.capitalized)")
                     if let confidence = candidate.confidence {
@@ -189,6 +201,8 @@ struct MigrationCandidateInspection: View {
                 candidates = try await repository.candidates(entryID: entry.id).sorted {
                     ($0.confidence ?? 0) == ($1.confidence ?? 0) ? $0.id.uuidString < $1.id.uuidString : ($0.confidence ?? 0) > ($1.confidence ?? 0)
                 }; error = nil
+                issueMessage = try await repository.issues(migrationID: entry.migrationID)
+                    .first { $0.entryID == entry.id && $0.resolution == .open }?.message
             } catch { self.error = "Candidates could not be read. Reopen this entry to retry." }
         }
     }

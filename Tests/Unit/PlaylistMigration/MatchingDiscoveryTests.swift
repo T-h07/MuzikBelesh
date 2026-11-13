@@ -36,7 +36,7 @@ final class MatchingDiscoveryTests: XCTestCase {
         let result = try await YouTubeSearchProviderAdapter(search: provider, metadata: provider).discover(source)
         XCTAssertEqual(result.recordings.count, 1); XCTAssertTrue(result.recordings[0].available)
         let searches = await provider.searches, inspections = await provider.inspections, tokens = await provider.tokens
-        XCTAssertEqual(searches, 2); XCTAssertEqual(inspections, 1); XCTAssertTrue(tokens.allSatisfy { $0 == nil })
+        XCTAssertEqual(searches, 1); XCTAssertEqual(inspections, 1); XCTAssertTrue(tokens.allSatisfy { $0 == nil })
     }
     func testChannelAloneDoesNotEstablishArtistAndSearchIsNotAvailability() async throws {
         let provider = MatchingYouTubeMock([video(title: "Song (Studio)")])
@@ -45,10 +45,11 @@ final class MatchingDiscoveryTests: XCTestCase {
         XCTAssertFalse(result.recordings[0].performerEstablished); XCTAssertFalse(result.recordings[0].available)
     }
     func testPartialProviderFailureKeepsEarlierResults() async throws {
-        let provider = MatchingYouTubeMock([video()], failSecond: true)
+        let provider = MatchingYouTubeMock([video(title: "Song (Studio)")], failSecond: true)
         let result = try await YouTubeSearchProviderAdapter(search: provider).discover(source)
         XCTAssertEqual(result.recordings.count, 1); XCTAssertEqual(result.failures.count, 1)
         XCTAssertFalse(result.recordings[0].available)
+        XCTAssertTrue(result.pauseDiscovery)
     }
     func testResultAndRequestCaps() async throws {
         let videos = (0..<50).map { video(String(format: "%011d", $0)) }

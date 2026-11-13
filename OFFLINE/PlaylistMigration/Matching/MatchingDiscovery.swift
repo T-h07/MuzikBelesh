@@ -45,6 +45,7 @@ struct MatchingDiscoveryResult: Sendable {
     var failures: [String] = []
     var truncated = false
     var failure: YouTubeError? = nil
+    var pauseDiscovery = false
 }
 protocol ExternalCandidateDiscovery: Sendable {
     /// Providers must honor cancellation and return bounded metadata only.
@@ -54,25 +55,40 @@ protocol ExternalCandidateDiscovery: Sendable {
 struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
     let search: any YouTubeSearchProvider
     var metadata: (any YouTubeMetadataProvider)? = nil
-    private static func credits(_ title: String) -> (title: String, artist: String?) {
-        for separator in [" - ", " – ", " — "] {
-            let parts = title.components(separatedBy: separator)
-            if parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty { return (parts[1], parts[0]) }
+    private static func credits(_ value: String) -> (title: String, artist: String?) {
+        let title = SongMetadataNormalizer.withoutTrackNumber(value)
+        if let range = title.range(of: "\\s+[-–—|:]\\s+|[–—]", options: .regularExpression) {
+            let artist = String(title[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let song = String(title[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if !artist.isEmpty, !song.isEmpty { return (song, artist) }
         }
         return (title, nil)
     }
     static func queries(_ source: PlaylistMigrationSourceTrack) -> [String] {
-        let base = YouTubeSearchService.normalize((source.primaryArtist ?? "") + " " + source.title)
+        let base = YouTubeSearchService.normalize((source.primaryArtist ?? "") + " " + SongMetadataNormalizer.withoutTrackNumber(source.title))
         guard !base.isEmpty else { return [] }
         // Source version words stay in the base; never invent a live/remix query.
-        return [String(base.prefix(400)), String((base + " Official Audio").prefix(500))]
+        let normalized = YouTubeSearchService.normalize((source.primaryArtist ?? "") + " " + SongMetadataNormalizer.cleanTitle(source.title)
+            + " " + (source.additionalArtists + SongMetadataNormalizer.splitFeature(source.title).1).joined(separator: " "))
+        return [String(base.prefix(400)), SongMetadataNormalizer.words(normalized) == SongMetadataNormalizer.words(base)
+            ? String((base + " Official Audio").prefix(500)) : String(normalized.prefix(500))]
+    }
+    private func searchWithRetry(_ query: String) async throws -> YouTubeSearchPage {
+        do { return try await search.search(query: query, continuationToken: nil) }
+        catch {
+            // Only transient transport failures get one delayed retry. Never retry
+            // access restrictions, rate limits or an unknown response schema here.
+            guard let failure = error as? YouTubeError, [.networkUnavailable, .requestTimeout].contains(failure) else { throw error }
+            try await Task.sleep(for: .seconds(1))
+            return try await search.search(query: query, continuationToken: nil)
+        }
     }
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult {
         var result = MatchingDiscoveryResult(), seen = Set<String>()
         for query in Self.queries(source) {
             try Task.checkCancellation()
             do {
-                let page = try await search.search(query: query, continuationToken: nil)
+                let page = try await searchWithRetry(query)
                 try Task.checkCancellation()
                 for video in page.videos.prefix(30) {
                     guard YouTubeURLValidator.isValidID(video.id), seen.insert(video.id).inserted,
@@ -100,9 +116,15 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                 let failure = YouTubeError.map(error, fallback: .searchUnavailable)
                 result.failures.append(failure.localizedDescription)
                 result.failure = failure
+                result.pauseDiscovery = true // Search access/schema failure is provider-wide.
                 break // No immediate retry after timeout/rate limiting/offline failure.
             }
             if result.recordings.count >= 20 { break }
+            // Do not repeat a search that already supplied title/artist evidence.
+            if result.recordings.contains(where: {
+                SongMetadataNormalizer.cleanTitle($0.title) == SongMetadataNormalizer.cleanTitle(source.title)
+                    && $0.artist != nil && SongMetadataNormalizer.artist($0.artist).0 == SongMetadataNormalizer.artist(source.primaryArtist).0
+            }) { break }
         }
         // Search availability is normally unknown. Inspect at most three likely
         // results through the existing watch-metadata provider, never the resolver.
@@ -134,6 +156,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     let error = YouTubeError.map(error, fallback: .metadataUnavailable)
                     result.failures.append(error.localizedDescription); result.failure = error
                     if [.networkUnavailable, .requestTimeout, .rateLimited].contains(error) {
+                        result.pauseDiscovery = true
                         break
                     }
                 }

@@ -70,12 +70,15 @@ enum YouTubeWebParser {
         }
         visit(nodes)
         // A known empty-results message is valid. Unknown nonempty layouts are not "no results".
-        if videos.isEmpty, !nodes.isEmpty, !containsMessage(nodes) { throw YouTubeError.searchUnavailable }
+        if videos.isEmpty, !containsMessage(nodes) { throw YouTubeError.searchUnavailable }
         return YouTubeSearchPage(videos: videos, continuationToken: token)
     }
     private static func containsMessage(_ nodes: [[String: Any]]) -> Bool {
         nodes.contains { node in
-            if node["messageRenderer"] != nil { return true }
+            // Restriction/error messages are not evidence of an empty search.
+            if let message = node["messageRenderer"] as? [String: Any],
+               let value = text(message["text"])?.lowercased(),
+               ["no results", "no results found", "no results found."].contains(value) { return true }
             if let section = node["itemSectionRenderer"] as? [String: Any], let contents = section["contents"] as? [[String: Any]] { return containsMessage(contents) }
             return false
         }

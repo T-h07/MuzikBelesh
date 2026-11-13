@@ -33,15 +33,16 @@ struct YouTubeWebProvider: YouTubeSearchProvider, YouTubeMetadataProvider {
                 try YouTubeHTTP.successful(response, fallback: .searchUnavailable)
                 guard let html = String(data: response.data, encoding: .utf8) else { throw YouTubeError.searchUnavailable }
                 object = try YouTubeWebParser.object(in: html, markers: ["var ytInitialData =", "window[\"ytInitialData\"] =", "ytInitialData ="])
-                let config = try YouTubeWebParser.object(in: html, markers: ["ytcfg.set("])
-                guard let liveContext = config["INNERTUBE_CONTEXT"] as? [String: Any], liveContext["client"] is [String: Any] else { throw YouTubeError.searchUnavailable }
-                context = liveContext // observed web client version; never a hardcoded rotating version
+                // Pagination configuration is optional for a valid first page.
+                let config = try? YouTubeWebParser.object(in: html, markers: ["ytcfg.set("])
+                let liveContext = config?["INNERTUBE_CONTEXT"] as? [String: Any]
+                context = liveContext?["client"] is [String: Any] ? (liveContext ?? [:]) : [:]
             }
             try Task.checkCancellation()
             let page = try YouTubeWebParser.search(object)
             let encoder = JSONEncoder()
             encoder.outputFormatting = .sortedKeys
-            let token = try page.continuationToken.map {
+            let token = try (context.isEmpty ? nil : page.continuationToken).map {
                 // Canonical encoding keeps a repeated server token identical after decoding
                 // context dictionaries, so the UI's consumed-token guard remains effective.
                 try encoder.encode(Cursor(query: query, token: $0, context: JSONSerialization.data(withJSONObject: context, options: .sortedKeys))).base64EncodedString()

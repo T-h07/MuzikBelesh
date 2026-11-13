@@ -357,7 +357,8 @@ extension GRDBPlaylistMigrationRepository {
     }
     /// All candidates, their evidence, the decision and the entry state commit together.
     func commitMatching(_ lease: MatchingEntryLease, decision: SongMatchDecision,
-                        local: MatchingLocalRecording? = nil, librarySnapshot: MatchingLibrarySnapshot? = nil, issue: String? = nil) async throws {
+                        local: MatchingLocalRecording? = nil, librarySnapshot: MatchingLibrarySnapshot? = nil, issue: String? = nil,
+                        discoveryFailed: Bool = false) async throws {
         try Task.checkCancellation()
         var verified: StoredTrack?
         if decision.outcome == .local {
@@ -426,12 +427,13 @@ extension GRDBPlaylistMigrationRepository {
                 let created = try MigrationCandidateRecord.fetchOne(db, key: candidate.id.uuidString)?.createdAt ?? Date()
                 try MigrationCandidateRecord(candidate, createdAt: created).save(db)
             }
-            let next: PlaylistMigrationEntryStatus = verifiedTrack != nil ? .ready : decision.outcome == .noMatch ? .unavailable : .needsReview
+            let next: PlaylistMigrationEntryStatus = verifiedTrack != nil ? .ready : decision.outcome == .noMatch ? (discoveryFailed ? .failed : .unavailable) : .needsReview
             try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: next)
             entry.status = next; entry.localTrackID = verifiedTrack?.id; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt)
             try entry.update(db)
             try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion,
-                retryable: issue != nil || decision.outcome == .noMatch, outcome: decision.outcome.rawValue, updatedAt: Date()).save(db)
+                retryable: discoveryFailed || issue != nil || decision.outcome == .noMatch,
+                outcome: discoveryFailed ? "discoveryFailed" : decision.outcome.rawValue, updatedAt: Date()).save(db)
             // One reusable attempt issue per occurrence; historical candidates remain intact.
             let oldIssue = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt").fetchOne(db)
             let message = issue ?? (decision.outcome == .noMatch ? decision.explanation : nil)
@@ -491,15 +493,27 @@ extension GRDBPlaylistMigrationRepository {
             let localIDs = Set(candidates.filter { $0.provider == "local" && $0.decision == .accepted }.map(\.entryID))
             let recommendedIDs = Set(candidates.filter { $0.decision == .pending && $0.evidence["outcome"] == "recommended" }.map(\.entryID))
             var result = SongMatchingProgress(total: entries.count)
+            let discoveryFailures = Set(try String.fetchAll(db, sql: """
+                SELECT e.id FROM migration_entries e
+                LEFT JOIN migration_matching_checkpoints c ON c.entryID = e.id
+                WHERE e.migrationID = ? AND (c.outcome = 'discoveryFailed' OR EXISTS (
+                    SELECT 1 FROM migration_issues i WHERE i.entryID = e.id AND i.code = 'matching-attempt'
+                    AND i.resolution = 'open' AND i.message LIKE 'External discovery%'))
+                """, arguments: [migrationID.uuidString]))
+            result.candidates = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_candidates c JOIN migration_entries e ON e.id = c.entryID WHERE e.migrationID = ?", arguments: [migrationID.uuidString]) ?? 0
             for entry in entries {
+                let discoveryFailed = discoveryFailures.contains(entry.id.uuidString) && entry.localTrackID == nil && entry.status != .skipped
+                if discoveryFailed { result.discoveryFailed += 1 }
                 if entry.status == .ready {
                     if localIDs.contains(entry.id) { result.localMatches += 1 } else { result.alreadyLocal += 1 }
                 } else if entry.status == .needsReview {
                     if recommendedIDs.contains(entry.id) { result.recommended += 1 } else { result.review += 1 }
-                } else if entry.status == .unavailable { result.noMatch += 1 }
-                else if entry.status == .failed { result.failed += 1 }
+                } else if entry.status == .unavailable && !discoveryFailed { result.noMatch += 1 }
+                else if entry.status == .failed && !discoveryFailed { result.failed += 1 }
+                if [.pending, .matching].contains(entry.status) { result.deferred += 1 }
                 if ![.pending, .matching].contains(entry.status) { result.processed += 1 }
             }
+            result.discoveryPaused = try Self.requiredSession(migrationID, db: db).status == .paused && result.discoveryFailed > 0
             result.message = try MigrationIssueRecord.filter(Column("migrationID") == migrationID.uuidString && Column("code") == "matching-attempt" && Column("resolution") == "open")
                 .order(Column("updatedAt").desc).fetchOne(db)?.message
             return result
