@@ -452,6 +452,7 @@ extension GRDBPlaylistMigrationRepository {
             _ = try Self.requireMatchingSession(lease.session, db: db)
             guard var entry = try MigrationEntryRecord.fetchOne(db, key: lease.entry.id.uuidString) else { return }
             let unchanged = try entry.model() == lease.entry && Self.matchingCandidates(lease.entry.id, db: db) == lease.previousCandidates
+            if !unchanged && (entry.localTrackID != nil || entry.status == .skipped) { return }
             if unchanged && entry.status == .matching && entry.localTrackID == nil {
                 try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .failed)
                 entry.status = .failed; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)

@@ -66,6 +66,10 @@ jobs:
             -only-testing:OFFLINETests/SongMatchingPolicyTests \
             -only-testing:OFFLINETests/MatchingDiscoveryTests \
             -only-testing:OFFLINETests/PlaylistMatchingIntegrationTests \
+            -only-testing:OFFLINETests/MatchingCorrectionTests \
+            -only-testing:OFFLINETests/MatchingLifecycleTests \
+            -only-testing:OFFLINETests/MatchingArtworkTests \
+            -only-testing:OFFLINETests/HybridPlaylistTests \
             -only-testing:OFFLINETests/PlaylistMigrationPersistenceTests \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-matching.log
       - name: Migration playlist UI

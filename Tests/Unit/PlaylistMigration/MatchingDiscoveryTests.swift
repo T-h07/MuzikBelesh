@@ -4,10 +4,13 @@ import XCTest
 private actor MatchingYouTubeMock: YouTubeSearchProvider, YouTubeMetadataProvider {
     let videos: [YouTubeVideo]
     let failSecond: Bool
+    let failFirstMetadata: Bool
     var searches = 0
     var inspections = 0
     var tokens: [String?] = []
-    init(_ videos: [YouTubeVideo], failSecond: Bool = false) { self.videos = videos; self.failSecond = failSecond }
+    init(_ videos: [YouTubeVideo], failSecond: Bool = false, failFirstMetadata: Bool = false) {
+        self.videos = videos; self.failSecond = failSecond; self.failFirstMetadata = failFirstMetadata
+    }
     func search(query: String, continuationToken: String?) async throws -> YouTubeSearchPage {
         searches += 1; tokens.append(continuationToken)
         if failSecond && searches == 2 { throw YouTubeError.rateLimited }
@@ -15,6 +18,7 @@ private actor MatchingYouTubeMock: YouTubeSearchProvider, YouTubeMetadataProvide
     }
     func metadata(videoID: String) async throws -> YouTubeVideo {
         inspections += 1
+        if failFirstMetadata && inspections == 1 { throw YouTubeError.metadataUnavailable }
         var value = videos.first { $0.id == videoID }!
         value.availability = .available
         return value
@@ -53,6 +57,15 @@ final class MatchingDiscoveryTests: XCTestCase {
         XCTAssertEqual(result.recordings.count, 20); XCTAssertTrue(result.truncated)
         let searches = await provider.searches, inspections = await provider.inspections
         XCTAssertEqual(searches, 1); XCTAssertEqual(inspections, 3)
+    }
+    func testIndividualMetadataFailureIsReportedAndLaterCandidatesAreInspected() async throws {
+        let provider = MatchingYouTubeMock([video(), video("xxxxxxxxxxx")], failFirstMetadata: true)
+        let result = try await YouTubeSearchProviderAdapter(search: provider, metadata: provider).discover(source)
+        let inspections = await provider.inspections
+        XCTAssertEqual(inspections, 2)
+        XCTAssertEqual(result.failure, .metadataUnavailable)
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertEqual(result.recordings.filter(\.available).count, 1)
     }
     func testQueriesDoNotInventRecordingVersions() {
         let plain = PlaylistMigrationSourceTrack(position: 0, title: "Song", primaryArtist: "Artist")

@@ -33,7 +33,7 @@ final class Phase4LibraryMigrationTests: XCTestCase {
         XCTAssertNotNil(state.sleepTimerDeadlineMs); XCTAssertEqual(state.sleepTimerDurationMs, 300000)
         XCTAssertEqual(try Data(contentsOf: paths.musicURL(relativePath: "legacy.wav")), bytes)
         XCTAssertEqual(try reopened.database.dbQueue.read { try Row.fetchAll($0, sql: "PRAGMA foreign_key_check").count }, 0)
-        XCTAssertEqual(try reopened.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM grdb_migrations") }, 13)
+        XCTAssertEqual(try reopened.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM grdb_migrations") }, 14)
         _ = try StorageCoordinator(paths: paths)
     }
 }

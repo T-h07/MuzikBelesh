@@ -1,7 +1,159 @@
 # Phase 10.4 — Intelligent Song Matching
 
+## Corrective update — 13 November 2026
+
+The initial device build failed acceptance. This section supersedes the initial
+background-cancellation and read-only imported-playlist behavior described below.
+Do not label the corrective feature accepted until its native build and device
+checks pass. CI and IPA execution remain assigned to the user; no workflows were
+dispatched for this corrective update.
+
+### Reproduced failure and isolation
+
+The legacy MigrationPersistentText credential regex rejects ordinary title words
+such as `Secret` or `Password`. `commitMatching` applied that diagnostics validator
+to candidate titles and normalized source evidence. A valid sixth song after five
+successful songs could therefore throw `unsafeDiagnostics`; the catch outside
+the whole playlist then aborted all remaining work. The portable verification
+script executes that actual regex literal and reproduces the predicate failure at
+occurrence 6. MatchingCorrectionTests additionally exercises the real GRDB worker
+path; it is prepared but NOT RUN on this Windows host. No device exception log was
+provided, so this is a demonstrated abort path, not proof of the exact device event.
+
+Matching now validates metadata using credential syntax, bearer values, URLs,
+length and control characters rather than ordinary isolated words. The legacy
+diagnostic validator remains unchanged. Unsafe candidate metadata still fails
+its transaction; it is not persisted. A per-occurrence catch records the category
+and legally marks an unchanged matching entry failed, then continues. Library
+changes invalidate local uniqueness; the worker records reviewable failure and
+rebuilds its index for subsequent songs. Concurrent skips/confirmations win over
+stale worker results. A superseded session, database corruption, constraint
+failure or inability to safely save a failure checkpoint stops the job; cleanup
+errors are logged rather than hidden with `try?`.
+
+OSLog category `PlaylistMatching` records category, session UUID, occurrence UUID,
+stage, provider and a safe underlying error identifier. SQLite logs include result
+and extended result codes, never SQL statements or arguments. Known Swift errors
+use fixed descriptions/case names. Export contents, candidate titles, paths and
+transport URLs are excluded. Per-entry issues and the dashboard show readable
+failure categories. Rate limiting/offline/timeouts disable further requests to
+that provider for the current run, while local work continues. Individual video
+or metadata failures do not disable later entries.
+
+### Durable recovery and background execution
+
+v014 adds `migration_matching_jobs` (session FK, persisted user intent) and
+`migration_matching_checkpoints` (occurrence FK, algorithm, retryable flag, outcome,
+timestamp). Result, entry state and checkpoint commit in one transaction. Clean
+review proposals are skipped on retry; local ready entries and explicit skips
+remain untouched. Rejected candidates remain excluded. No-result, failed and
+provider-interrupted work stays retryable without duplicating candidate rows.
+
+AppContainer owns the view model and worker. A singleton background adapter
+registers `com.th07.muzikbelesh.matching.*` once; iOS 26 requests use a unique suffix,
+`BGContinuedProcessingTaskRequest` with `.fail` admission, and CPU/network work
+only. Its handler starts the sole worker and reports actual processed/total
+progress. Rejected admission falls back to `UIApplication.beginBackgroundTask`;
+older supported iOS versions use that limited execution path directly. There is
+no background GPU entitlement, silent audio or fake activity. Existing audio and
+download background systems remain separate.
+
+Switching applications, locking the screen or scene inactivity does not cancel.
+Expiration cancels in-flight discovery, closes the owned lease where execution
+time remains, and preserves resumable intent. Every completed occurrence is
+already durable if iOS terminates before cleanup finishes. On the next foreground
+or manual launch, a single restoration guard resumes saved running/systemPaused
+intent. Force-quit does not schedule a new background launch. In-app Cancel saves
+userCancelled intent and will not automatically resume. The OS exposes the same
+expiration callback for system interruption and cancellation through its own task
+UI; that distinction cannot be inferred reliably. In-app Cancel is the explicit
+durable cancellation control. System suspension time is never reported as work.
+
+The iOS behavior follows Apple's [continued processing guidance](https://developer.apple.com/documentation/backgroundtasks/performing-long-running-tasks-on-ios-and-ipados/)
+and [identifier requirements](https://developer.apple.com/documentation/backgroundtasks/bgcontinuedprocessingtaskrequest/init(identifier:title:subtitle:)).
+Wildcard registration/admission, lock-screen behavior and SideStore provisioning
+must be verified on the actual device. Fallback is limited runtime, not a promise
+to finish a 1,000-entry job in the background. No deferred BGProcessing relaunch is
+scheduled. The native build workflow is prepared for Xcode 26.2, with iOS 17 still
+the deployment target and API availability guards around iOS 26 functionality.
+
+### Candidate artwork and manual verification
+
+SongRecording retains the original full video title separately from parsed
+comparison metadata, plus actual channel and a validated thumbnail. Candidate
+evidence stores only HTTPS YouTube image hosts with no credentials, query,
+fragment or unexpected port. Inspection can derive the standard trusted thumbnail
+from a validated 11-character video ID for older candidates. Invalid IDs cannot
+produce an artwork request or Open on YouTube link. Rendering reuses YouTubeArtwork
+and YouTubeArtworkLoader: lazy view tasks, cancellation, a 30-image/180-second
+cache, bounded image data/downsampling, and fallback artwork. Matching itself does
+not fetch thumbnails. Failed image requests never change matching state. Channel
+is labelled uploader and never substituted for verified performer identity.
+
+### Hybrid playlist schema, UI and playback
+
+v014 also adds `playlist_local_occurrences`: UUID primary key, playlist FK with
+CASCADE, existing track FK with CASCADE, independent nonnegative position,
+creation time, UNIQUE(playlistID, position), and track index. Track IDs are not
+unique: intentionally adding the same song twice creates separate occurrences.
+Original migration entries, source positions, fingerprints, candidate ownership
+and existing `playlist_tracks` semantics are unchanged. No synthetic Spotify
+metadata is created. New occurrences append after all original source occurrences;
+removal leaves ordering stable without renumbering source positions.
+
+Imported playlists appear in Add to Playlist and expose Add Songs. The picker
+explains duplicate/addition behavior. Manual rows have their own label and Remove
+Added Song action. A 200-source playlist plus one manual occurrence shows 201 total
+while its import dashboard still shows 200 source entries. Deleting a manual
+occurrence never deletes the recording. Deleting a recording cascades only its
+manual memberships; original occurrences retain their source metadata.
+
+Resolve Existing Placeholder is a separate inspection action with confirmation.
+It verifies managed audio decoding and SHA-256, checks the source snapshot for
+concurrent changes, and commits user-confirmed candidate evidence and association
+atomically. It creates no extra playlist occurrence. It does not weaken automatic
+identity thresholds or permit automatic acceptance of an uncertain recording.
+
+Hybrid playback supplies original playable occurrence IDs followed by namespaced
+`local:<UUID>` IDs to the existing navigation/shuffle/repeat/remote-command engine.
+Restoration and library refresh reconcile occurrence IDs, not only track IDs, so
+removing one duplicate cannot leave a phantom occurrence. Unresolved source rows
+are excluded. Candidate/status-only changes no longer trigger playback catalog
+refresh; actual associations, memberships and track metadata still do. Decoder
+validation and ordinary managed-audio availability checks remain in place.
+
+### Corrective verification and delivery status
+
+Executed locally: `python Scripts/verify-matching-corrections.py` — PASS for the
+actual legacy regex failure predicate, revised credential syntax checks, actual
+v013-to-v014 schema SQL, 200 preserved source rows, manual duplicates/removal,
+foreign-key cascades, checkpoints and retained playback position. This is SQLite
+and regex execution, not Swift/GRDB runtime execution. Changed Swift files passed
+tree-sitter parsing; YAML/plist/source inclusion and Git whitespace checks passed.
+
+Prepared XCTest suites: MatchingCorrectionTests (48/200 entries, recoverable
+metadata/provider failure, concurrent skip/recovery, fatal persistence),
+MatchingLifecycleTests (background/foreground, expiration, saved running intent,
+explicit cancellation and pending OS admission), MatchingArtworkTests (URL/ID
+safety, fallback, existing loader cache and network failure), and HybridPlaylistTests
+(200 source rows, duplicate local occurrences, deletion, restart, queue identity,
+v013 upgrade and explicit placeholder resolution). Existing schema-count assertions
+now expect 14 migrations and legacy source-edit prohibitions remain enforced.
+All corrective XCTest cases are NOT RUN here. Native compilation, actual OS
+lifecycle behavior, final packaging, SideStore installation and device acceptance
+are NOT RUN and remain the user's verification gates. Static parsing proves none
+of those gates. The old failure result must not be changed to PASS based on this work.
+
+The existing focused dispatch mode includes the corrective suites. No workflow is
+started by these instructions. When building, choose a build number strictly above
+the installed IPA; do not reuse the earlier build 75. For example, use 76 only if
+75 is still the latest installed candidate. The bundle identifier, Share extension,
+signing settings and prior migrations are retained. Install in place; do not delete
+the app or its library. There is no merge or release in this update.
+
 Implementation branch: `feature/phase-10-04-matching`, based on Phase 10.3 merge
-`15ba93398bc0b8630dd6572b7a86c281c5f7e55a`. Physical-device acceptance is pending.
+`15ba93398bc0b8630dd6572b7a86c281c5f7e55a`. Physical-device acceptance of the initial implementation FAILED. The corrective
+implementation below is pending native compilation and physical retest.
 
 ## Architecture and reused components
 
@@ -39,8 +191,8 @@ identical titles, artist, album and duration. Missing labels do not establish
 studio identity. Local automatic reuse currently requires compatible explicit
 version traits. This intentionally reduces automatic completion for ordinary
 Spotify imports. Remaster/original differences and different remix names require
-review. Phase 10.7 can provide explicit identity confirmation; Phase 10.4 never
-silently treats an unknown version as original.
+review. Explicit local confirmation is available in the corrective update; Phase 10.4
+never silently treats an unknown version as original.
 
 ## Scoring and decision policy
 
@@ -88,8 +240,8 @@ remain necessary, as in Phase 10.1.
 
 ## Persistence, history and legal transitions
 
-No database migration is added: existing v001–v013 migration definitions and
-Phase 10.1 record meanings are unchanged. Candidate confidence remains 0–1 in
+The corrective update adds v014; v001–v013 migration definitions and Phase 10.1
+record meanings are unchanged. See the corrective schema and recovery section below. Candidate confidence remains 0–1 in
 SQLite; inspection renders 0–100. Structured string evidence includes algorithm
 version, source occurrence, provider identity, normalized titles, individual
 signal scores, duration delta, source/candidate traits, gates, classification,
@@ -137,9 +289,12 @@ rest of the run while local matching continues; earlier candidates and committed
 local associations survive. No unbounded task group, retry loop or request queue.
 
 The job publishes progress after every occurrence, checks cancellation between
-entries/requests and before commit, and pauses on backgrounding. Navigation is
-independent. No continued execution while suspended/terminated is promised.
+entries/requests and before commit, and requests supported background continuation. Navigation is independent.
+Backgrounding does not cancel the worker; expiration and user cancellation are separate. No continued execution while suspended/terminated is promised.
 Explicit retry rebuilds the local index and reuses stable candidate identities.
+Durable checkpoints skip clean completed review proposals; failed, interrupted and
+no-result occurrences remain retryable. A changed explicit decision invalidates
+its checkpoint.
 Large runs hold source entries and the local catalog/index, not 1,000 provider
 responses. Candidate inspection reads only its occurrence; dashboard summary
 reads current recommendations after the run, not from every row render.
@@ -150,8 +305,8 @@ The existing migration dashboard exposes Find Matching Recordings, counts,
 progress, Cancel and errors. Source Entry inspection shows candidate provider,
 score, classification, versions, evidence, gates and pending/accepted decisions.
 The black/lime styling, source metadata, mini-player and queue remain intact.
-There is no Download button or confirmation action with incomplete persistence
-semantics. Ambiguous candidates are clearly pending Phase 10.7 review.
+There is no Download button. The corrective update adds explicit, atomically
+verified local-placeholder resolution; full external-candidate review remains Phase 10.7.
 
 Phase 10.5 authorized acquisition, Phase 10.6 durable scheduling and Phase 10.7
 full review are not implemented. No releases, automatic merges or source-library
@@ -229,11 +384,11 @@ over the existing app with the same signing identity to retain compatible data.
 Do not delete the installed app or recreate its library.
 
 ```sh
-gh workflow run build-ipa.yml --ref feature/phase-10-04-matching -f build_number=75
+gh workflow run build-ipa.yml --ref feature/phase-10-04-matching -f build_number=76
 gh workflow run playlist-migration.yml --ref feature/phase-10-04-matching -f matching_only=true
 ```
 
-For any later build, replace 75 with a number above the most recently installed
+For any later build, replace 76 with a number above the most recently installed
 version. Physical acceptance remains separate from build/test success.
 
 ## iPhone 13 Pro Max acceptance — all NOT RUN
@@ -260,3 +415,45 @@ version. Physical acceptance remains separate from build/test success.
 Record PASS, FAIL, BLOCKED or NOT RUN per scenario with device/iOS, commit SHA,
 build number and observed evidence. Real-provider matching quality, accessibility,
 device performance and SideStore upgrade acceptance require these manual checks.
+
+
+## Corrective file manifest
+
+Changes relative to `2f9c10d132eeb1f824abb2828a501a7520cea427`:
+
+- `.github/workflows/build-ipa.yml`
+- `.github/workflows/playlist-migration.yml`
+- `Docs/PHASE_10_04_MATCHING.md`
+- `OFFLINE/App/AppContainer.swift`
+- `OFFLINE/Audio/AudioPlayerService.swift`
+- `OFFLINE/Audio/PlaybackQueueManager.swift`
+- `OFFLINE/Features/Library/DetailViews.swift`
+- `OFFLINE/Features/Library/MigrationPlaylistViews.swift`
+- `OFFLINE/Features/Library/PlaylistMatchingViewModel.swift`
+- `OFFLINE/Features/Library/ResolveMigrationPlaceholderView.swift`
+- `OFFLINE/Features/Root/RootView.swift`
+- `OFFLINE/Library/HybridPlaylist.swift`
+- `OFFLINE/Library/LibraryModels.swift`
+- `OFFLINE/Library/LibraryRepository.swift`
+- `OFFLINE/Library/MusicLibraryService.swift`
+- `OFFLINE/PlaylistMigration/GRDBPlaylistMigrationRepository.swift`
+- `OFFLINE/PlaylistMigration/HybridPlaylistSchema.swift`
+- `OFFLINE/PlaylistMigration/Matching/MatchingBackgroundExecution.swift`
+- `OFFLINE/PlaylistMigration/Matching/MatchingCandidateArtwork.swift`
+- `OFFLINE/PlaylistMigration/Matching/MatchingDiscovery.swift`
+- `OFFLINE/PlaylistMigration/Matching/MatchingRecovery.swift`
+- `OFFLINE/PlaylistMigration/Matching/PlaylistMigrationMatchingService.swift`
+- `OFFLINE/PlaylistMigration/Matching/SongMatchingPolicy.swift`
+- `OFFLINE/Resources/Info.plist`
+- `OFFLINE/Storage/DatabaseManager.swift`
+- `Scripts/verify-matching-corrections.py`
+- `Tests/Unit/Library/Phase4LibraryMigrationTests.swift`
+- `Tests/Unit/Phase2StorageTests.swift`
+- `Tests/Unit/PlaylistMigration/HybridPlaylistTests.swift`
+- `Tests/Unit/PlaylistMigration/MatchingArtworkTests.swift`
+- `Tests/Unit/PlaylistMigration/MatchingCorrectionTests.swift`
+- `Tests/Unit/PlaylistMigration/MatchingDiscoveryTests.swift`
+- `Tests/Unit/PlaylistMigration/MatchingLifecycleTests.swift`
+- `Tests/Unit/PlaylistMigration/PlaylistImportIntegrationTests.swift`
+- `Tests/Unit/PlaylistMigration/PlaylistMigrationPersistenceTests.swift`
+- `project.yml`

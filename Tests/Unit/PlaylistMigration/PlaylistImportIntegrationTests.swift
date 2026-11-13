@@ -146,7 +146,7 @@ final class PlaylistImportIntegrationTests: XCTestCase {
         XCTAssertEqual(try count("playlists", fixture), 3); XCTAssertEqual(try count("playlist_migrations", fixture), 2)
         XCTAssertEqual(try count("migration_entries", fixture), 3); XCTAssertEqual(try count("tracks", fixture), 1)
         XCTAssertEqual(try fixture.repository.snapshot().playlistTracks(ordinary.id), before)
-        XCTAssertEqual(try count("grdb_migrations", fixture), 13); XCTAssertEqual(try fixture.foreignKeys(), 0)
+        XCTAssertEqual(try count("grdb_migrations", fixture), 14); XCTAssertEqual(try fixture.foreignKeys(), 0)
     }
 
     func testCancelledCommitCreatesNothingAndStrictFileContractRejectsPartialReport() async throws {

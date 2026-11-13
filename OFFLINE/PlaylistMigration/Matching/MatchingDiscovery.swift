@@ -132,8 +132,9 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     if Task.isCancelled || (error as? YouTubeError) == .cancelled { throw CancellationError() }
                     result.recordings[index].available = false
                     let error = YouTubeError.map(error, fallback: .metadataUnavailable)
+                    result.failures.append(error.localizedDescription); result.failure = error
                     if [.networkUnavailable, .requestTimeout, .rateLimited].contains(error) {
-                        result.failures.append(error.localizedDescription); result.failure = error; break
+                        break
                     }
                 }
             }

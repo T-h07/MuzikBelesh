@@ -17,13 +17,13 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
         catch { XCTAssertEqual(error as? E, expected, file: file, line: line) }
     }
 
-    func testFreshSchemaAndReopeningHaveExactlyThirteenMigrations() throws {
+    func testFreshSchemaAndReopeningHaveExactlyFourteenMigrations() throws {
         let f = try LibraryFixture(count: 0)
-        XCTAssertEqual(try count("grdb_migrations", f), 13)
-        for table in ["playlist_migrations", "migration_entries", "migration_candidates", "migration_issues"] { XCTAssertEqual(try count(table, f), 0) }
+        XCTAssertEqual(try count("grdb_migrations", f), 14)
+        for table in ["playlist_migrations", "migration_entries", "migration_candidates", "migration_issues", "playlist_local_occurrences", "migration_matching_jobs", "migration_matching_checkpoints"] { XCTAssertEqual(try count(table, f), 0) }
         let reopened = try DatabaseManager(url: f.paths.database)
         let migrations = try reopened.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
-        XCTAssertEqual(migrations.count, 13); XCTAssertEqual(migrations.last, "v013_playlist_migration_storage")
+        XCTAssertEqual(migrations.count, 14); XCTAssertEqual(migrations.last, "v014_matching_recovery_hybrid_playlists")
         XCTAssertEqual(try f.foreignKeys(), 0)
     }
 
@@ -216,10 +216,13 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
         for id in [nil, input.entries[0].id] {
             try await repo.saveIssue(PlaylistMigrationIssue(id: UUID(), migrationID: session.id, entryID: id, code: "test", message: "Issue", technicalDetails: nil, severity: .warning, resolution: .open, createdAt: Date(), resolvedAt: nil))
         }
-        XCTAssertThrowsError(try f.repository.addTracks(f.ids, playlistID: playlistID))
+        try f.repository.addTracks(f.ids, playlistID: playlistID)
+        let preserved = try await repo.entries(migrationID: session.id)
+        XCTAssertEqual(preserved.map(\.source), input.entries)
+        XCTAssertEqual(try count("playlist_local_occurrences", f), 1)
         XCTAssertThrowsError(try f.repository.reorder([], playlistID: playlistID))
         _ = try f.repository.deletePlaylist(id: playlistID, confirmed: true)
-        for table in ["playlist_migrations", "migration_entries", "migration_candidates", "migration_issues"] { XCTAssertEqual(try count(table, f), 0) }
+        for table in ["playlist_migrations", "migration_entries", "migration_candidates", "migration_issues", "playlist_local_occurrences", "migration_matching_jobs", "migration_matching_checkpoints"] { XCTAssertEqual(try count(table, f), 0) }
         XCTAssertEqual(try f.repository.snapshot().playlistTracks(ordinary.id).map(\.id), f.ids)
         XCTAssertTrue(FileManager.default.fileExists(atPath: try f.file(0).path)); XCTAssertEqual(try f.foreignKeys(), 0)
         let another = try await repo.createPlaylist(from: source(1), operationID: "delete-session")

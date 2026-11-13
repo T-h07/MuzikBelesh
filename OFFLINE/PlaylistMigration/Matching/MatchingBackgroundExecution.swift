@@ -1,5 +1,6 @@
 import BackgroundTasks
 import UIKit
+import OSLog
 
 @MainActor protocol MatchingBackgroundExecuting: AnyObject {
     func begin(start: @escaping @MainActor () -> Void, expiration: @escaping @MainActor () -> Void)
@@ -20,6 +21,7 @@ import UIKit
     private var expireWork: (@MainActor () -> Void)?
     private var registered = false
     private var awaitingLaunch = false
+    private let log = Logger(subsystem: "com.th07.muzikbelesh", category: "PlaylistMatchingBackground")
     private init() {
         if #available(iOS 26.0, *) {
             registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.identifier + ".*", using: .main) { [weak self] task in
@@ -49,7 +51,10 @@ import UIKit
             request.strategy = .fail // Never leave an orphan queued request after fallback starts.
             awaitingLaunch = true
             do { try BGTaskScheduler.shared.submit(request); return }
-            catch { awaitingLaunch = false } // Unsupported/restricted admission uses the limited path.
+            catch {
+                awaitingLaunch = false
+                log.notice("Continued processing admission failed; using limited execution. Error code=\((error as NSError).code, privacy: .public)")
+            }
         }
         limited = UIApplication.shared.beginBackgroundTask(withName: "Playlist matching") { [weak self] in
             Task { @MainActor in self?.expired(generation: generation) }

@@ -39,8 +39,9 @@ import SwiftUI
         }
     }
     private func finishBeforeStart(_ id: UUID, reason: MatchingFailureCategory) async throws {
+        defer { busy = false; work = nil }
         try await repository.setMatchingIntent(id, intent: reason == .cancelled ? "userCancelled" : "systemPaused")
-        message = reason.message; busy = false; work = nil
+        message = reason.message
     }
     private func launch(_ id: UUID) {
         guard busy, activeID == id else { return }
@@ -49,12 +50,13 @@ import SwiftUI
             do {
                 if stopReason != nil { throw CancellationError() }
                 try await service.run(migrationID: id) { [weak self] value in await self?.update(value) }
-                success = true
+                try Task.checkCancellation()
                 try await repository.setMatchingIntent(id, intent: "completed")
                 let warning = progress.message
                 progress = try await repository.matchingSummary(migrationID: id)
                 if progress.message == nil { progress.message = warning }
                 message = "Matching finished. Proposals remain pending review; failed entries can be retried."
+                success = true
             } catch {
                 let reason = stopReason ?? MatchingFailureCategory.classify(error)
                 let intent = reason == .cancelled ? "userCancelled" : reason == .interrupted ? "systemPaused" : "fatal"
@@ -66,6 +68,7 @@ import SwiftUI
             }
             execution.finish(success: success); busy = false; work = nil
             if resumeOnIdle { resumeOnIdle = false; await restoreIfNeeded() }
+            else if success && foreground { await restoreIfNeeded() }
         }
     }
     private func failure(_ error: Error, id: UUID, reason: MatchingFailureCategory? = nil) {
@@ -170,7 +173,9 @@ struct MigrationCandidateInspection: View {
                     if let duration = candidate.durationMs { Text("Duration: \(duration / 60000):\(String(format: "%02d", duration / 1000 % 60))") }
                     if let url = MatchingCandidateArtwork.watchURL(candidate) { Link("Open on YouTube", destination: url).frame(minHeight: 44) }
                     Text("\(candidate.provider) • \(candidate.decision.rawValue.capitalized)")
-                    Text("Confidence: \(Int(((candidate.confidence ?? 0) * 100).rounded())) / 100 • \(candidate.evidence["confidenceClassification"] ?? "Unknown")")
+                    if let confidence = candidate.confidence {
+                        Text("Confidence: \(Int((confidence * 100).rounded())) / 100 • \(candidate.evidence["confidenceClassification"] ?? "Unknown")")
+                    } else { Text(candidate.evidence["confidenceClassification"] ?? "Confidence not scored") }
                     if candidate.evidence["currentAttempt"] == "false" { Text("Earlier proposal — retained for review history") }
                     ForEach(["selectionExplanation", "primaryArtistAgreement", "featuredArtistAgreement", "durationDifferenceMs", "sourceVersion", "candidateVersion", "versionCompatibility", "hardGateFailures", "acceptance", "matchingAlgorithmVersion"], id: \.self) { key in
                         if let value = candidate.evidence[key], !value.isEmpty { Text("\(label(key)): \(value)") }

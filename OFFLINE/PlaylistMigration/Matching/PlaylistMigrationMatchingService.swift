@@ -72,73 +72,73 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                     await progress(report); continue
                 }
                 do {
-                if lease.previousCandidates.count >= 60 {
-                    let decision = SongMatchDecision(outcome: .review, ranked: [], explanation: "Saved candidate history limit reached. Review existing alternatives before further discovery.", margin: 0)
-                    try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
-                    report.processed += 1; report.review += 1; await progress(report); continue
-                }
-                let rejected = Set(lease.previousCandidates.filter { $0.decision == .rejected }.map { $0.provider + ":" + ($0.providerTrackID ?? "") })
-                let local = index.candidates(for: entry.source)
-                var scores = local.values.filter { !rejected.contains($0.provider + ":" + $0.identity) }
-                    .map { scoring.score(source: entry.source, candidate: $0) }
-                var decision = policy.decide(scores, truncated: local.truncated)
-                var issue: String?
-                var acceptedLocal: MatchingLocalRecording?
-                if decision.outcome == .local, let best = decision.ranked.first {
-                    acceptedLocal = index.recordings[best.recording.identity]
-                } else {
-                    var truncated = local.truncated
-                    var seen = Set(scores.map { $0.recording.provider + ":" + $0.recording.identity })
-                    for (number, provider) in providers.enumerated() where !disabledProviders.contains(number) {
-                        try Task.checkCancellation()
-                        do {
-                            let found = try await provider.discover(entry.source)
+                    if lease.previousCandidates.count >= 60 {
+                        let decision = SongMatchDecision(outcome: .review, ranked: [], explanation: "Saved candidate history limit reached. Review existing alternatives before further discovery.", margin: 0)
+                        try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
+                        report.processed += 1; report.review += 1; await progress(report); continue
+                    }
+                    let rejected = Set(lease.previousCandidates.filter { $0.decision == .rejected }.map { $0.provider + ":" + ($0.providerTrackID ?? "") })
+                    let local = index.candidates(for: entry.source)
+                    var scores = local.values.filter { !rejected.contains($0.provider + ":" + $0.identity) }
+                        .map { scoring.score(source: entry.source, candidate: $0) }
+                    var decision = policy.decide(scores, truncated: local.truncated)
+                    var issue: String?
+                    var acceptedLocal: MatchingLocalRecording?
+                    if decision.outcome == .local, let best = decision.ranked.first {
+                        acceptedLocal = index.recordings[best.recording.identity]
+                    } else {
+                        var truncated = local.truncated
+                        var seen = Set(scores.map { $0.recording.provider + ":" + $0.recording.identity })
+                        for (number, provider) in providers.enumerated() where !disabledProviders.contains(number) {
                             try Task.checkCancellation()
-                            truncated = truncated || found.truncated
-                            for recording in found.recordings.prefix(20) {
-                                let identity = recording.provider + ":" + recording.identity
-                                guard !rejected.contains(identity), seen.insert(identity).inserted else { continue }
-                                scores.append(scoring.score(source: entry.source, candidate: recording))
-                            }
-                            if !found.failures.isEmpty {
-                                issue = "External discovery interrupted. Completed local matches are preserved. Retry later."
-                                report.message = found.failures.first
-                                if let failure = found.failure {
-                                    MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: "youtube")
-                                    if [.rateLimited, .networkUnavailable, .requestTimeout].contains(failure) { disabledProviders.insert(number) }
+                            do {
+                                let found = try await provider.discover(entry.source)
+                                try Task.checkCancellation()
+                                truncated = truncated || found.truncated
+                                for recording in found.recordings.prefix(20) {
+                                    let identity = recording.provider + ":" + recording.identity
+                                    guard !rejected.contains(identity), seen.insert(identity).inserted else { continue }
+                                    scores.append(scoring.score(source: entry.source, candidate: recording))
                                 }
+                                if !found.failures.isEmpty {
+                                    issue = "External discovery interrupted. Completed local matches are preserved. Retry later."
+                                    report.message = found.failures.first
+                                    if let failure = found.failure {
+                                        MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: "youtube")
+                                        if [.rateLimited, .networkUnavailable, .requestTimeout].contains(failure) { disabledProviders.insert(number) }
+                                    }
+                                }
+                            } catch {
+                                if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                                MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: "provider-" + String(number))
+                                if let failure = error as? YouTubeError, [.rateLimited, .networkUnavailable, .requestTimeout].contains(failure) { disabledProviders.insert(number) }
+                                issue = "External discovery failed. Retry later; existing local audio is preserved."
+                                report.message = issue
                             }
-                        } catch {
-                            if Task.isCancelled || error is CancellationError { throw CancellationError() }
-                            MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: "provider-" + String(number))
-                            if let failure = error as? YouTubeError, [.rateLimited, .networkUnavailable, .requestTimeout].contains(failure) { disabledProviders.insert(number) }
-                            issue = "External discovery failed. Retry later; existing local audio is preserved."
-                            report.message = issue
+                        }
+                        if disabledProviders.count == providers.count && !providers.isEmpty && issue == nil {
+                            issue = "External discovery deferred after a provider failure. Retry later."
+                        }
+                        decision = policy.decide(scores, truncated: truncated)
+                        // Local uncertainty must never be promoted by remote ranking.
+                        if decision.outcome == .local {
+                            decision = SongMatchDecision(outcome: .review, ranked: decision.ranked, explanation: "Local identity needs review after external comparison.", margin: decision.margin)
                         }
                     }
-                    if disabledProviders.count == providers.count && !providers.isEmpty && issue == nil {
-                        issue = "External discovery deferred after a provider failure. Retry later."
+                    do {
+                        try await repository.commitMatching(lease, decision: decision, local: acceptedLocal, librarySnapshot: index.snapshot, issue: issue)
+                    } catch PlaylistMigrationStorageError.invalidLocalTrack {
+                        // Never try the runner-up after failed file verification.
+                        decision = .init(outcome: .review, ranked: decision.ranked,
+                            explanation: "Managed local audio failed verification. No alternate recording was selected.", margin: decision.margin)
+                        try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
                     }
-                    decision = policy.decide(scores, truncated: truncated)
-                    // Local uncertainty must never be promoted by remote ranking.
-                    if decision.outcome == .local {
-                        decision = SongMatchDecision(outcome: .review, ranked: decision.ranked, explanation: "Local identity needs review after external comparison.", margin: decision.margin)
+                    switch decision.outcome {
+                    case .local: report.localMatches += 1
+                    case .recommended: report.recommended += 1
+                    case .review: report.review += 1
+                    case .noMatch: report.noMatch += 1
                     }
-                }
-                do {
-                    try await repository.commitMatching(lease, decision: decision, local: acceptedLocal, librarySnapshot: index.snapshot, issue: issue)
-                } catch PlaylistMigrationStorageError.invalidLocalTrack {
-                    // Never try the runner-up after failed file verification.
-                    decision = .init(outcome: .review, ranked: decision.ranked,
-                        explanation: "Managed local audio failed verification. No alternate recording was selected.", margin: decision.margin)
-                    try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
-                }
-                switch decision.outcome {
-                case .local: report.localMatches += 1
-                case .recommended: report.recommended += 1
-                case .review: report.review += 1
-                case .noMatch: report.noMatch += 1
-                }
                 } catch {
                     if Task.isCancelled || error is CancellationError { throw CancellationError() }
                     let category = MatchingFailureCategory.classify(error)
