@@ -3,16 +3,30 @@ import Foundation
 // The only provider-specific JSON schema lives here. Fail closed on schema drift.
 enum YouTubeWebParser {
     static func object(in html: String, markers: [String]) throws -> [String: Any] {
+        var found = false
         for marker in markers {
             var searchStart = html.startIndex
             while let range = html.range(of: marker, range: searchStart..<html.endIndex) {
+                found = true
                 let suffix = html[range.upperBound...].drop(while: { $0.isWhitespace })
                 if suffix.first == "{", let data = balancedObject(suffix),
                    let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { return object }
                 searchStart = range.upperBound
             }
         }
-        throw YouTubeError.searchUnavailable
+        throw found ? YouTubeParserFailure.malformedObject : .missingObject
+    }
+    static func initialData(in html: String) throws -> [String: Any] {
+        let pattern = "(?:\\bytInitialData|window\\s*\\[\\s*[\"']ytInitialData[\"']\\s*\\])\\s*=\\s*"
+        let regex = try NSRegularExpression(pattern: pattern)
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for match in matches {
+            guard let range = Range(match.range, in: html) else { continue }
+            let suffix = html[range.upperBound...]
+            if suffix.first == "{", let data = balancedObject(suffix),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { return object }
+        }
+        throw matches.isEmpty ? YouTubeParserFailure.missingObject : .malformedObject
     }
     private static func balancedObject(_ text: Substring) -> Data? {
         var depth = 0, quoted = false, escaped = false
@@ -51,18 +65,27 @@ enum YouTubeWebParser {
         if let contents = object["contents"] as? [String: Any],
            let two = contents["twoColumnSearchResultsRenderer"] as? [String: Any],
            let primary = two["primaryContents"] as? [String: Any],
-           let section = primary["sectionListRenderer"] as? [String: Any],
+           let section = (primary["sectionListRenderer"] ?? primary["richGridRenderer"]) as? [String: Any],
            let items = section["contents"] as? [[String: Any]] { nodes = items }
+        else if let contents = object["contents"] as? [String: Any],
+                let single = contents["singleColumnSearchResultsRenderer"] as? [String: Any],
+                let section = single["sectionListRenderer"] as? [String: Any],
+                let items = section["contents"] as? [[String: Any]] { nodes = items }
+        else if let contents = object["continuationContents"] as? [String: Any],
+                let section = (contents["sectionListContinuation"] ?? contents["itemSectionContinuation"]) as? [String: Any],
+                let items = section["contents"] as? [[String: Any]] { nodes = items }
         else if let commands = (object["onResponseReceivedCommands"] ?? object["onResponseReceivedActions"]) as? [[String: Any]] {
             for command in commands {
                 if let append = command["appendContinuationItemsAction"] as? [String: Any], let items = append["continuationItems"] as? [[String: Any]] { nodes += items }
             }
-        } else { throw YouTubeError.searchUnavailable }
+        } else { throw YouTubeParserFailure.searchStructure }
         var videos: [YouTubeVideo] = [], token: String?, seen = Set<String>()
-        func visit(_ items: [[String: Any]]) {
-            for item in items {
-                if let section = item["itemSectionRenderer"] as? [String: Any], let children = section["contents"] as? [[String: Any]] { visit(children) }
-                if let renderer = item["videoRenderer"] as? [String: Any], let video = video(renderer), seen.insert(video.id).inserted { videos.append(video) }
+        func visit(_ items: [[String: Any]], depth: Int = 0) {
+            guard depth < 8 else { return }
+            for item in items.prefix(2000) {
+                if let section = item["itemSectionRenderer"] as? [String: Any], let children = section["contents"] as? [[String: Any]] { visit(children, depth: depth + 1) }
+                if let rich = item["richItemRenderer"] as? [String: Any], let child = rich["content"] as? [String: Any] { visit([child], depth: depth + 1) }
+                if let renderer = (item["videoRenderer"] ?? item["compactVideoRenderer"]) as? [String: Any], let video = video(renderer), seen.insert(video.id).inserted { videos.append(video) }
                 if let renderer = item["continuationItemRenderer"] as? [String: Any],
                    let endpoint = renderer["continuationEndpoint"] as? [String: Any],
                    let command = endpoint["continuationCommand"] as? [String: Any], let value = command["token"] as? String, value.count < 16_384 { token = value }
@@ -70,7 +93,7 @@ enum YouTubeWebParser {
         }
         visit(nodes)
         // A known empty-results message is valid. Unknown nonempty layouts are not "no results".
-        if videos.isEmpty, !containsMessage(nodes) { throw YouTubeError.searchUnavailable }
+        if videos.isEmpty, !containsMessage(nodes) { throw YouTubeParserFailure.resultRenderers }
         return YouTubeSearchPage(videos: videos, continuationToken: token)
     }
     private static func containsMessage(_ nodes: [[String: Any]]) -> Bool {

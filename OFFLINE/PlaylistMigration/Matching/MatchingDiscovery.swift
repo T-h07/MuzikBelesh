@@ -52,9 +52,26 @@ protocol ExternalCandidateDiscovery: Sendable {
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult
 }
 
+/// One shared monotonic request budget for matching, including retries and watch reads.
+actor MatchingRequestPacer {
+    static let shared = MatchingRequestPacer()
+    private let clock = ContinuousClock()
+    private let interval: Duration
+    private var next: ContinuousClock.Instant?
+    init(interval: Duration = .seconds(1)) { self.interval = interval }
+    func wait() async throws {
+        try Task.checkCancellation()
+        let deadline = max(next ?? clock.now, clock.now)
+        next = deadline.advanced(by: interval)
+        try await clock.sleep(until: deadline)
+        try Task.checkCancellation()
+    }
+}
+
 struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
     let search: any YouTubeSearchProvider
     var metadata: (any YouTubeMetadataProvider)? = nil
+    var pacer: MatchingRequestPacer = .shared
     private static func credits(_ value: String) -> (title: String, artist: String?) {
         let title = SongMetadataNormalizer.withoutTrackNumber(value)
         if let range = title.range(of: "\\s+[-–—|:]\\s+|[–—]", options: .regularExpression) {
@@ -74,12 +91,14 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
             ? String((base + " Official Audio").prefix(500)) : String(normalized.prefix(500))]
     }
     private func searchWithRetry(_ query: String) async throws -> YouTubeSearchPage {
+        try await pacer.wait()
         do { return try await search.search(query: query, continuationToken: nil) }
         catch {
             // Only transient transport failures get one delayed retry. Never retry
             // access restrictions, rate limits or an unknown response schema here.
             guard let failure = error as? YouTubeError, [.networkUnavailable, .requestTimeout].contains(failure) else { throw error }
             try await Task.sleep(for: .seconds(1))
+            try await pacer.wait()
             return try await search.search(query: query, continuationToken: nil)
         }
     }
@@ -120,24 +139,31 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                 break // No immediate retry after timeout/rate limiting/offline failure.
             }
             if result.recordings.count >= 20 { break }
-            // Do not repeat a search that already supplied title/artist evidence.
-            if result.recordings.contains(where: {
-                SongMetadataNormalizer.cleanTitle($0.title) == SongMetadataNormalizer.cleanTitle(source.title)
-                    && $0.artist != nil && SongMetadataNormalizer.artist($0.artist).0 == SongMetadataNormalizer.artist(source.primaryArtist).0
-            }) { break }
+            // A fallback query is useful only when no plausible candidates survived.
+            if !result.recordings.isEmpty { break }
         }
-        // Search availability is normally unknown. Inspect at most three likely
-        // results through the existing watch-metadata provider, never the resolver.
+        // Reuse title, duration, channel and artwork from search. Watch-check only
+        // one candidate that could meet every recommendation gate except availability.
+        // Missing duration may justify one enrichment request. Unknown availability
+        // stays unverified; no confidence thresholds or identity gates are relaxed.
         if let metadata, result.failures.isEmpty {
             let scorer = CandidateScoringEngine()
-            let order = result.recordings.indices.sorted {
+            let eligible = result.recordings.indices.filter { index in
+                var candidate = result.recordings[index]
+                guard !candidate.available else { return false }
+                if candidate.durationMs == nil { return true }
+                candidate.available = true
+                return scorer.score(source: source, candidate: candidate).gates.isEmpty
+            }
+            let order = eligible.sorted {
                 let left = scorer.score(source: source, candidate: result.recordings[$0]).score
                 let right = scorer.score(source: source, candidate: result.recordings[$1]).score
                 return left == right ? result.recordings[$0].identity < result.recordings[$1].identity : left > right
             }
-            for index in order.prefix(3) {
+            for index in order.prefix(1) {
                 try Task.checkCancellation()
                 do {
+                    try await pacer.wait()
                     let video = try await metadata.metadata(videoID: result.recordings[index].identity)
                     try Task.checkCancellation()
                     guard video.id == result.recordings[index].identity else { continue }
@@ -149,7 +175,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     let searchArtist = SongMetadataNormalizer.artist(result.recordings[index].artist)
                     let sameArtist = watch.artist != nil && watchArtist.0 == searchArtist.0 && watchArtist.1 == searchArtist.1
                     result.recordings[index].available = sameTitle && sameArtist && video.availability == .available && !video.isShort
-                    result.recordings[index].durationMs = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil }
+                    result.recordings[index].durationMs = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil } ?? result.recordings[index].durationMs
                 } catch {
                     if Task.isCancelled || (error as? YouTubeError) == .cancelled { throw CancellationError() }
                     result.recordings[index].available = false

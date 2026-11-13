@@ -42,7 +42,15 @@ final class YouTubeURLSessionTransport: NSObject, YouTubeTransport, URLSessionTa
         request.timeoutInterval = 15
         let (data, response) = try await session.data(for: request, delegate: self)
         try Task.checkCancellation()
-        guard let response = response as? HTTPURLResponse, let finalURL = response.url, Self.permitted(finalURL), data.count <= 8_000_000 else { throw YouTubeError.searchUnavailable }
+        guard let response = response as? HTTPURLResponse else {
+            YouTubeDiscoveryDiagnostics.record(.init(stage: .transportResponse, category: .searchUnavailable, status: nil, responseType: .unknown, operation: .transport))
+            throw YouTubeError.searchUnavailable
+        }
+        guard let finalURL = response.url, Self.permitted(finalURL), data.count <= 8_000_000 else {
+            YouTubeDiscoveryDiagnostics.record(.init(stage: data.count > 8_000_000 ? .transportSize : .transportRedirect,
+                category: .searchUnavailable, status: response.statusCode, responseType: .init(response.value(forHTTPHeaderField: "Content-Type")), operation: .transport))
+            throw YouTubeError.searchUnavailable
+        }
         return YouTubeHTTPResponse(data: data, status: response.statusCode, url: finalURL, contentType: response.value(forHTTPHeaderField: "Content-Type"))
     }
 }
