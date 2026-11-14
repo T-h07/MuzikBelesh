@@ -1,4 +1,6 @@
+
 name: Playlist migration verification
+
 on:
   workflow_call:
   workflow_dispatch:
@@ -9,10 +11,14 @@ on:
         default: false
   pull_request:
     branches: [develop]
-permissions: {contents: read}
+
+permissions:
+  contents: read
+
 concurrency:
   group: playlist-migration-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
+
 jobs:
   persistence:
     runs-on: macos-15
@@ -22,12 +28,15 @@ jobs:
         shell: bash
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
       - name: Portable foundation contracts
         run: bash Scripts/test-playlist-migration-foundation.sh
+
       - name: Build application and all test products
         run: |
           set -euo pipefail
@@ -40,6 +49,7 @@ jobs:
           xcrun simctl boot "$ID"
           xcrun simctl bootstatus "$ID" -b
           xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$ID" -derivedDataPath build/Products build-for-testing CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/migration-build.log
+
       - name: Foundation persistence and affected regression tests
         if: inputs.matching_only != true
         run: |
@@ -57,6 +67,7 @@ jobs:
             -only-testing:OFFLINETests/PlaybackPreviousPolicyTests \
             -only-testing:OFFLINETests/PlaybackServiceAuditTests \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-units.log
+
       - name: Focused song matching and persistence tests
         if: inputs.matching_only == true
         run: |
@@ -71,18 +82,26 @@ jobs:
             -only-testing:OFFLINETests/MatchingFailureIsolationTests \
             -only-testing:OFFLINETests/YouTubeDiscoveryReliabilityTests \
             -only-testing:OFFLINETests/FinalDiscoveryReliabilityTests \
+            -only-testing:OFFLINETests/DiscoveryProviderTests \
+            -only-testing:OFFLINETests/ManualYouTubeSelectionTests \
             -only-testing:OFFLINETests/YouTubeProviderTests \
             -only-testing:OFFLINETests/MatchingLifecycleTests \
             -only-testing:OFFLINETests/MatchingArtworkTests \
             -only-testing:OFFLINETests/HybridPlaylistTests \
             -only-testing:OFFLINETests/PlaylistMigrationPersistenceTests \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-matching.log
+
       - name: Migration playlist UI
         if: inputs.matching_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
-          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUI.xcresult -only-testing:OFFLINEUITests/PlaylistMigrationUITests -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-ui.log
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUI.xcresult \
+            -only-testing:OFFLINEUITests/PlaylistMigrationUITests \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 60 \
+            -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-ui.log
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -93,6 +112,7 @@ jobs:
             build/FoundationContracts*
             build/*.xcresult
           retention-days: 14
+
       - name: Remove isolated simulator
         if: always() && env.SIMULATOR_ID != ''
         run: |
