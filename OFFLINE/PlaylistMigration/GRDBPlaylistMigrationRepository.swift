@@ -349,7 +349,7 @@ extension GRDBPlaylistMigrationRepository {
             guard !candidates.contains(where: { $0.decision == .accepted }) else { return nil }
             if let checkpoint = try MatchingCheckpoint.fetchOne(db, key: entry.id.uuidString),
                checkpoint.algorithm == CandidateScoringEngine.algorithmVersion, !checkpoint.retryable,
-               current.status == .needsReview { return nil }
+               [.needsReview, .unavailable].contains(current.status) { return nil }
             try PlaylistMigrationValidation.requireEntryTransition(current.status, to: .matching)
             current.status = .matching; current.updatedAt = Self.nextMatchingRevision(current.updatedAt); try current.update(db)
             return try MatchingEntryLease(session: session, entry: Self.requiredEntry(entry.id, db: db).model(), previousCandidates: candidates)
@@ -432,7 +432,7 @@ extension GRDBPlaylistMigrationRepository {
             entry.status = next; entry.localTrackID = verifiedTrack?.id; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt)
             try entry.update(db)
             try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion,
-                retryable: discoveryFailed || issue != nil || decision.outcome == .noMatch,
+                retryable: discoveryFailed || issue != nil,
                 outcome: discoveryFailed ? "discoveryFailed" : decision.outcome.rawValue, updatedAt: Date()).save(db)
             // One reusable attempt issue per occurrence; historical candidates remain intact.
             let oldIssue = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt").fetchOne(db)

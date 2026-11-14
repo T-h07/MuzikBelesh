@@ -127,7 +127,7 @@ struct PlaylistMatchingControls: View {
         let progress = active ? model.progress : saved
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Button { model.start(session.id) } label: {
-                Label("Find Matching Recordings", systemImage: "magnifyingglass").frame(minHeight: 44)
+                Label(progress.discoveryPaused || progress.discoveryFailed > 0 ? "Retry Unfinished Discovery" : "Find Matching Recordings", systemImage: "magnifyingglass").frame(minHeight: 44)
             }.disabled(model.busy || session.status.isTerminal)
                 .accessibilityIdentifier("migration-find-matches")
             Text("Source entries: \(progress.total) • Already local: \(progress.alreadyLocal)")
@@ -146,6 +146,9 @@ struct PlaylistMatchingControls: View {
                 if let message = model.message { Text(message) }
             }
             if let message = progress.message { Text(message).foregroundStyle(AppColors.error) }
+            if progress.discoveryPaused {
+                Text("Anonymous YouTube search may require consent or verification and cannot guarantee bulk discovery. Retry later to continue unfinished entries. You can also search individual songs in your browser and use Resolve Existing Placeholder for audio already in your library.")
+            }
             if let readError { Text(readError).foregroundStyle(AppColors.error) }
             MatchingDeveloperDiagnosticsView()
             Text("Discovery only. External candidates are not available offline. Background matching continues while iOS permits. Interrupted work resumes when the app reopens.")
@@ -169,6 +172,10 @@ struct MigrationCandidateInspection: View {
         Section("Recording Candidates") {
             if let error { Text(error) }
             if let issueMessage { Text(issueMessage).foregroundStyle(AppColors.error) }
+            if let url = YouTubeSearchProviderAdapter.browserSearchURL(entry.source) {
+                Link("Search This Song in Browser", destination: url).frame(minHeight: 44)
+                Text("Browser review does not select or download a recording. To use audio already in your library, choose Resolve Existing Placeholder.").font(.caption)
+            }
             if candidates.isEmpty {
                 Text(entry.status == .failed ? "Discovery did not produce a saved candidate. Retry Find Matching Recordings from the playlist." : "No saved candidates. Run Find Matching Recordings from the playlist.")
             }

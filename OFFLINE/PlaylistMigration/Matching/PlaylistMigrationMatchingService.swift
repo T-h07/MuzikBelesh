@@ -64,6 +64,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             report.candidates = try await repository.matchingSummary(migrationID: migrationID).candidates
             report.deferred = entries.filter { [.pending, .matching].contains($0.status) }.count
             var failures = MatchingDiscoveryFailurePolicy()
+            let runProviders = providers.map { $0.forRun() }
             await progress(report)
             for entry in entries {
                 try Task.checkCancellation()
@@ -97,7 +98,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                     } else {
                         var truncated = local.truncated
                         var seen = Set(scores.map { $0.recording.provider + ":" + $0.recording.identity })
-                        for (number, provider) in providers.enumerated() {
+                        for (number, provider) in runProviders.enumerated() {
                             try Task.checkCancellation()
                             do {
                                 let found = try await provider.discover(entry.source)

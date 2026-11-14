@@ -51,6 +51,39 @@ struct MatchingDiscoveryResult: Sendable {
 protocol ExternalCandidateDiscovery: Sendable {
     /// Providers must honor cancellation and return bounded metadata only.
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult
+    func forRun() -> any ExternalCandidateDiscovery
+}
+extension ExternalCandidateDiscovery {
+    func forRun() -> any ExternalCandidateDiscovery { self }
+}
+
+/// Successful responses only, bounded and discarded after each run. Duplicate
+/// occurrences still receive separate scoring, leases, candidates and decisions.
+private actor MatchingYouTubeResponseCache: YouTubeSearchProvider, YouTubeMetadataProvider {
+    let searchProvider: any YouTubeSearchProvider
+    let metadataProvider: (any YouTubeMetadataProvider)?
+    private var pages: [String: YouTubeSearchPage] = [:]
+    private var videos: [String: YouTubeVideo] = [:]
+    init(search: any YouTubeSearchProvider, metadata: (any YouTubeMetadataProvider)?) {
+        searchProvider = search; metadataProvider = metadata
+    }
+    func search(query: String, continuationToken: String?) async throws -> YouTubeSearchPage {
+        try Task.checkCancellation()
+        if continuationToken == nil, let cached = pages[query] { return cached }
+        let page = try await searchProvider.search(query: query, continuationToken: continuationToken)
+        try Task.checkCancellation()
+        if continuationToken == nil, pages.count < 200 { pages[query] = page }
+        return page
+    }
+    func metadata(videoID: String) async throws -> YouTubeVideo {
+        try Task.checkCancellation()
+        if let cached = videos[videoID] { return cached }
+        guard let metadataProvider else { throw YouTubeError.metadataUnavailable }
+        let video = try await metadataProvider.metadata(videoID: videoID)
+        try Task.checkCancellation()
+        if video.id == videoID, videos.count < 200 { videos[videoID] = video }
+        return video
+    }
 }
 
 /// Count failed occurrences, never the retries within one occurrence. Successful
@@ -58,7 +91,7 @@ protocol ExternalCandidateDiscovery: Sendable {
 struct MatchingDiscoveryFailurePolicy {
     private var streaks: [Int: Set<UUID>] = [:]
     static func immediate(_ error: YouTubeError?) -> Bool {
-        error == .rateLimited || error == .accessRestricted
+        error == .rateLimited || error == .accessRestricted || error == .providerRestricted || error == .redirectUnavailable
     }
     mutating func observe(provider: Int, entry: UUID, searchFailed: Bool, restricted: Bool) -> Bool {
         if restricted { return true }
@@ -88,6 +121,16 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
     let search: any YouTubeSearchProvider
     var metadata: (any YouTubeMetadataProvider)? = nil
     var pacer: MatchingRequestPacer = .shared
+    func forRun() -> any ExternalCandidateDiscovery {
+        let cache = MatchingYouTubeResponseCache(search: search, metadata: metadata)
+        return Self(search: cache, metadata: metadata == nil ? nil : cache, pacer: pacer)
+    }
+    static func browserSearchURL(_ source: PlaylistMigrationSourceTrack) -> URL? {
+        guard let query = queries(source).first else { return nil }
+        var url = URLComponents(string: "https://www.youtube.com/results")
+        url?.queryItems = [URLQueryItem(name: "search_query", value: query)]
+        return url?.url
+    }
     private static func credits(_ value: String) -> (title: String, artist: String?) {
         let title = SongMetadataNormalizer.withoutTrackNumber(value)
         if let range = title.range(of: "\\s+[-–—|:]\\s+|[–—]", options: .regularExpression) {
@@ -153,7 +196,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                 result.failure = failure
                 result.searchFailed = true
                 result.pauseDiscovery = MatchingDiscoveryFailurePolicy.immediate(failure)
-                break // No immediate retry after timeout/rate limiting/offline failure.
+                break // No alternate-query requests after an exhausted or restricted search.
             }
             if result.recordings.count >= 20 { break }
             // A fallback query is useful only when no plausible candidates survived.
@@ -193,12 +236,14 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     let sameArtist = watch.artist != nil && watchArtist.0 == searchArtist.0 && watchArtist.1 == searchArtist.1
                     result.recordings[index].available = sameTitle && sameArtist && video.availability == .available && !video.isShort
                     result.recordings[index].durationMs = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil } ?? result.recordings[index].durationMs
+                    result.recordings[index].channel = video.channel ?? result.recordings[index].channel
+                    result.recordings[index].thumbnailURL = MatchingCandidateArtwork.safe(video.thumbnailURL) ?? result.recordings[index].thumbnailURL
                 } catch {
                     if Task.isCancelled || (error as? YouTubeError) == .cancelled { throw CancellationError() }
                     result.recordings[index].available = false
                     let error = YouTubeError.map(error, fallback: .metadataUnavailable)
                     result.failures.append(error.localizedDescription); result.failure = error
-                    if error == .rateLimited {
+                    if [.rateLimited, .providerRestricted, .redirectUnavailable].contains(error) {
                         result.pauseDiscovery = true
                         break
                     }

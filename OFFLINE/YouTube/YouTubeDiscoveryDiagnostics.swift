@@ -24,8 +24,10 @@ struct YouTubeDiscoveryDiagnostic: Sendable {
     let status: Int?
     let responseType: YouTubeResponseType
     var operation: YouTubeDiscoveryOperation = .search
+    var redirect: YouTubeRedirectCategory? = nil
     var developerSummary: String {
         "Category: \(category.rawValue)\nOperation: \(operation.rawValue)\nStage: \(stage.rawValue)\nHTTP: \(status.map(String.init) ?? "Unavailable")\nResponse: \(responseType.rawValue)"
+        + (redirect.map { "\nRedirect: " + $0.rawValue } ?? "")
     }
 }
 enum YouTubeDiscoveryDiagnostics {
@@ -35,7 +37,7 @@ enum YouTubeDiscoveryDiagnostics {
             Task { @MainActor in YouTubeDiagnosticModel.shared.update(event.developerSummary) }
         }
         // Fixed enums and numeric status only; never URLs, queries, headers or bodies.
-        log.error("operation=\(event.operation.rawValue, privacy: .public) stage=\(event.stage.rawValue, privacy: .public) category=\(event.category.rawValue, privacy: .public) http=\(event.status ?? 0, privacy: .public) response=\(event.responseType.rawValue, privacy: .public)")
+        log.error("operation=\(event.operation.rawValue, privacy: .public) stage=\(event.stage.rawValue, privacy: .public) category=\(event.category.rawValue, privacy: .public) http=\(event.status ?? 0, privacy: .public) response=\(event.responseType.rawValue, privacy: .public) redirect=\(event.redirect?.rawValue ?? "none", privacy: .public)")
     }
 }
 enum YouTubeParserFailure: Error {

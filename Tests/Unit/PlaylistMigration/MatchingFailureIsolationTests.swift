@@ -17,6 +17,24 @@ private actor IsolatedDiscovery: ExternalCandidateDiscovery {
     }
 }
 final class MatchingFailureIsolationTests: XCTestCase {
+    func testConsecutiveSearchFailuresRecoverWithoutLosingAnyOfTwoHundredEntries() async throws {
+        let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
+        let source = MatchingCorrectionTests.source(200)
+        let session = try await repo.createPlaylist(from: source, operationID: "consecutive-recovery")
+        let provider = IsolatedDiscovery([0, 1, 2])
+        let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
+        try await worker.run(migrationID: session.id) { _ in }
+        let paused = try await repo.matchingSummary(migrationID: session.id)
+        XCTAssertTrue(paused.discoveryPaused); XCTAssertEqual(paused.deferred, 197)
+        try await worker.run(migrationID: session.id) { _ in }
+        let calls = await provider.calls, entries = try await repo.entries(migrationID: session.id)
+        let finished = try await repo.matchingSummary(migrationID: session.id)
+        XCTAssertEqual(calls, [0, 1, 2] + Array(0..<200))
+        XCTAssertEqual(entries.map(\.source), source.entries)
+        XCTAssertEqual(Set(entries.map(\.id)).count, 200)
+        XCTAssertEqual(finished.candidates, 200); XCTAssertEqual(finished.discoveryFailed, 0)
+        XCTAssertEqual(finished.deferred, 0); XCTAssertFalse(finished.discoveryPaused)
+    }
     func testOneFailureAtEntrySevenContinuesAllTwoHundredAndRetryPreservesCandidates() async throws {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
         let session = try await repo.createPlaylist(from: MatchingCorrectionTests.source(200), operationID: "isolation")

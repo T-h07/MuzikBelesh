@@ -70,6 +70,8 @@ jobs:
             -only-testing:OFFLINETests/MatchingReliabilityTests \
             -only-testing:OFFLINETests/MatchingFailureIsolationTests \
             -only-testing:OFFLINETests/YouTubeDiscoveryReliabilityTests \
+            -only-testing:OFFLINETests/FinalDiscoveryReliabilityTests \
+            -only-testing:OFFLINETests/YouTubeProviderTests \
             -only-testing:OFFLINETests/MatchingLifecycleTests \
             -only-testing:OFFLINETests/MatchingArtworkTests \
             -only-testing:OFFLINETests/HybridPlaylistTests \
