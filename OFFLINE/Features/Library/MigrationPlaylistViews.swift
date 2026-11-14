@@ -164,6 +164,7 @@ struct MigrationProgressOverview: View {
 
 struct MigrationOccurrenceDetailView: View {
     @EnvironmentObject private var library: MusicLibraryService
+    @EnvironmentObject private var container: AppContainer
     let playlistID: String
     let occurrenceID: UUID
     @State private var resolving: PlaylistMigrationEntry?
@@ -181,7 +182,7 @@ struct MigrationOccurrenceDetailView: View {
                     }
                 }
                 if let repository = library.storage?.playlistMigrations {
-                    MigrationCandidateInspection(entry: row.entry, repository: repository)
+                    MigrationCandidateInspection(entry: row.entry, repository: repository, lookup: container.youtubeManualLookup)
                 }
                 Section("Entry Issues") {
                     let issues = value.issuesByEntry[occurrenceID] ?? []

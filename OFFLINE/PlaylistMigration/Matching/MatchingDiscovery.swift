@@ -131,7 +131,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
         url?.queryItems = [URLQueryItem(name: "search_query", value: query)]
         return url?.url
     }
-    private static func credits(_ value: String) -> (title: String, artist: String?) {
+    static func credits(_ value: String) -> (title: String, artist: String?) {
         let title = SongMetadataNormalizer.withoutTrackNumber(value)
         if let range = title.range(of: "\\s+[-–—|:]\\s+|[–—]", options: .regularExpression) {
             let artist = String(title[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)

@@ -136,6 +136,7 @@ struct PlaylistMatchingControls: View {
             Text("Recommended external: \(progress.recommended) • Review: \(progress.review)")
             Text("Genuine no match: \(progress.noMatch) • Entry errors: \(progress.failed)")
             Text("Discovery failed: \(progress.discoveryFailed) • Awaiting discovery: \(progress.deferred)")
+            Text("Selected YouTube videos: \(progress.selected) (not downloaded) • Offline ready: \(progress.alreadyLocal + progress.localMatches)")
             if active {
                 ProgressView(value: Double(progress.processed), total: Double(max(1, progress.total)))
                     .accessibilityLabel("Matching progress").accessibilityValue("\(progress.processed) of \(progress.total)")
@@ -147,7 +148,7 @@ struct PlaylistMatchingControls: View {
             }
             if let message = progress.message { Text(message).foregroundStyle(AppColors.error) }
             if progress.discoveryPaused {
-                Text("Anonymous YouTube search may require consent or verification and cannot guarantee bulk discovery. Retry later to continue unfinished entries. You can also search individual songs in your browser and use Resolve Existing Placeholder for audio already in your library.")
+                Text("Anonymous YouTube search may require consent or verification and cannot guarantee bulk discovery. Saved results are kept; Retry later continues only unfinished entries. Meanwhile, open any entry, search it in your browser, and paste the video link to select it manually.")
             }
             if let readError { Text(readError).foregroundStyle(AppColors.error) }
             MatchingDeveloperDiagnosticsView()
@@ -165,7 +166,9 @@ struct PlaylistMatchingControls: View {
 struct MigrationCandidateInspection: View {
     let entry: PlaylistMigrationEntry
     let repository: GRDBPlaylistMigrationRepository
+    var lookup: YouTubeManualLookup? = nil
     @State private var candidates: [PlaylistMigrationCandidate] = []
+    @State private var reload = 0
     @State private var error: String?
     @State private var issueMessage: String?
     var body: some View {
@@ -174,7 +177,11 @@ struct MigrationCandidateInspection: View {
             if let issueMessage { Text(issueMessage).foregroundStyle(AppColors.error) }
             if let url = YouTubeSearchProviderAdapter.browserSearchURL(entry.source) {
                 Link("Search This Song in Browser", destination: url).frame(minHeight: 44)
-                Text("Browser review does not select or download a recording. To use audio already in your library, choose Resolve Existing Placeholder.").font(.caption)
+                Text("Find the right video in your browser, copy its link, and paste it below. Selecting a video does not download it. To use audio already in your library, choose Resolve Existing Placeholder.").font(.caption)
+            }
+            if let lookup {
+                ManualYouTubeSelectionView(entry: entry, repository: repository, lookup: lookup,
+                    accepted: candidates.first { $0.provider == "youtube" && $0.decision == .accepted }) { reload += 1 }
             }
             if candidates.isEmpty {
                 Text(entry.status == .failed ? "Discovery did not produce a saved candidate. Retry Find Matching Recordings from the playlist." : "No saved candidates. Run Find Matching Recordings from the playlist.")
@@ -200,11 +207,12 @@ struct MigrationCandidateInspection: View {
                     ForEach(["selectionExplanation", "primaryArtistAgreement", "featuredArtistAgreement", "durationDifferenceMs", "sourceVersion", "candidateVersion", "versionCompatibility", "hardGateFailures", "acceptance", "matchingAlgorithmVersion"], id: \.self) { key in
                         if let value = candidate.evidence[key], !value.isEmpty { Text("\(label(key)): \(value)") }
                     }
-                    if candidate.decision == .pending { Text("Pending review. Confirmation and acquisition are reserved for later phases.") }
+                    if candidate.decision == .pending { Text(candidate.provider == "youtube" ? "Pending review. To use this video, open it and paste its link above." : "Pending review.") }
+                    if candidate.decision == .accepted && candidate.provider == "youtube" { Text("Selected by you • Not downloaded • Not available offline").foregroundStyle(AppColors.accentPrimary) }
                 }.font(.caption).padding(.vertical, 6)
                     .accessibilityIdentifier("migration-candidate-" + candidate.id.uuidString)
             }
-        }.task(id: entry.updatedAt) {
+        }.task(id: "\(entry.updatedAt.timeIntervalSince1970)-\(reload)") {
             do {
                 candidates = try await repository.candidates(entryID: entry.id).sorted {
                     ($0.confidence ?? 0) == ($1.confidence ?? 0) ? $0.id.uuidString < $1.id.uuidString : ($0.confidence ?? 0) > ($1.confidence ?? 0)
@@ -236,6 +244,110 @@ private struct MatchingDeveloperDiagnosticsView: View {
         DisclosureGroup("Developer diagnostics") {
             Text(diagnostics.summary).font(.caption.monospaced()).textSelection(.enabled)
             Text("Last failure across YouTube requests; retained after restart.").font(.caption2)
+        }
+    }
+}
+
+/// Paste → validate → inspect → explicit confirmation. Confirmation records a
+/// matched YouTube candidate only; it never creates a track or marks audio playable.
+struct ManualYouTubeSelectionView: View {
+    let entry: PlaylistMigrationEntry
+    let repository: GRDBPlaylistMigrationRepository
+    let lookup: YouTubeManualLookup
+    let accepted: PlaylistMigrationCandidate?
+    let changed: () -> Void
+    @State private var link = ""
+    @State private var preview: YouTubeManualLookupResult?
+    @State private var busy = false
+    @State private var message: String?
+    @State private var confirming = false
+    private var selectable: Bool {
+        entry.localTrackID == nil && [.pending, .needsReview, .failed, .unavailable].contains(entry.status)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if let accepted {
+                Text("Selected YouTube video: \(accepted.title)").font(.headline)
+                Text("Not downloaded. This entry stays unavailable offline until audio is acquired and verified.").font(.caption)
+                Button("Change or Reject Selection", role: .destructive) { reject(accepted) }
+                    .disabled(busy).frame(minHeight: 44).accessibilityIdentifier("migration-manual-reject")
+            } else if selectable {
+                Text("Choose a YouTube video manually").font(.headline)
+                TextField("Paste YouTube video link", text: $link)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    .onChange(of: link) { _, _ in preview = nil; message = nil }
+                    .accessibilityIdentifier("migration-manual-link")
+                Button("Look Up Video") { look() }
+                    .disabled(busy || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).frame(minHeight: 44)
+                    .accessibilityIdentifier("migration-manual-lookup")
+                if busy { ProgressView() }
+                if let preview { previewView(preview) }
+            } else if entry.status == .matching {
+                Text("Matching is processing this entry. Manual selection is available when it finishes.").font(.caption)
+            }
+            if let message { Text(message).font(.caption).foregroundStyle(AppColors.error) }
+        }.tint(AppColors.accentPrimary)
+            .confirmationDialog("Use this video for this Spotify entry?", isPresented: $confirming, titleVisibility: .visible) {
+                Button("Confirm Selection") { confirm() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The video is linked to this entry only. Nothing is downloaded and the entry is not marked as available offline.")
+            }
+    }
+    @ViewBuilder private func previewView(_ value: YouTubeManualLookupResult) -> some View {
+        let video = value.video
+        YouTubeArtwork(url: video.thumbnailURL ?? YouTubeManualLookup.fallbackThumbnail(video.id))
+            .frame(height: 170).clipShape(RoundedRectangle(cornerRadius: 8))
+        Text(video.title.isEmpty ? "Title unavailable" : video.title).font(.headline)
+        Text("Channel: \(video.channel ?? "Unknown uploader")")
+        Text("Duration: \(video.duration == nil ? "Unknown" : video.durationLabel)")
+        Text("Video ID: \(video.id)").font(.caption.monospaced())
+        if let url = video.canonicalURL { Link("Open on YouTube", destination: url).frame(minHeight: 44) }
+        if !value.metadataVerified {
+            Text("Video details could not be read without verification. Confirm only after checking the video in your browser.").font(.caption).foregroundStyle(AppColors.error)
+        }
+        if [.live, .upcoming, .unavailable].contains(video.availability) {
+            Text("This video is live, upcoming or unavailable and is unlikely to be usable.").font(.caption).foregroundStyle(AppColors.error)
+        }
+        Button("Use This Video") { confirming = true }.disabled(busy).frame(minHeight: 44)
+            .accessibilityIdentifier("migration-manual-confirm")
+    }
+    private func look() {
+        busy = true; message = nil; preview = nil
+        let input = link
+        Task {
+            defer { busy = false }
+            do {
+                let result = try await lookup.lookup(input)
+                guard input == link else { return }
+                preview = result
+            } catch is CancellationError {
+            } catch {
+                message = (error as? YouTubeError).flatMap(\.errorDescription) ?? YouTubeError.metadataUnavailable.localizedDescription
+            }
+        }
+    }
+    private func confirm() {
+        guard let preview else { return }
+        busy = true; message = nil
+        Task {
+            defer { busy = false }
+            do {
+                try await repository.confirmYouTubeCandidate(for: entry, video: preview.video, metadataVerified: preview.metadataVerified)
+                self.preview = nil; link = ""; changed()
+            } catch SongMatchingError.staleAttempt {
+                message = "This entry changed or is being matched. Reopen it and try again."
+            } catch PlaylistMigrationStorageError.invalidCandidate {
+                message = "This entry already has a selection. Reject it first to choose another video."
+            } catch { message = "The selection could not be saved. Try again." }
+        }
+    }
+    private func reject(_ candidate: PlaylistMigrationCandidate) {
+        busy = true; message = nil
+        Task {
+            defer { busy = false }
+            do { try await repository.rejectYouTubeSelection(entryID: entry.id, candidateID: candidate.id); changed() }
+            catch { message = "The selection could not be changed. Reopen this entry and try again." }
         }
     }
 }

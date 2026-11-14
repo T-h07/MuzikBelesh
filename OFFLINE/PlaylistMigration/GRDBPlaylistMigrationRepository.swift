@@ -508,6 +508,7 @@ extension GRDBPlaylistMigrationRepository {
                     if localIDs.contains(entry.id) { result.localMatches += 1 } else { result.alreadyLocal += 1 }
                 } else if entry.status == .needsReview {
                     if recommendedIDs.contains(entry.id) { result.recommended += 1 } else { result.review += 1 }
+                } else if entry.status == .matched { result.selected += 1
                 } else if entry.status == .unavailable && !discoveryFailed { result.noMatch += 1 }
                 else if entry.status == .failed && !discoveryFailed { result.failed += 1 }
                 if [.pending, .matching].contains(entry.status) { result.deferred += 1 }
@@ -593,5 +594,92 @@ private struct MigrationIssueRecord: Codable, FetchableRecord, PersistableRecord
     }
     func model() throws -> PlaylistMigrationIssue {
         try PlaylistMigrationIssue(id: migrationUUID(id), migrationID: migrationUUID(migrationID), entryID: entryID.map(migrationUUID), code: code, message: message, technicalDetails: technicalDetails, severity: severity, resolution: resolution, createdAt: createdAt, resolvedAt: resolvedAt)
+    }
+}
+
+/// Manual browser-assisted selection. A confirmed YouTube candidate marks the
+/// occurrence `matched` only: no track, file or download is created, so it is
+/// never presented as playable or offline-ready.
+extension GRDBPlaylistMigrationRepository {
+    static func manualYouTubeCandidate(for entry: PlaylistMigrationEntry, video: YouTubeVideo, metadataVerified: Bool,
+                                       id: UUID = UUID()) throws -> PlaylistMigrationCandidate {
+        guard YouTubeURLValidator.isValidID(video.id) else { throw YouTubeError.invalidVideoID }
+        let fullTitle = MatchingSafeText.metadata(video.title.trimmingCharacters(in: .whitespacesAndNewlines))
+        let title = fullTitle.isEmpty ? "YouTube video " + video.id : String(fullTitle.prefix(500))
+        let channel = video.channel.map { MatchingSafeText.metadata($0) }.flatMap { $0.isEmpty ? nil : $0 }
+        let durationMs = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil }
+        let credits = YouTubeSearchProviderAdapter.credits(title)
+        let recording = SongRecording(provider: "youtube", identity: video.id, title: credits.title, artist: credits.artist,
+                                      durationMs: durationMs, performerEstablished: credits.artist != nil,
+                                      available: video.availability == .available, fullTitle: title, channel: channel)
+        // Scored for information only; strict gates are shown, never relaxed.
+        let score = CandidateScoringEngine().score(source: entry.source, candidate: recording)
+        var evidence = score.evidence
+        evidence.removeValue(forKey: "thumbnailURL")
+        evidence["matchingAlgorithmVersion"] = "manual-youtube-10.4.5"
+        evidence["sourceOccurrenceID"] = entry.id.uuidString
+        evidence["selectionMethod"] = "manual"
+        evidence["acceptance"] = "Explicit user confirmation of a pasted YouTube link. Audio is not downloaded or verified."
+        evidence["selectionExplanation"] = "User-selected YouTube video. Not available offline until acquired and verified."
+        evidence["confidenceClassification"] = score.gates.isEmpty ? "User confirmed" : "User confirmed despite automatic checks"
+        evidence["hardGateFailures"] = score.gates.joined(separator: ", ")
+        evidence["metadataSource"] = metadataVerified ? "verified" : "unavailable"
+        evidence["currentAttempt"] = "true"; evidence["rank"] = "1"; evidence["outcome"] = "manual"
+        if let channel { evidence["channel"] = channel }
+        if let thumbnail = MatchingCandidateArtwork.safe(video.thumbnailURL) ?? MatchingCandidateArtwork.safe(URL(string: "https://i.ytimg.com/vi/" + video.id + "/hqdefault.jpg")) {
+            evidence["thumbnailURL"] = thumbnail.absoluteString
+        }
+        let confidence = min(1, max(0, score.score / 100))
+        return PlaylistMigrationCandidate(id: id, entryID: entry.id, provider: "youtube", providerTrackID: video.id, title: title,
+            artist: credits.artist, durationMs: durationMs, confidence: confidence.isFinite ? confidence : 0, evidence: evidence, decision: .accepted)
+    }
+
+    /// Requires the caller's last-read entry; a running worker or concurrent edit wins.
+    @discardableResult
+    func confirmYouTubeCandidate(for expected: PlaylistMigrationEntry, video: YouTubeVideo, metadataVerified: Bool) async throws -> PlaylistMigrationCandidate {
+        _ = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: metadataVerified)
+        return try await db.write { db in
+            var entry = try Self.requiredEntry(expected.id, db: db)
+            guard try entry.model() == expected, entry.localTrackID == nil,
+                  [.pending, .needsReview, .failed, .unavailable].contains(entry.status) else { throw SongMatchingError.staleAttempt }
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            guard !previous.contains(where: { $0.decision == .accepted }) else { throw PlaylistMigrationStorageError.invalidCandidate }
+            let old = previous.first { $0.provider == "youtube" && $0.providerTrackID == video.id }
+            let candidate = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: metadataVerified, id: old?.id ?? UUID())
+            let metadata = [candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist].compactMap { $0 }
+                + candidate.evidence.filter { $0.key != "thumbnailURL" }.flatMap { [$0.key, $0.value] }
+            guard metadata.allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else { throw PlaylistMigrationStorageError.unsafeDiagnostics }
+            let created = try MigrationCandidateRecord.fetchOne(db, key: candidate.id.uuidString)?.createdAt ?? Date()
+            try MigrationCandidateRecord(candidate, createdAt: created).save(db)
+            if entry.status == .unavailable {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matched)
+            entry.status = .matched; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false,
+                                   outcome: "manual", updatedAt: Date()).save(db)
+            if var issue = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt"
+                && Column("resolution") == "open").fetchOne(db) {
+                issue.resolution = .resolved; issue.resolvedAt = Date(); issue.updatedAt = Date(); try issue.update(db)
+            }
+            return candidate
+        }
+    }
+
+    /// Rejects the accepted YouTube selection. The occurrence returns to review and
+    /// becomes eligible for discovery again; the rejected video is never re-proposed.
+    func rejectYouTubeSelection(entryID: UUID, candidateID: UUID) async throws {
+        try await db.write { db in
+            var entry = try Self.requiredEntry(entryID, db: db)
+            guard var record = try MigrationCandidateRecord.fetchOne(db, key: candidateID.uuidString),
+                  record.entryID == entryID.uuidString, record.provider == "youtube", record.decision == .accepted else {
+                throw PlaylistMigrationStorageError.invalidCandidate
+            }
+            guard entry.localTrackID == nil, entry.status == .matched else { throw SongMatchingError.staleAttempt }
+            record.decision = .rejected; record.updatedAt = Date(); try record.update(db)
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .needsReview)
+            entry.status = .needsReview; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint.deleteOne(db, key: entry.id)
+        }
     }
 }

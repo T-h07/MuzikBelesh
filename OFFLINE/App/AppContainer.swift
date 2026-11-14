@@ -22,6 +22,7 @@ final class AppContainer: ObservableObject {
     let youtubeResolver: any YouTubeAudioResolver
     let youtubePreparer: any YouTubeDownloadPreparing
     let youtubeLibrary: any YouTubeLibraryChecking
+    let youtubeManualLookup: YouTubeManualLookup
     let youtubePreferences: YouTubePreferences
     let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
@@ -35,6 +36,7 @@ final class AppContainer: ObservableObject {
         let resolver = youtubeAudioResolver ?? YouTubeKitAudioResolver(metadata: metadata, transport: transport)
         self.youtubeSearch = YouTubeSearchService(provider: youtubeSearchProvider ?? web)
         self.youtubeMetadata = metadata
+        self.youtubeManualLookup = YouTubeManualLookup(metadata: metadata, transport: transport)
         self.youtubeResolver = resolver
         self.youtubePreparer = YouTubeDownloadPreparer(resolver: resolver)
         self.youtubeLibrary = YouTubeLibraryLookup(database: self.storage?.database.dbQueue, paths: self.storage?.paths)

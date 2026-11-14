@@ -12,6 +12,8 @@ struct SongMatchingProgress: Sendable {
     var candidates = 0
     var discoveryFailed = 0
     var deferred = 0
+    /// Explicitly confirmed YouTube selections. Matched only: not downloaded or playable.
+    var selected = 0
     var discoveryPaused = false
     var message: String? = nil
 }
