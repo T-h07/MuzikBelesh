@@ -10,6 +10,7 @@ import SwiftUI
     private var foreground = true
     private var restoring = false
     private var resumeOnIdle = false
+    private var onlyEntries: Set<UUID>?
     private let service: PlaylistMigrationMatchingService
     private let repository: GRDBPlaylistMigrationRepository
     private let execution: any MatchingBackgroundExecuting
@@ -17,8 +18,17 @@ import SwiftUI
          execution: (any MatchingBackgroundExecuting)? = nil) {
         self.service = service; self.repository = repository; self.execution = execution ?? MatchingBackgroundExecution.shared
     }
-    func start(_ id: UUID) {
+    /// Retry This Song: only the given unresolved occurrence is re-attempted.
+    func retry(_ id: UUID, entry: UUID) {
         guard !busy else { return }
+        Task {
+            do { try await repository.markRetryable(entryID: entry); start(id, only: [entry]) }
+            catch { message = "This song cannot be retried now. It may be confirmed or currently matching." }
+        }
+    }
+    func start(_ id: UUID, only: Set<UUID>? = nil) {
+        guard !busy else { return }
+        onlyEntries = only
         activeID = id; busy = true; message = nil; progress = SongMatchingProgress(); stopReason = nil
         // Save user intent before submitting OS work. No scene/view owns the worker.
         work = Task {
@@ -49,7 +59,7 @@ import SwiftUI
             var success = false
             do {
                 if stopReason != nil { throw CancellationError() }
-                try await service.run(migrationID: id) { [weak self] value in await self?.update(value) }
+                try await service.run(migrationID: id, only: onlyEntries) { [weak self] value in await self?.update(value) }
                 try Task.checkCancellation()
                 // A provider-paused attempt requires explicit retry, not a relaunch
                 // loop against rate limits. Its unfinished occurrence checkpoints remain.
@@ -127,7 +137,7 @@ struct PlaylistMatchingControls: View {
         let progress = active ? model.progress : saved
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Button { model.start(session.id) } label: {
-                Label(progress.discoveryPaused || progress.discoveryFailed > 0 ? "Retry Unfinished Discovery" : "Find Matching Recordings", systemImage: "magnifyingglass").frame(minHeight: 44)
+                Label(progress.discoveryPaused || progress.discoveryFailed + progress.externalDeferred > 0 ? "Retry Unfinished Discovery" : "Find Matching Recordings", systemImage: "magnifyingglass").frame(minHeight: 44)
             }.disabled(model.busy || session.status.isTerminal)
                 .accessibilityIdentifier("migration-find-matches")
             Text("Source entries: \(progress.total) • Already local: \(progress.alreadyLocal)")
@@ -135,7 +145,9 @@ struct PlaylistMatchingControls: View {
             Text("Processed entries: \(progress.processed) • Saved candidates: \(progress.candidates)")
             Text("Recommended external: \(progress.recommended) • Review: \(progress.review)")
             Text("Genuine no match: \(progress.noMatch) • Entry errors: \(progress.failed)")
-            Text("Discovery failed: \(progress.discoveryFailed) • Awaiting discovery: \(progress.deferred)")
+            Text("Visited: \(progress.processed)/\(progress.total) • External searches attempted: \(progress.externalAttempted)")
+            Text("Discovery failed: \(progress.discoveryFailed) • External discovery deferred: \(progress.externalDeferred) • Awaiting discovery: \(progress.deferred)")
+            Text("Resolved \(progress.resolved)/\(progress.total) — \(progress.recommended + progress.review) Need Review — \(progress.unresolved) Unresolved").bold()
             Text("Selected YouTube videos: \(progress.selected) (not downloaded) • Offline ready: \(progress.alreadyLocal + progress.localMatches)")
             if active {
                 ProgressView(value: Double(progress.processed), total: Double(max(1, progress.total)))
@@ -148,7 +160,7 @@ struct PlaylistMatchingControls: View {
             }
             if let message = progress.message { Text(message).foregroundStyle(AppColors.error) }
             if progress.discoveryPaused {
-                Text("Anonymous YouTube search may require consent or verification and cannot guarantee bulk discovery. Saved results are kept; Retry later continues only unfinished entries. Meanwhile, open any entry, search it in your browser, and paste the video link to select it manually.")
+                Text("YouTube search was suspended after a verification or rate-limit response. Every song was still checked against your local library; songs that could not be searched are marked External Discovery Deferred. Retry Unfinished Discovery later resumes only those songs. You can also select a saved candidate, paste a YouTube link, or choose a local recording.")
             }
             if let readError { Text(readError).foregroundStyle(AppColors.error) }
             MatchingDeveloperDiagnosticsView()
@@ -169,12 +181,19 @@ struct MigrationCandidateInspection: View {
     var lookup: YouTubeManualLookup? = nil
     @State private var candidates: [PlaylistMigrationCandidate] = []
     @State private var reload = 0
+    @State private var selecting: PlaylistMigrationCandidate?
+    @State private var actionError: String?
+    private var canSelect: Bool {
+        entry.localTrackID == nil && [.pending, .needsReview, .failed, .unavailable].contains(entry.status)
+            && !candidates.contains { $0.decision == .accepted }
+    }
     @State private var error: String?
     @State private var issueMessage: String?
     var body: some View {
         Section("Recording Candidates") {
             if let error { Text(error) }
             if let issueMessage { Text(issueMessage).foregroundStyle(AppColors.error) }
+            if let actionError { Text(actionError).foregroundStyle(AppColors.error) }
             if let url = YouTubeSearchProviderAdapter.browserSearchURL(entry.source) {
                 Link("Search This Song in Browser", destination: url).frame(minHeight: 44)
                 Text("Find the right video in your browser, copy its link, and paste it below. Selecting a video does not download it. To use audio already in your library, choose Resolve Existing Placeholder.").font(.caption)
@@ -199,6 +218,15 @@ struct MigrationCandidateInspection: View {
                     if let duration = candidate.durationMs { Text("Duration: \(duration / 60000):\(String(format: "%02d", duration / 1000 % 60))") }
                     else { Text("Duration: Unknown") }
                     if let url = MatchingCandidateArtwork.watchURL(candidate) { Link("Open on YouTube", destination: url).frame(minHeight: 44) }
+                    if candidate.decision == .pending && canSelect {
+                        HStack {
+                            Button(candidate.provider == "youtube" ? "Select This Video" : "Select This Recording") { selecting = candidate }
+                                .buttonStyle(.borderedProminent).frame(minHeight: 44)
+                                .accessibilityIdentifier("migration-candidate-select-" + candidate.id.uuidString)
+                            Button("Reject", role: .destructive) { reject(candidate) }.buttonStyle(.bordered).frame(minHeight: 44)
+                                .accessibilityIdentifier("migration-candidate-reject-" + candidate.id.uuidString)
+                        }
+                    }
                     Text("\(candidate.provider) • \(candidate.decision.rawValue.capitalized)")
                     if let confidence = candidate.confidence {
                         Text("Confidence: \(Int((confidence * 100).rounded())) / 100 • \(candidate.evidence["confidenceClassification"] ?? "Unknown")")
@@ -207,11 +235,20 @@ struct MigrationCandidateInspection: View {
                     ForEach(["selectionExplanation", "primaryArtistAgreement", "featuredArtistAgreement", "durationDifferenceMs", "sourceVersion", "candidateVersion", "versionCompatibility", "hardGateFailures", "acceptance", "matchingAlgorithmVersion"], id: \.self) { key in
                         if let value = candidate.evidence[key], !value.isEmpty { Text("\(label(key)): \(value)") }
                     }
-                    if candidate.decision == .pending { Text(candidate.provider == "youtube" ? "Pending review. To use this video, open it and paste its link above." : "Pending review.") }
+                    if candidate.decision == .pending { Text("Pending review.") }
                     if candidate.decision == .accepted && candidate.provider == "youtube" { Text("Selected by you • Not downloaded • Not available offline").foregroundStyle(AppColors.accentPrimary) }
                 }.font(.caption).padding(.vertical, 6)
                     .accessibilityIdentifier("migration-candidate-" + candidate.id.uuidString)
             }
+        }.confirmationDialog("Use this recording for this Spotify entry?", isPresented: Binding(get: { selecting != nil }, set: { if !$0 { selecting = nil } }),
+                             titleVisibility: .visible, presenting: selecting) { candidate in
+            Button("Confirm Selection") { select(candidate) }
+            Button("Cancel", role: .cancel) { selecting = nil }
+        } message: { candidate in
+            let gates = candidate.evidence["hardGateFailures"] ?? ""
+            Text(gates.isEmpty
+                 ? "Only this occurrence is changed. Nothing is downloaded and it is not marked as available offline."
+                 : "Automatic checks flagged: \(gates). Confirm only if this is the right recording. Nothing is downloaded.")
         }.task(id: "\(entry.updatedAt.timeIntervalSince1970)-\(reload)") {
             do {
                 candidates = try await repository.candidates(entryID: entry.id).sorted {
@@ -220,6 +257,21 @@ struct MigrationCandidateInspection: View {
                 issueMessage = try await repository.issues(migrationID: entry.migrationID)
                     .first { $0.entryID == entry.id && $0.resolution == .open }?.message
             } catch { self.error = "Candidates could not be read. Reopen this entry to retry." }
+        }
+    }
+    private func select(_ candidate: PlaylistMigrationCandidate) {
+        selecting = nil; actionError = nil
+        Task {
+            do { try await repository.selectCandidate(for: entry, candidateID: candidate.id); reload += 1 }
+            catch SongMatchingError.staleAttempt { actionError = "This entry changed or is being matched. Reopen it and try again." }
+            catch { actionError = "The selection could not be saved. Local recordings must pass audio verification." }
+        }
+    }
+    private func reject(_ candidate: PlaylistMigrationCandidate) {
+        actionError = nil
+        Task {
+            do { try await repository.rejectCandidate(entryID: entry.id, candidateID: candidate.id); reload += 1 }
+            catch { actionError = "The candidate could not be rejected. Reopen this entry and try again." }
         }
     }
     private func label(_ key: String) -> String {

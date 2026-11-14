@@ -124,7 +124,9 @@ final class FinalDiscoveryReliabilityTests: XCTestCase {
             let summary = try await repo.matchingSummary(migrationID: session.id), requests = await transport.requests
             let entries = try await repo.entries(migrationID: session.id)
             XCTAssertEqual(requests.count, 1); XCTAssertTrue(summary.discoveryPaused)
-            XCTAssertEqual(summary.discoveryFailed, 1); XCTAssertEqual(summary.noMatch, 0); XCTAssertEqual(summary.deferred, 199)
+            XCTAssertEqual(summary.discoveryFailed, 1); XCTAssertEqual(summary.noMatch, 0)
+            // The provider is suspended, but every remaining occurrence is still visited locally.
+            XCTAssertEqual(summary.externalDeferred, 199); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.processed, 200)
             XCTAssertEqual(entries.map(\.source), source.entries)
             XCTAssertThrowsError(try YouTubeHTTP.successful(response, fallback: .searchUnavailable)) { XCTAssertEqual($0 as? YouTubeError, expected) }
         }

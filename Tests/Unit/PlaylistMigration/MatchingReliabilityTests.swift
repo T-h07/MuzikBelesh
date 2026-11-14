@@ -30,14 +30,14 @@ final class MatchingReliabilityTests: XCTestCase {
             let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
             try await worker.run(migrationID: session.id) { _ in }
             let stopped = try await repo.matchingSummary(migrationID: session.id)
-            XCTAssertEqual(stopped.processed, 101); XCTAssertEqual(stopped.deferred, 99)
+            XCTAssertEqual(stopped.processed, 200); XCTAssertEqual(stopped.externalDeferred, 99); XCTAssertEqual(stopped.deferred, 0)
             XCTAssertEqual(stopped.discoveryFailed, 1); XCTAssertEqual(stopped.noMatch, 0)
             XCTAssertTrue(stopped.discoveryPaused)
             let firstCalls = await provider.calls
             XCTAssertEqual(firstCalls, Array(0...100))
             let entries = try await repo.entries(migrationID: session.id)
             XCTAssertEqual(entries[100].status, partial ? .needsReview : .failed)
-            XCTAssertEqual(entries[101].status, .pending)
+            XCTAssertEqual(entries[101].status, .failed) // Deferred and retryable, never a genuine no-match.
             let originalCandidates = try await repo.candidates(entryID: entries[0].id)
             // Restart storage before retry; the UI can still inspect title/channel/artwork/link.
             let database = try DatabaseManager(url: f.paths.database)
@@ -54,7 +54,7 @@ final class MatchingReliabilityTests: XCTestCase {
             let calls = await provider.calls, finished = try await reopened.matchingSummary(migrationID: session.id)
             XCTAssertEqual(calls, Array(0...100) + Array(100..<200))
             XCTAssertEqual(finished.candidates, 200); XCTAssertEqual(finished.discoveryFailed, 0)
-            XCTAssertEqual(finished.deferred, 0); XCTAssertEqual(finished.noMatch, 0)
+            XCTAssertEqual(finished.deferred, 0); XCTAssertEqual(finished.externalDeferred, 0); XCTAssertEqual(finished.noMatch, 0)
             let retained = try await reopened.candidates(entryID: entries[0].id)
             XCTAssertEqual(retained, originalCandidates)
         }

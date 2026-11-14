@@ -114,6 +114,7 @@ struct MigrationPlaylistDashboard: View {
                 MigrationProgressOverview(progress: value.progress)
                 if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
                     PlaylistMatchingControls(model: model, session: value.session, repository: repository)
+                    MigrationResolutionSummaryLink(playlistID: playlistID, session: value.session, repository: repository)
                 }
                 if expanded {
                     LabeledContent("Original playlist", value: value.session.sourcePlaylistName)
@@ -179,6 +180,10 @@ struct MigrationOccurrenceDetailView: View {
                     if row.entry.localTrackID == nil && [.pending, .matching, .needsReview, .unavailable, .failed].contains(row.entry.status) {
                         Button("Resolve Existing Placeholder") { resolving = row.entry }.frame(minHeight: 44)
                         Text("Choose and confirm an existing local recording for this Spotify occurrence. To append a separate occurrence, use Add Songs in the playlist.").font(.caption)
+                    }
+                    if let model = container.playlistMatching, row.entry.localTrackID == nil,
+                       [.needsReview, .unavailable, .failed].contains(row.entry.status) {
+                        MigrationRetrySongButton(model: model, entry: row.entry)
                     }
                 }
                 if let repository = library.storage?.playlistMigrations {

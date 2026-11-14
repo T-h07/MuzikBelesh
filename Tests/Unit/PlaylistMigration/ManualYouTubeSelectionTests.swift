@@ -51,8 +51,8 @@ final class ManualYouTubeSelectionTests: XCTestCase {
         let service = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
         try await service.run(migrationID: session.id) { _ in }
         var summary = try await repo.matchingSummary(migrationID: session.id)
-        XCTAssertEqual(summary.processed, 11); XCTAssertEqual(summary.discoveryFailed, 1)
-        XCTAssertEqual(summary.deferred, 189); XCTAssertEqual(summary.noMatch, 0)
+        XCTAssertEqual(summary.processed, 200); XCTAssertEqual(summary.discoveryFailed, 1)
+        XCTAssertEqual(summary.externalDeferred, 189); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.noMatch, 0)
         XCTAssertTrue(summary.discoveryPaused)
         let savedCandidates = summary.candidates
 
@@ -69,7 +69,7 @@ final class ManualYouTubeSelectionTests: XCTestCase {
         XCTAssertEqual(entries[150].status, .matched); XCTAssertNil(entries[150].localTrackID)
         summary = try await repo.matchingSummary(migrationID: session.id)
         XCTAssertEqual(summary.processed, 200); XCTAssertEqual(summary.deferred, 0)
-        XCTAssertEqual(summary.selected, 1); XCTAssertEqual(summary.discoveryFailed, 0)
+        XCTAssertEqual(summary.selected, 1); XCTAssertEqual(summary.discoveryFailed, 0); XCTAssertEqual(summary.externalDeferred, 0)
         XCTAssertEqual(summary.alreadyLocal + summary.localMatches, 0, "A selected video is not offline-ready")
         XCTAssertGreaterThan(summary.candidates, savedCandidates)
         let tracksAfter = try await f.storage.database.dbQueue.read { try StoredTrack.fetchCount($0) }

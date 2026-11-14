@@ -121,9 +121,15 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
     let search: any YouTubeSearchProvider
     var metadata: (any YouTubeMetadataProvider)? = nil
     var pacer: MatchingRequestPacer = .shared
+    /// Bounded exponential backoff with jitter for transient failures only.
+    var maxAttempts = 3
+    var retryDelay: @Sendable (Int) -> Duration = { YouTubeSearchProviderAdapter.backoff($0) }
+    static func backoff(_ attempt: Int) -> Duration {
+        .milliseconds(500 * (1 << min(attempt, 4)) + Int.random(in: 0...250))
+    }
     func forRun() -> any ExternalCandidateDiscovery {
         let cache = MatchingYouTubeResponseCache(search: search, metadata: metadata)
-        return Self(search: cache, metadata: metadata == nil ? nil : cache, pacer: pacer)
+        return Self(search: cache, metadata: metadata == nil ? nil : cache, pacer: pacer, maxAttempts: maxAttempts, retryDelay: retryDelay)
     }
     static func browserSearchURL(_ source: PlaylistMigrationSourceTrack) -> URL? {
         guard let query = queries(source).first else { return nil }
@@ -150,15 +156,18 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
             ? String((base + " Official Audio").prefix(500)) : String(normalized.prefix(500))]
     }
     private func searchWithRetry(_ query: String) async throws -> YouTubeSearchPage {
-        try await pacer.wait()
-        do { return try await search.search(query: query, continuationToken: nil) }
-        catch {
-            // One paced retry for ambiguous search/transport failures. Access
-            // restrictions and rate limits are never retried here.
-            guard let failure = error as? YouTubeError, [.networkUnavailable, .requestTimeout, .searchUnavailable].contains(failure) else { throw error }
-            try await Task.sleep(for: .seconds(1))
+        var attempt = 0
+        while true {
             try await pacer.wait()
-            return try await search.search(query: query, continuationToken: nil)
+            do { return try await search.search(query: query, continuationToken: nil) }
+            catch {
+                // Paced retries for timeouts, connection loss and 5xx only. Access
+                // restrictions, verification and rate limits are never retried here.
+                attempt += 1
+                guard attempt < max(1, maxAttempts), let failure = error as? YouTubeError,
+                      [.networkUnavailable, .requestTimeout, .searchUnavailable].contains(failure) else { throw error }
+                try await Task.sleep(for: retryDelay(attempt - 1))
+            }
         }
     }
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult {

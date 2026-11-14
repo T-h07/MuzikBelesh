@@ -25,7 +25,7 @@ final class MatchingFailureIsolationTests: XCTestCase {
         let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
         try await worker.run(migrationID: session.id) { _ in }
         let paused = try await repo.matchingSummary(migrationID: session.id)
-        XCTAssertTrue(paused.discoveryPaused); XCTAssertEqual(paused.deferred, 197)
+        XCTAssertTrue(paused.discoveryPaused); XCTAssertEqual(paused.externalDeferred, 197); XCTAssertEqual(paused.deferred, 0)
         try await worker.run(migrationID: session.id) { _ in }
         let calls = await provider.calls, entries = try await repo.entries(migrationID: session.id)
         let finished = try await repo.matchingSummary(migrationID: session.id)
@@ -33,7 +33,7 @@ final class MatchingFailureIsolationTests: XCTestCase {
         XCTAssertEqual(entries.map(\.source), source.entries)
         XCTAssertEqual(Set(entries.map(\.id)).count, 200)
         XCTAssertEqual(finished.candidates, 200); XCTAssertEqual(finished.discoveryFailed, 0)
-        XCTAssertEqual(finished.deferred, 0); XCTAssertFalse(finished.discoveryPaused)
+        XCTAssertEqual(finished.deferred, 0); XCTAssertEqual(finished.externalDeferred, 0); XCTAssertFalse(finished.discoveryPaused)
     }
     func testOneFailureAtEntrySevenContinuesAllTwoHundredAndRetryPreservesCandidates() async throws {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
@@ -61,7 +61,7 @@ final class MatchingFailureIsolationTests: XCTestCase {
             let calls = await provider.calls, summary = try await repo.matchingSummary(migrationID: session.id)
             let expected = rateLimited ? 1 : 3
             XCTAssertEqual(calls.count, expected); XCTAssertEqual(summary.discoveryFailed, expected)
-            XCTAssertEqual(summary.deferred, 10 - expected); XCTAssertEqual(summary.noMatch, 0)
+            XCTAssertEqual(summary.externalDeferred, 10 - expected); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.noMatch, 0)
             XCTAssertTrue(summary.discoveryPaused)
         }
     }
@@ -74,11 +74,11 @@ final class MatchingFailureIsolationTests: XCTestCase {
         XCTAssertFalse(policy.observe(provider: 0, entry: UUID(), searchFailed: true, restricted: false))
     }
     func testAmbiguousSearchRetriesOnceWithoutImmediatePauseAndSafeDiagnosticFields() async throws {
-        let search = YTSearchStub([.failure(.searchUnavailable), .failure(.searchUnavailable)])
-        let result = try await YouTubeSearchProviderAdapter(search: search, pacer: .init(interval: .zero))
+        let search = YTSearchStub([.failure(.searchUnavailable), .failure(.searchUnavailable), .failure(.searchUnavailable)])
+        let result = try await YouTubeSearchProviderAdapter(search: search, pacer: .init(interval: .zero), retryDelay: { _ in .zero })
             .discover(MatchingCorrectionTests.source(1).entries[0])
         let calls = await search.calls
-        XCTAssertEqual(calls.count, 2); XCTAssertTrue(result.searchFailed); XCTAssertFalse(result.pauseDiscovery)
+        XCTAssertEqual(calls.count, 3, "Bounded: one attempt plus two backoff retries"); XCTAssertTrue(result.searchFailed); XCTAssertFalse(result.pauseDiscovery)
         let diagnostic = YouTubeDiscoveryDiagnostic(stage: .http, category: .rateLimited, status: 429, responseType: .html)
         XCTAssertEqual(diagnostic.developerSummary, "Category: rateLimited\nOperation: search\nStage: http\nHTTP: 429\nResponse: html")
     }
