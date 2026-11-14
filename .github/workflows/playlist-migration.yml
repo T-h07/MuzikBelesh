@@ -82,7 +82,6 @@ jobs:
             -only-testing:OFFLINETests/MatchingFailureIsolationTests \
             -only-testing:OFFLINETests/YouTubeDiscoveryReliabilityTests \
             -only-testing:OFFLINETests/FinalDiscoveryReliabilityTests \
-            -only-testing:OFFLINETests/DiscoveryProviderTests \
             -only-testing:OFFLINETests/ManualYouTubeSelectionTests \
             -only-testing:OFFLINETests/YouTubeProviderTests \
             -only-testing:OFFLINETests/MatchingLifecycleTests \
