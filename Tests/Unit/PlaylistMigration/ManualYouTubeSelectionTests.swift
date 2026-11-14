@@ -119,7 +119,11 @@ final class ManualYouTubeSelectionTests: XCTestCase {
         let first = try await repo.confirmYouTubeCandidate(for: entry, video: video(), metadataVerified: true)
         entry = try await repo.entries(migrationID: session.id)[0]
         do { try await repo.confirmYouTubeCandidate(for: entry, video: video("abcdefghijk"), metadataVerified: true); XCTFail("Second accept must fail") }
-        catch { XCTAssertEqual(error as? PlaylistMigrationStorageError, .invalidCandidate) }
+        // A matched entry is no longer selectable: the status guard rejects the
+        // replacement before any write, so the existing selection must be rejected first.
+        catch { XCTAssertEqual(error as? SongMatchingError, .staleAttempt) }
+        let unchanged = try await repo.candidates(entryID: entry.id)
+        XCTAssertEqual(unchanged.map(\.providerTrackID), [id]); XCTAssertEqual(unchanged.first?.decision, .accepted)
 
         try await repo.rejectYouTubeSelection(entryID: entry.id, candidateID: first.id)
         entry = try await repo.entries(migrationID: session.id)[0]
