@@ -57,8 +57,20 @@ checkpoints. `MatchingFailureIsolationTests` adds consecutive failure/recovery
 over 200 entries. Existing isolation, interruption, candidate-history, scoring and
 background-lifecycle tests remain in the focused workflow.
 
-Windows SQLite/static regression checks and `git diff --check` pass. Native
-application compilation and focused XCTest are to be run using the existing
-macOS `Playlist migration verification` workflow with `matching_only=true`.
-No IPA build is requested. Physical-iPhone recovery and uninterrupted 200-entry
-anonymous discovery remain device acceptance checks, not established results.
+Windows SQLite/static regression checks and `git diff --check` pass.
+[Native verification run 43637026236](https://github.com/T-h07/MuzikBelesh/actions/runs/43637026236)
+completed successfully on 2026-11-14, testing implementation commit
+`0caf86ab9edccfffc155367ea60735015a016450` with `matching_only=true`:
+
+- macOS foundation XCTest: **14 tests, zero failures**.
+- Xcode 26.2 application and all test products: **TEST BUILD SUCCEEDED**.
+- iOS 26.2 simulator focused XCTest: **91 tests, zero failures**. This includes
+  all eight FinalDiscoveryReliabilityTests and five MatchingFailureIsolationTests,
+  plus scoring, candidate persistence, cancellation and background lifecycle suites.
+
+The verification-note commit changes documentation only; executable sources,
+tests and workflow are identical to the tested implementation. No IPA build was
+triggered. Physical-iPhone recovery and uninterrupted 200-entry anonymous discovery
+remain device acceptance checks, not established results. In particular, fixture
+success does not establish why YouTube redirected the original iPhone or guarantee
+that the anonymous provider will permit a large playlist on that network.
