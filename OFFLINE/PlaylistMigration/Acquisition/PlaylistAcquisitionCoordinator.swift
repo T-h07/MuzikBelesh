@@ -490,9 +490,9 @@ import OSLog
             // Only playlists that Phase 10.5 acquired for; never a surprise at upgrade.
             guard !migrationLinks.isEmpty else { continue }
             let rows: [MigrationPlaylistRow]
-            let repository = migrations, playlistID = playlist.playlistID
+            let occurrences = migrations, playlistID = playlist.playlistID
             // Bounded file checks run off the main actor.
-            do { rows = try await Task.detached(priority: .utility) { try repository.rows(playlistID: playlistID) }.value } catch { continue }
+            do { rows = try await Task.detached(priority: .utility) { try occurrences.rows(playlistID: playlistID) }.value } catch { continue }
             let ready = rows.filter { $0.playableTrack != nil }.count
             let complete = !rows.isEmpty && ready == rows.count
             let control = controls[migrationID]

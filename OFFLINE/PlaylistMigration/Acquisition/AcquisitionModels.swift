@@ -128,7 +128,7 @@ enum AcquisitionFailureCategory: String, Sendable, CaseIterable {
         case .streamExpired: "The temporary audio link expired."
         case .unsupportedFormat: "No supported audio-only stream is available for this recording."
         case .verificationFailed: "The downloaded audio failed verification."
-        case .insufficientStorage: "There is not enough storage to save this song."
+        case .insufficientStorage: "The audio file could not be stored. Check available storage."
         case .sourceUnavailable: "This recording is unavailable, private or removed."
         case .accessRestricted: "This recording requires access or verification the app cannot provide."
         case .userCancelled: "The download was cancelled."
