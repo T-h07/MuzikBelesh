@@ -910,3 +910,82 @@ extension GRDBPlaylistMigrationRepository {
     }
 }
 #endif
+
+// MARK: - Phase 10.5 acquisition association
+
+extension GRDBPlaylistMigrationRepository {
+    /// Attaches one verified downloaded recording to every listed occurrence that still
+    /// holds the exact accepted YouTube decision it was linked for. Decoding and SHA-256
+    /// verification run once, before (and outside) the write transaction. A changed or
+    /// rejected decision is `.stale` and is never overwritten by a late completion.
+    func associateAcquiredTrack(trackID: String, occurrences: [(entryID: UUID, candidateID: UUID)]) async throws -> [UUID: AcquisitionAssociation] {
+        guard !occurrences.isEmpty else { return [:] }
+        let track: StoredTrack
+        do { track = try await verifiedMatchingAudio(trackID: trackID) }
+        catch is CancellationError { throw CancellationError() }
+        catch { return Dictionary(uniqueKeysWithValues: occurrences.map { ($0.entryID, AcquisitionAssociation.invalidAudio) }) }
+        return try await db.write { [self] db in
+            var result: [UUID: AcquisitionAssociation] = [:]
+            do { try validateMatchingAudio(track, db: db) }
+            catch { return Dictionary(uniqueKeysWithValues: occurrences.map { ($0.entryID, AcquisitionAssociation.invalidAudio) }) }
+            for item in occurrences {
+                guard var entry = try MigrationEntryRecord.fetchOne(db, key: item.entryID.uuidString) else { result[item.entryID] = .stale; continue }
+                let accepted = try Self.matchingCandidates(item.entryID, db: db).filter { $0.decision == .accepted }
+                guard accepted.count == 1, accepted[0].id == item.candidateID, accepted[0].provider == "youtube" else { result[item.entryID] = .stale; continue }
+                if entry.status == .ready && entry.localTrackID == trackID { result[item.entryID] = .associated; continue }
+                guard entry.status == .matched, entry.localTrackID == nil else { result[item.entryID] = .stale; continue }
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .ready)
+                entry.status = .ready; entry.localTrackID = trackID; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt)
+                try entry.update(db)
+                result[item.entryID] = .associated
+            }
+            return result
+        }
+    }
+
+    /// Resolves an occurrence with audio the user imported from Files and explicitly
+    /// confirmed after inspecting both sets of metadata. The occurrence keeps its source
+    /// identity and position. A previously accepted YouTube selection (for example one
+    /// whose source is not downloadable) is retained as evidence: it returns to `pending`
+    /// and is marked superseded, never deleted or silently rejected.
+    func confirmImportedRecording(for expected: PlaylistMigrationEntry, trackID: String) async throws {
+        let track = try await verifiedMatchingAudio(trackID: trackID)
+        try await db.write { [self] db in
+            var entry = try Self.requiredEntry(expected.id, db: db)
+            guard try entry.model() == expected, entry.localTrackID == nil,
+                  [.pending, .matching, .needsReview, .matched, .failed, .unavailable].contains(entry.status) else { throw SongMatchingError.staleAttempt }
+            try validateMatchingAudio(track, db: db)
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            guard !previous.contains(where: { $0.provider == "local" && $0.providerTrackID == trackID && $0.decision == .rejected }) else {
+                throw PlaylistMigrationStorageError.invalidCandidate
+            }
+            for old in previous where old.decision == .accepted {
+                guard old.provider != "local", var record = try MigrationCandidateRecord.fetchOne(db, key: old.id.uuidString) else {
+                    throw PlaylistMigrationStorageError.invalidCandidate
+                }
+                var evidence = old.evidence
+                evidence["supersededBy"] = "local-file"; evidence["currentAttempt"] = "false"
+                record.evidence = try migrationJSON(evidence); record.decision = .pending; record.updatedAt = Date()
+                try record.update(db)
+            }
+            if entry.status != .matched && entry.status != .matching {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .ready)
+            let artist = try track.artistID.flatMap { try StoredArtist.fetchOne(db, key: $0)?.name }
+            let title = MatchingSafeText.metadata(track.title).isEmpty ? "Imported audio" : MatchingSafeText.metadata(track.title)
+            let safeArtist = artist.map { MatchingSafeText.metadata($0) }.flatMap { $0.isEmpty ? nil : $0 }
+            let old = previous.first { $0.provider == "local" && $0.providerTrackID == trackID }
+            let candidate = PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: expected.id, provider: "local", providerTrackID: trackID,
+                title: String(title.prefix(500)), artist: safeArtist, durationMs: track.durationMs, confidence: nil,
+                evidence: ["matchingAlgorithmVersion": "manual-10.5-file", "selectionMethod": "local-file", "sourceOccurrenceID": entry.id,
+                    "acceptance": "Explicit user confirmation of audio imported from Files after metadata inspection",
+                    "selectionExplanation": "The user imported and confirmed this file. Managed audio decoding and SHA-256 verification passed.",
+                    "confidenceClassification": "User confirmed; no automatic identity claim", "currentAttempt": "true", "rank": "1"], decision: .accepted)
+            try MigrationCandidateRecord(candidate, createdAt: Date()).save(db)
+            entry.status = .ready; entry.localTrackID = trackID; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false, outcome: "local", updatedAt: Date()).save(db)
+            try Self.resolveAttemptIssue(entry.id, db: db)
+        }
+    }
+}

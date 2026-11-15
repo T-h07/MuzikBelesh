@@ -108,6 +108,7 @@ final class DatabaseManager {
         }
         MigrationStorageSchema.register(in: &migrator)
         HybridPlaylistSchema.register(in: &migrator)
+        AcquisitionSchema.register(in: &migrator)
         if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
         else { try migrator.migrate(dbQueue) }
     }

@@ -17,13 +17,13 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
         catch { XCTAssertEqual(error as? E, expected, file: file, line: line) }
     }
 
-    func testFreshSchemaAndReopeningHaveExactlyFifteenMigrations() throws {
+    func testFreshSchemaAndReopeningHaveExactlySixteenMigrations() throws {
         let f = try LibraryFixture(count: 0)
-        XCTAssertEqual(try count("grdb_migrations", f), 15)
+        XCTAssertEqual(try count("grdb_migrations", f), 16)
         for table in ["playlist_migrations", "migration_entries", "migration_candidates", "migration_issues", "playlist_local_occurrences", "migration_matching_jobs", "migration_matching_checkpoints"] { XCTAssertEqual(try count(table, f), 0) }
         let reopened = try DatabaseManager(url: f.paths.database)
         let migrations = try reopened.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
-        XCTAssertEqual(migrations.count, 15); XCTAssertEqual(migrations.last, "v015_matching_user_pause")
+        XCTAssertEqual(migrations.count, 16); XCTAssertEqual(migrations.last, "v016_playlist_audio_acquisition")
         XCTAssertEqual(try f.foreignKeys(), 0)
     }
 
