@@ -25,7 +25,12 @@ struct SongMatchingProgress: Sendable {
     var discoveryFailedRequests = 0
     /// Live per-source metrics for this attempt (not persisted).
     var providerStats: [String: DiscoveryProviderStats] = [:]
+    /// The run stopped because the device appears to be offline (not a song failure).
+    var waitingForConnection = false
     var resolved: Int { alreadyLocal + localMatches + selected }
+    var readyToReview: Int { recommended + review }
+    var needAttention: Int { discoveryFailed + failed + noMatch }
+    var remaining: Int { deferred + externalDeferred }
     var unresolved: Int { max(0, total - resolved - recommended - review) }
     var discoveryPaused = false
     var message: String? = nil
@@ -65,6 +70,8 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
     let policy: MatchDecisionPolicy
     let restriction: ProviderRestrictionPolicy
     private var running = false
+    /// Final report of the last completed run (read by the view model after `run` returns).
+    private(set) var lastReport = SongMatchingProgress()
     init(repository: GRDBPlaylistMigrationRepository, providers: [any ExternalCandidateDiscovery],
          configuration: SongMatchingConfiguration = .standard, restriction: ProviderRestrictionPolicy = .standard) {
         self.repository = repository; self.providers = Array(providers.prefix(3)); self.restriction = restriction
@@ -95,7 +102,10 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
 
     /// `only` limits the attempt to specific occurrences (Retry This Song). Every
     /// other occurrence, decision and checkpoint is left untouched.
-    func run(migrationID: UUID, only: Set<UUID>? = nil, progress: @escaping @Sendable (SongMatchingProgress) async -> Void) async throws {
+    /// `retryFailed == false` is an ordinary resume: only unfinished/deferred songs are
+    /// searched. `true` additionally retries songs whose earlier search failed.
+    func run(migrationID: UUID, only: Set<UUID>? = nil, retryFailed: Bool = true,
+             progress: @escaping @Sendable (SongMatchingProgress) async -> Void) async throws {
         guard !running else { throw SongMatchingError.busy }
         running = true
         defer { running = false }
@@ -103,9 +113,12 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
         do {
             let entries = try await repository.entries(migrationID: migrationID).filter { only?.contains($0.id) ?? true }
             var index = try await repository.matchingLibrary()
-            var report = SongMatchingProgress(total: entries.count)
-            report.candidates = try await repository.matchingSummary(migrationID: migrationID).candidates
-            report.deferred = entries.filter { [.pending, .matching].contains($0.status) }.count
+            // Progress starts from authoritative persisted state, never from zero.
+            var report = try await repository.matchingSummary(migrationID: migrationID)
+            report.discoveryPaused = false; report.message = nil
+            var lastRefresh = ContinuousClock.now
+            var connectivityStreak = 0
+            var claimed = 0, skippedCompleted = 0
             // Enabled sources only, in preference order (e.g. SearXNG, then direct YouTube).
             let runProviders = providers.map { $0.forRun() }.filter(\.isEnabled)
             // Independent health per source: restriction cooldowns/probes and failure streaks.
@@ -114,23 +127,19 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             await progress(report)
             for entry in entries {
                 try Task.checkCancellation()
-                guard let lease = try await repository.claimMatchingEntry(entry, session: session) else {
-                    report.processed += 1
-                    if entry.status == .ready { report.alreadyLocal += 1 }
-                    else if entry.status == .matched { report.selected += 1 }
-                    else if entry.status == .needsReview {
-                        let prior = try await repository.candidates(entryID: entry.id)
-                        if prior.contains(where: { $0.evidence["currentAttempt"] == "true" && $0.evidence["outcome"] == "recommended" && $0.decision == .pending }) { report.recommended += 1 }
-                        else { report.review += 1 }
-                    }
-                    await progress(report); continue
+                guard let lease = try await repository.claimMatchingEntry(entry, session: session, retryFailed: retryFailed) else {
+                    skippedCompleted += 1 // Already counted by the persisted summary.
+                    continue
                 }
-                if [.pending, .matching].contains(entry.status) { report.deferred -= 1 }
+                claimed += 1
+                let wasUnfinished = [.pending, .matching].contains(entry.status)
+                if wasUnfinished { report.deferred -= 1 }
                 do {
                     if lease.previousCandidates.count >= 60 {
                         let decision = SongMatchDecision(outcome: .review, ranked: [], explanation: "Saved candidate history limit reached. Review existing alternatives before further discovery.", margin: 0)
                         try await repository.commitMatching(lease, decision: decision, issue: decision.explanation)
-                        report.processed += 1; report.review += 1; await progress(report); continue
+                        if wasUnfinished { report.processed += 1 }
+                        report.review += 1; await progress(report); continue
                     }
                     let rejected = Set(lease.previousCandidates.filter { $0.decision == .rejected }.map { $0.provider + ":" + ($0.providerTrackID ?? "") })
                     let local = index.candidates(for: entry.source)
@@ -147,6 +156,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                         var truncated = local.truncated
                         var seen = Set(scores.map { $0.recording.provider + ":" + $0.recording.identity })
                         var attempted = false, foundCandidates = false, failedAny = false
+                        var connectivityOnly = true, sawConnectivityFailure = false
                         var attemptedProviders = Set<Int>(), skipped = Set<Int>()
                         func escalate(_ number: Int, _ reason: String) {
                             restrictions[number].probes += 1; restrictions[number].reason = reason; restrictions[number].failStreak = 0
@@ -177,6 +187,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                     guard !rejected.contains(identity), seen.insert(identity).inserted else { continue }
                                     scores.append(scoring.score(source: entry.source, candidate: recording))
                                 }
+                                if found.failure == .networkUnavailable { sawConnectivityFailure = true } else { connectivityOnly = false }
                                 if found.failures.isEmpty {
                                     restrictions[number] = ProviderHealth()
                                     if !found.recordings.isEmpty { foundCandidates = true }
@@ -191,7 +202,8 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                 if let failure = found.failure {
                                     MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: name)
                                 }
-                                if providerWide { escalate(number, reason) } else if found.searchFailed { songFailure(number) }
+                                if providerWide { escalate(number, reason) }
+                                else if found.searchFailed && found.failure != .networkUnavailable { songFailure(number) }
                             } catch {
                                 if Task.isCancelled || error is CancellationError { throw CancellationError() }
                                 MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: name)
@@ -203,7 +215,10 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                     : (error as? YouTubeError)?.localizedDescription ?? "Discovery is unavailable."
                                 issue = (runProviders.count > 1 ? name + ": " : "") + reason + " Discovery incomplete; saved candidates are preserved. Retry later."
                                 report.message = issue
-                                if MatchingDiscoveryFailurePolicy.immediate(error as? YouTubeError) { escalate(number, reason) } else { songFailure(number) }
+                                let offline = (error as? YouTubeError) == .networkUnavailable
+                                if offline { sawConnectivityFailure = true } else { connectivityOnly = false }
+                                if MatchingDiscoveryFailurePolicy.immediate(error as? YouTubeError) { escalate(number, reason) }
+                                else if !offline { songFailure(number) }
                             }
                         }
                         // Pass 1: sources in preference order. A cooling source is skipped,
@@ -227,8 +242,15 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                         }
                         report.discoveryPaused = !providers.isEmpty && runProviders.indices.allSatisfy { restrictions[$0].suspended }
                         if attempted { report.externalAttempted += 1 }
+                        let offline = failedAny && !foundCandidates && connectivityOnly && sawConnectivityFailure
+                        connectivityStreak = offline ? connectivityStreak + 1 : (attempted ? 0 : connectivityStreak)
                         if foundCandidates {
                             issue = nil // An earlier source failed, but a later one completed discovery.
+                        } else if offline {
+                            // Lost connectivity (e.g. while locked/suspended) is not a song failure:
+                            // the song stays unfinished and an ordinary resume searches it again.
+                            deferred = true; discoveryFailed = true
+                            issue = "External discovery deferred. Waiting for an internet connection."
                         } else if !providers.isEmpty && !attempted {
                             deferred = true; discoveryFailed = true
                             issue = "External discovery deferred. " + (restrictions.first { $0.suspended }?.reason ?? "No discovery source is enabled.")
@@ -274,14 +296,28 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                     report.failed += 1; report.message = category.message
                     if category == .changedRecords { index = try await repository.matchingLibrary() }
                 }
-                // One occurrence never stops the job; only cancellation or fatal
-                // storage/session failures propagate out of this loop.
-                report.processed += 1
+                // One occurrence never stops the job; only cancellation, fatal storage/session
+                // failures, or a lost connection (saved as unfinished) end the loop.
+                if wasUnfinished { report.processed += 1 }
+                if ContinuousClock.now - lastRefresh > .seconds(2) {
+                    // Coalesced: correct counters for re-searched songs from persisted state.
+                    var fresh = try await repository.matchingSummary(migrationID: migrationID)
+                    fresh.providerStats = report.providerStats; fresh.discoveryPaused = report.discoveryPaused
+                    fresh.message = report.message
+                    report = fresh; lastRefresh = .now
+                }
                 await progress(report)
+                if connectivityStreak >= 3 { report.waitingForConnection = true; break }
             }
+            MatchingDiagnostics.run(session: migrationID, claimed: claimed, skippedCompleted: skippedCompleted,
+                                    retryFailed: retryFailed, offline: report.waitingForConnection)
             try Task.checkCancellation()
-            try await repository.finishMatching(session, paused: report.discoveryPaused)
-            await progress(try await repository.matchingSummary(migrationID: migrationID))
+            try await repository.finishMatching(session, paused: report.discoveryPaused || report.waitingForConnection)
+            var final = try await repository.matchingSummary(migrationID: migrationID)
+            final.waitingForConnection = report.waitingForConnection; final.providerStats = report.providerStats
+            if final.discoveryPaused == false { final.discoveryPaused = report.discoveryPaused }
+            lastReport = final
+            await progress(final)
         } catch {
             // A separate non-cancelled cleanup task closes only this lease. If a
             // newer run/user action owns the session, its revision wins.

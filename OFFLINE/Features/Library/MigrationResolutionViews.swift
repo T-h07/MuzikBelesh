@@ -11,7 +11,7 @@ struct MigrationResolutionSummaryLink: View {
             MigrationResolutionListView(playlistID: playlistID, migrationID: session.id, repository: repository)
         } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Label("Review Songs by Resolution", systemImage: "list.bullet.rectangle")
+                Label("All Songs by Status", systemImage: "list.bullet.rectangle")
                 if let overview { Text(overview.summary).font(.caption).foregroundStyle(AppColors.textSecondary) }
             }.frame(minHeight: 44)
         }.accessibilityIdentifier("migration-resolution-list")
@@ -48,8 +48,12 @@ struct MigrationResolutionListView: View {
                                 Text("\(item.entry.position + 1). \(item.entry.source.title)").font(.body)
                                 Text(([item.entry.source.primaryArtist] + [item.entry.source.album]).compactMap { $0 }.joined(separator: " • "))
                                     .font(.caption).foregroundStyle(AppColors.textSecondary)
-                                if item.pendingCandidates > 0 { Text("\(item.pendingCandidates) saved candidate(s) to review").font(.caption) }
-                                if let reason = item.reason, item.category.isUnresolved { Text(reason).font(.caption).foregroundStyle(AppColors.error) }
+                                if item.pendingCandidates > 0 && item.category.isUnresolved {
+                                    Text("\(item.pendingCandidates) suggestion\(item.pendingCandidates == 1 ? "" : "s")").font(.caption)
+                                }
+                                if item.category.isUnresolved, item.category != .needsReview, let reason = MatchingUserText.reason(item.reason) {
+                                    Text(reason).font(.caption).foregroundStyle(AppColors.textSecondary)
+                                }
                             }
                         }.accessibilityIdentifier("migration-resolution-" + item.id.uuidString)
                     }
@@ -74,6 +78,5 @@ struct MigrationRetrySongButton: View {
     var body: some View {
         Button("Retry This Song") { model.retry(entry.migrationID, entry: entry.id) }
             .disabled(model.busy).frame(minHeight: 44).accessibilityIdentifier("migration-retry-song")
-        Text("Searches again for this occurrence only. Confirmed selections and other songs are unchanged.").font(.caption)
     }
 }

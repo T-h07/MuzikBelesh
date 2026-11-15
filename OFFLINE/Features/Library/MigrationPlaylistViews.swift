@@ -113,7 +113,8 @@ struct MigrationPlaylistDashboard: View {
                 Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
                 MigrationProgressOverview(progress: value.progress)
                 if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
-                    PlaylistMatchingControls(model: model, session: value.session, repository: repository)
+                    PlaylistMatchingControls(model: model, session: value.session, repository: repository,
+                                             playlistID: playlistID, lookup: container.youtubeManualLookup)
                     MigrationResolutionSummaryLink(playlistID: playlistID, session: value.session, repository: repository)
                 }
                 if expanded {
@@ -189,10 +190,11 @@ struct MigrationOccurrenceDetailView: View {
                 if let repository = library.storage?.playlistMigrations {
                     MigrationCandidateInspection(entry: row.entry, repository: repository, lookup: container.youtubeManualLookup)
                 }
-                Section("Entry Issues") {
-                    let issues = value.issuesByEntry[occurrenceID] ?? []
-                    if issues.isEmpty { Text("No recorded issues for this entry.") }
-                    ForEach(issues) { MigrationIssueView(issue: $0, position: row.entry.position) }
+                // Matching reasons are shown in plain language under the suggestions;
+                // only import-level issues remain listed here.
+                let issues = (value.issuesByEntry[occurrenceID] ?? []).filter { $0.code != "matching-attempt" }
+                if !issues.isEmpty {
+                    Section("Issues") { ForEach(issues) { MigrationIssueView(issue: $0, position: row.entry.position) } }
                 }
             } else { Text("This migration entry is no longer available.") }
         }.scrollContentBackground(.hidden).screenBackground()

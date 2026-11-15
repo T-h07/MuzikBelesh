@@ -72,7 +72,7 @@ import OSLog
         if #available(iOS 26.0, *), let task = systemTask as? BGContinuedProcessingTask {
             task.progress.totalUnitCount = Int64(max(1, progress.total))
             task.progress.completedUnitCount = Int64(progress.processed)
-            task.updateTitle("Matching recordings", subtitle: "\(progress.processed) of \(progress.total) entries processed")
+            task.updateTitle("Matching songs", subtitle: "\(progress.processed) of \(progress.total) songs checked")
         }
     }
     func finish(success: Bool) {

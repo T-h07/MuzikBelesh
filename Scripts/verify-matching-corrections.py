@@ -74,6 +74,23 @@ def test_schema_upgrade():
     print("PASS: actual additive schema SQL, 200 unchanged source occurrences, independent duplicates, removal, FK cascades, checkpoints and preserved playback position")
 
 
+def test_consumer_matching_presentation():
+    """Consumer matching screens: no developer diagnostics, raw HTTP codes or provider internals in UI strings."""
+    files = ["OFFLINE/Features/Library/PlaylistMatchingViewModel.swift", "OFFLINE/Features/Library/MigrationReviewQueue.swift",
+             "OFFLINE/Features/Library/MigrationResolutionViews.swift", "OFFLINE/Features/Library/MigrationPlaylistViews.swift"]
+    for name in files:
+        source = (ROOT / name).read_text(encoding="utf-8")
+        assert "MatchingDeveloperDiagnosticsView" not in source and "Developer diagnostics" not in source, name
+        for literal in re.findall(r'Text\("([^"]*)"', source):
+            for banned in ("HTTP", "invidious", "searxng", "Discovery incomplete", "Algorithm", "checkpoint"):
+                assert banned.lower() not in literal.lower(), f"{name}: {literal}"
+    # The manual-link confirmation must not route through a Link in the same control.
+    manual = (ROOT / "OFFLINE/Features/Library/PlaylistMatchingViewModel.swift").read_text(encoding="utf-8")
+    body = manual[manual.index("struct ManualYouTubeSelectionView"):]
+    assert "Link(" not in body, "ManualYouTubeSelectionView must use explicit, separately styled buttons"
+    print("PASS: consumer matching screens contain no developer diagnostics, raw HTTP/provider text or Link-based confirmation")
+
+
 def enumerate_to_args(ids):
     return [(identifier, position) for position, identifier in enumerate(ids)]
 
@@ -81,3 +98,4 @@ def enumerate_to_args(ids):
 if __name__ == "__main__":
     test_metadata_abort()
     test_schema_upgrade()
+    test_consumer_matching_presentation()

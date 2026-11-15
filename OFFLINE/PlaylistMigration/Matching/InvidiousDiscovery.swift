@@ -2,6 +2,8 @@ import Foundation
 
 enum InvidiousError: Error, Equatable, Sendable {
     case unreachable, timeout, server(Int), badResponse, rateLimited, apiDisabled(Int), noHealthyInstance, insecure
+    /// The device itself has no connection: never held against an instance.
+    case offline
     /// Genuine connection/server failures may fail over to another instance.
     /// Rate limits and access refusals never do.
     var allowsFailover: Bool {
@@ -17,6 +19,7 @@ enum InvidiousError: Error, Equatable, Sendable {
         case .apiDisabled(let code): "search API disabled or requires credentials (HTTP \(code))"
         case .noHealthyInstance: "no public instance is currently available"
         case .insecure: "not HTTPS"
+        case .offline: "device offline"
         }
     }
 }
@@ -132,7 +135,7 @@ actor InvidiousInstancePool {
             && ($0.checkedAt.map { $0.duration(to: clock.now) < healthTTL } ?? false) }
         if let best = healthy.min(by: { ($0.status.latency ?? .infinity) < ($1.status.latency ?? .infinity) }) { return best.status.host }
         for index in entries.indices where !cooling(entries[index]) {
-            if await check(index) { return entries[index].status.host }
+            if try await check(index) { return entries[index].status.host }
         }
         throw InvidiousError.noHealthyInstance
     }
@@ -140,11 +143,13 @@ actor InvidiousInstancePool {
     /// Health-checks every host (Test Discovery Providers). Sequential and paced by the caller.
     func checkAll() async -> [InvidiousInstanceStatus] {
         await loadRegistryIfNeeded()
-        for index in entries.indices where !cooling(entries[index]) || entries[index].status.state != .rateLimited { _ = await check(index) }
+        for index in entries.indices where !cooling(entries[index]) || entries[index].status.state != .rateLimited {
+            if (try? await check(index)) == nil { break } // Offline: no host is to blame.
+        }
         return statuses
     }
 
-    private func check(_ index: Int) async -> Bool {
+    private func check(_ index: Int) async throws -> Bool {
         let host = entries[index].status.host
         do {
             let (videos, seconds) = try await request(host: host, query: "music")
@@ -152,7 +157,8 @@ actor InvidiousInstancePool {
             guard !videos.isEmpty else { mark(index, .badResponse); return false }
             entries[index].status.state = .healthy; entries[index].status.latency = seconds; entries[index].retryAt = nil
             return true
-        } catch let error as InvidiousError { mark(index, error); return false }
+        } catch InvidiousError.offline { throw InvidiousError.offline }
+        catch let error as InvidiousError { mark(index, error); return false }
         catch { mark(index, .unreachable); return false }
     }
 
@@ -169,6 +175,7 @@ actor InvidiousInstancePool {
     }
 
     func report(_ host: String, _ error: InvidiousError) {
+        guard error != .offline else { return }
         if let index = entries.firstIndex(where: { $0.status.host == host }) { mark(index, error) }
     }
 
@@ -195,7 +202,11 @@ actor InvidiousInstancePool {
         do { response = try await transport.send(request) }
         catch {
             if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
-            throw (error as? URLError)?.code == .timedOut ? InvidiousError.timeout : InvidiousError.unreachable
+            switch (error as? URLError)?.code {
+            case .notConnectedToInternet?, .networkConnectionLost?, .dataNotAllowed?, .internationalRoamingOff?: throw InvidiousError.offline
+            case .timedOut?: throw InvidiousError.timeout
+            default: throw InvidiousError.unreachable
+            }
         }
         try Task.checkCancellation()
         let elapsed = started.duration(to: clock.now)
@@ -221,7 +232,7 @@ struct InvidiousPoolSearch: YouTubeSearchProvider {
         var last = InvidiousError.noHealthyInstance
         for _ in 0..<2 {
             let host: String
-            do { host = try await pool.select() } catch { break }
+            do { host = try await pool.select() } catch { last = error as? InvidiousError ?? .noHealthyInstance; break }
             do { return YouTubeSearchPage(videos: try await pool.search(query, on: host), continuationToken: nil) }
             catch let error as InvidiousError {
                 await pool.report(host, error)
@@ -232,7 +243,8 @@ struct InvidiousPoolSearch: YouTubeSearchProvider {
         switch last {
         case .rateLimited: throw YouTubeError.rateLimited          // Provider-wide: service cooldown, no instance hopping.
         case .timeout: throw YouTubeError.requestTimeout
-        case .unreachable: throw YouTubeError.networkUnavailable
+        case .offline: throw YouTubeError.networkUnavailable          // Device connectivity, not the host.
+        case .unreachable: throw YouTubeError.searchUnavailable
         // Every instance is down or cooling down: provider-wide, so songs are deferred, not "searched".
         case .noHealthyInstance: throw YouTubeError.sourceUnavailable
         default: throw YouTubeError.searchUnavailable

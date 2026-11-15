@@ -23,7 +23,7 @@ final class PlaylistMigrationPersistenceTests: XCTestCase {
         for table in ["playlist_migrations", "migration_entries", "migration_candidates", "migration_issues", "playlist_local_occurrences", "migration_matching_jobs", "migration_matching_checkpoints"] { XCTAssertEqual(try count(table, f), 0) }
         let reopened = try DatabaseManager(url: f.paths.database)
         let migrations = try reopened.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
-        XCTAssertEqual(migrations.count, 14); XCTAssertEqual(migrations.last, "v014_matching_recovery_hybrid_playlists")
+        XCTAssertEqual(migrations.count, 15); XCTAssertEqual(migrations.last, "v015_matching_user_pause")
         XCTAssertEqual(try f.foreignKeys(), 0)
     }
 

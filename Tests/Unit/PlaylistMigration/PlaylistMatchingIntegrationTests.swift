@@ -10,7 +10,7 @@ private actor MatchingMockProvider: ExternalCandidateDiscovery {
     init(values: [SongRecording] = [], fails: Bool = false) { self.values = values; self.fails = fails }
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult {
         calls += 1
-        if fails { throw YouTubeError.networkUnavailable }
+        if fails { throw YouTubeError.searchUnavailable } // Song-level failure; networkUnavailable now means "device offline".
         return MatchingDiscoveryResult(recordings: values)
     }
 }

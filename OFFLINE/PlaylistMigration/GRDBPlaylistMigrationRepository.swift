@@ -338,7 +338,11 @@ extension GRDBPlaylistMigrationRepository {
             return MatchingSessionLease(id: migrationID, revision: canonical.updatedAt)
         }
     }
-    func claimMatchingEntry(_ entry: PlaylistMigrationEntry, session: MatchingSessionLease) async throws -> MatchingEntryLease? {
+    /// Eligibility. Ordinary resume (`retryFailed == false`) claims only unfinished
+    /// work: never-searched/in-flight occurrences, provider-deferred searches, and
+    /// occurrences whose checkpoint was cleared (e.g. after a rejection) or predates the
+    /// current algorithm. Failed searches are retried only on explicit request.
+    func claimMatchingEntry(_ entry: PlaylistMigrationEntry, session: MatchingSessionLease, retryFailed: Bool = true) async throws -> MatchingEntryLease? {
         try Task.checkCancellation()
         return try await db.write { db in
             _ = try Self.requireMatchingSession(session, db: db)
@@ -347,9 +351,13 @@ extension GRDBPlaylistMigrationRepository {
                   current.localTrackID == nil, [.pending, .matching, .needsReview, .unavailable, .failed].contains(current.status) else { return nil }
             let candidates = try Self.matchingCandidates(entry.id, db: db)
             guard !candidates.contains(where: { $0.decision == .accepted }) else { return nil }
-            if let checkpoint = try MatchingCheckpoint.fetchOne(db, key: entry.id.uuidString),
-               checkpoint.algorithm == CandidateScoringEngine.algorithmVersion, !checkpoint.retryable,
+            let checkpoint = try MatchingCheckpoint.fetchOne(db, key: entry.id.uuidString)
+            if let checkpoint, checkpoint.algorithm == CandidateScoringEngine.algorithmVersion, !checkpoint.retryable,
                [.needsReview, .unavailable].contains(current.status) { return nil }
+            if !retryFailed, ![.pending, .matching].contains(current.status), let checkpoint,
+               checkpoint.algorithm == CandidateScoringEngine.algorithmVersion, checkpoint.outcome != "discoveryDeferred" {
+                return nil // Completed or failed: not part of an ordinary resume.
+            }
             try PlaylistMigrationValidation.requireEntryTransition(current.status, to: .matching)
             current.status = .matching; current.updatedAt = Self.nextMatchingRevision(current.updatedAt); try current.update(db)
             return try MatchingEntryLease(session: session, entry: Self.requiredEntry(entry.id, db: db).model(), previousCandidates: candidates)
@@ -472,11 +480,13 @@ extension GRDBPlaylistMigrationRepository {
         try await db.write { db in
             var session = try Self.requireMatchingSession(lease, db: db)
             let entries = try Self.entries(db, migrationID: lease.id.uuidString)
-            // A cancelled/interrupted attempt never leaves an active-looking entry.
+            // A cancelled/interrupted attempt never leaves an active-looking entry. With
+            // nothing saved it returns to `pending` (unfinished), never "needs review".
             for entry in entries where entry.status == .matching {
                 var record = try Self.requiredEntry(entry.id, db: db)
-                try PlaylistMigrationValidation.requireEntryTransition(record.status, to: .needsReview)
-                record.status = .needsReview; record.updatedAt = Self.nextMatchingRevision(record.updatedAt); try record.update(db)
+                let next: PlaylistMigrationEntryStatus = try Self.matchingCandidates(entry.id, db: db).isEmpty ? .pending : .needsReview
+                try PlaylistMigrationValidation.requireEntryTransition(record.status, to: next)
+                record.status = next; record.updatedAt = Self.nextMatchingRevision(record.updatedAt); try record.update(db)
             }
             let next: PlaylistMigrationStatus = paused ? .paused : entries.contains { $0.status == .ready } ? .partiallyCompleted : .awaitingReview
             try PlaylistMigrationValidation.requireSessionTransition(session.status, to: next)
@@ -753,6 +763,10 @@ struct MigrationAcquisitionHandoff: Equatable, Sendable {
 
 extension GRDBPlaylistMigrationRepository {
     private static let selectableStatuses: [PlaylistMigrationEntryStatus] = [.pending, .needsReview, .failed, .unavailable]
+
+    func entry(id: UUID) async throws -> PlaylistMigrationEntry {
+        try await db.read { db in try Self.requiredEntry(id, db: db).model() }
+    }
 
     /// Accepts one already-discovered candidate for its exact occurrence. Exactly one
     /// accepted candidate per occurrence is enforced inside the write transaction.
