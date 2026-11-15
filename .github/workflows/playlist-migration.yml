@@ -86,6 +86,7 @@ jobs:
             -only-testing:OFFLINETests/MatchingCompletionTests \
             -only-testing:OFFLINETests/MatchingIndependentSearchTests \
             -only-testing:OFFLINETests/SearXNGDiscoveryTests \
+            -only-testing:OFFLINETests/InvidiousDiscoveryTests \
             -only-testing:OFFLINETests/YouTubeProviderTests \
             -only-testing:OFFLINETests/MatchingLifecycleTests \
             -only-testing:OFFLINETests/MatchingArtworkTests \

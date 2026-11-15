@@ -99,7 +99,7 @@ struct MatchingDiscoveryFailurePolicy {
     /// Provider-wide only: a consent/sign-in/verification redirect or HTTP 429.
     /// 401/403 and unsupported redirects are treated as song-specific failures.
     static func immediate(_ error: YouTubeError?) -> Bool {
-        error == .rateLimited || error == .providerRestricted
+        error == .rateLimited || error == .providerRestricted || error == .sourceUnavailable
     }
     mutating func observe(provider: Int, entry: UUID, searchFailed: Bool, restricted: Bool) -> Bool {
         if restricted { return true }

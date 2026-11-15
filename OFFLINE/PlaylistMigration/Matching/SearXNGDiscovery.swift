@@ -32,6 +32,17 @@ final class DiscoverySourceSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "discovery.directYouTube") }
     }
     var lastHealth: String? { get { defaults.string(forKey: "searxng.lastHealth") } set { defaults.set(newValue, forKey: "searxng.lastHealth") } }
+    /// Recommended default: public Invidious, then direct YouTube fallback; no server needed.
+    var automaticDiscovery: Bool {
+        get { defaults.object(forKey: "discovery.automatic") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "discovery.automatic") }
+    }
+    var invidiousEnabled: Bool {
+        get { defaults.object(forKey: "discovery.invidious") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "discovery.invidious") }
+    }
+    var useInvidious: Bool { automaticDiscovery || invidiousEnabled }
+    var useDirectYouTube: Bool { automaticDiscovery || directYouTubeEnabled }
     var engineList: [String] {
         searxEngines.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && $0.count <= 40 }.prefix(8).map { $0 }
     }
@@ -70,7 +81,7 @@ final class SearXNGURLSessionTransport: NSObject, YouTubeTransport, URLSessionTa
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil; configuration.httpShouldSetCookies = false
         configuration.urlCredentialStorage = nil; configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 8; configuration.timeoutIntervalForResource = 12
+        configuration.timeoutIntervalForRequest = 8; configuration.timeoutIntervalForResource = 20
         configuration.httpMaximumConnectionsPerHost = 2
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()

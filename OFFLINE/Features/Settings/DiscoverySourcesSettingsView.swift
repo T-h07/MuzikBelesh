@@ -1,39 +1,59 @@
 import SwiftUI
 
-/// Spotify matching sources: optional private SearXNG instance and direct YouTube fallback.
+/// Spotify matching sources. Default (Automatic) needs no server: public Invidious,
+/// then direct YouTube fallback. Self-hosted SearXNG is an optional advanced source.
 struct DiscoverySourcesSettingsView: View {
     let settings: DiscoverySourceSettings
     let transport: any YouTubeTransport
-    @State private var enabled = false
+    let pool: InvidiousInstancePool
+    @State private var automatic = true
+    @State private var invidious = true
+    @State private var directYouTube = true
+    @State private var searxEnabled = false
     @State private var baseURL = ""
     @State private var engines = ""
     @State private var allowLAN = false
-    @State private var directYouTube = true
-    @State private var status: String?
-    @State private var statusIsError = false
+    @State private var instances: [InvidiousInstanceStatus] = []
+    @State private var searxStatus: String?
+    @State private var searxError = false
     @State private var testing = false
     var body: some View {
         Section {
-            Toggle("Use SearXNG", isOn: $enabled).onChange(of: enabled) { _, value in settings.searxEnabled = value }
-                .accessibilityIdentifier("searxng-enabled")
-            TextField("https://searxng.example.lan", text: $baseURL)
-                .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                .onSubmit { save() }.accessibilityIdentifier("searxng-url")
-            TextField("Video engines", text: $engines)
-                .textInputAutocapitalization(.never).autocorrectionDisabled().onSubmit { save() }
-            Toggle("Allow HTTP on local network (development)", isOn: $allowLAN)
-                .onChange(of: allowLAN) { _, value in settings.allowLANHTTP = value }
-            Button(testing ? "Testing…" : "Save and Test Connection") { save(); test() }.disabled(testing)
-                .accessibilityIdentifier("searxng-test")
-            if let status { Text(status).font(.caption).foregroundStyle(statusIsError ? AppColors.error : AppColors.textSecondary) }
-            Toggle("Direct YouTube search fallback", isOn: $directYouTube)
+            Toggle("Automatic Discovery (recommended)", isOn: $automatic)
+                .onChange(of: automatic) { _, value in settings.automaticDiscovery = value }
+                .accessibilityIdentifier("discovery-automatic")
+            Toggle("Public Invidious search", isOn: $invidious).disabled(automatic)
+                .onChange(of: invidious) { _, value in settings.invidiousEnabled = value }
+            Toggle("Direct YouTube search fallback", isOn: $directYouTube).disabled(automatic)
                 .onChange(of: directYouTube) { _, value in settings.directYouTubeEnabled = value }
+            Button(testing ? "Testing…" : "Test Discovery Providers") { test() }.disabled(testing)
+                .accessibilityIdentifier("discovery-test")
+            ForEach(instances) { status in
+                Text(status.summary).font(.caption)
+                    .foregroundStyle(status.state == .healthy ? AppColors.textSecondary : AppColors.error)
+            }
+            if !instances.isEmpty {
+                let healthy = instances.filter { $0.state == .healthy }.count
+                Text(healthy == 0 ? "No public Invidious instance is available right now. Matching will use other enabled sources or manual links."
+                                  : "\(healthy) public instance(s) available.").font(.caption)
+            }
+            DisclosureGroup("Advanced: self-hosted SearXNG") {
+                Toggle("Use SearXNG", isOn: $searxEnabled).onChange(of: searxEnabled) { _, value in settings.searxEnabled = value }
+                TextField("https://searxng.example.com", text: $baseURL)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL).onSubmit { save() }
+                TextField("Video engines", text: $engines).textInputAutocapitalization(.never).autocorrectionDisabled().onSubmit { save() }
+                Toggle("Allow HTTP on local network (development)", isOn: $allowLAN)
+                    .onChange(of: allowLAN) { _, value in settings.allowLANHTTP = value }
+                if let searxStatus { Text(searxStatus).font(.caption).foregroundStyle(searxError ? AppColors.error : AppColors.textSecondary) }
+            }
         } header: { Text("Spotify Matching Sources") } footer: {
-            Text("Order: local library, then SearXNG (if enabled), then direct YouTube only when SearXNG finds nothing or is unavailable, then manual links. A self-hosted SearXNG only works while the computer running it is on and reachable from this iPhone.")
+            Text("Order: your local library, public Invidious, optional SearXNG, direct YouTube, then manual links. Song titles and artist names are sent to the third-party services you enable to search for videos. Found videos are candidates only; nothing is downloaded.")
         }
         .onAppear {
-            enabled = settings.searxEnabled; baseURL = settings.searxBaseURL; engines = settings.searxEngines
-            allowLAN = settings.allowLANHTTP; directYouTube = settings.directYouTubeEnabled; status = settings.lastHealth
+            automatic = settings.automaticDiscovery; invidious = settings.invidiousEnabled; directYouTube = settings.directYouTubeEnabled
+            searxEnabled = settings.searxEnabled; baseURL = settings.searxBaseURL; engines = settings.searxEngines
+            allowLAN = settings.allowLANHTTP; searxStatus = settings.lastHealth
+            Task { instances = await pool.statuses }
         }
     }
     private func save() {
@@ -41,14 +61,16 @@ struct DiscoverySourcesSettingsView: View {
         settings.searxEngines = engines
     }
     private func test() {
-        testing = true; status = nil
+        save(); testing = true
         Task {
-            let result = await SearXNGConnectionTest.run(settings: settings, transport: transport)
-            switch result {
-            case .success(let health): status = health.summary; statusIsError = false
-            case .failure(let error): status = error.localizedDescription; statusIsError = true
+            instances = await pool.checkAll()
+            if settings.searxEnabled {
+                switch await SearXNGConnectionTest.run(settings: settings, transport: transport) {
+                case .success(let health): searxStatus = health.summary; searxError = false
+                case .failure(let error): searxStatus = error.localizedDescription; searxError = true
+                }
+                settings.lastHealth = searxStatus
             }
-            settings.lastHealth = status
             testing = false
         }
     }
