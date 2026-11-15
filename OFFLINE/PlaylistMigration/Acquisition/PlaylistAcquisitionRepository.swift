@@ -92,15 +92,8 @@ final class PlaylistAcquisitionRepository: @unchecked Sendable {
         try await updateControl(migrationID) { $0.userPaused = paused }
     }
 
-    func markReadyNotified(migrationID: String, at date: Date?) async throws {
-        try await updateControl(migrationID) { $0.readyNotifiedAt = date }
-    }
-
-    func markPartialNotified(migrationID: String, summary: String?) async throws {
-        try await updateControl(migrationID) { $0.partialNotifiedSummary = summary }
-    }
-
-    private func updateControl(_ migrationID: String, _ change: @escaping @Sendable (inout AcquisitionControlRecord) -> Void) async throws {
+    /// Merges only the given fields, so concurrent intent (Pause) is never overwritten.
+    func updateControl(_ migrationID: String, _ change: @escaping @Sendable (inout AcquisitionControlRecord) -> Void) async throws {
         try await db.write { db in
             guard try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM playlist_migrations WHERE id = ?)", arguments: [migrationID]) == true else {
                 throw PlaylistMigrationStorageError.notFound

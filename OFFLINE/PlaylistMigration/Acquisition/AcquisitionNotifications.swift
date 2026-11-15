@@ -6,9 +6,10 @@ import UserNotifications
 @MainActor protocol PlaylistAcquisitionNotifying: AnyObject {
     /// Asks once while permission is undetermined; never re-prompts after a decision.
     func requestAuthorizationIfUndetermined() async
-    /// Returns false when delivery is not permitted or failed; the caller then keeps
-    /// the notification eligible for a later, legitimate attempt.
-    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> Bool
+    /// `.delivered` only after iOS accepted the request; `.notPermitted` when the user
+    /// denied notifications; `.failed` for transient failures (including a permission
+    /// decision not yet made), which the caller may retry a bounded number of times.
+    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> AcquisitionNotificationDelivery
     var onOpenPlaylist: ((String) -> Void)? { get set }
 }
 
@@ -30,9 +31,13 @@ import UserNotifications
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
     }
 
-    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> Bool {
+    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> AcquisitionNotificationDelivery {
         let settings = await center.notificationSettings()
-        guard [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus) else { return false }
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: break
+        case .notDetermined: return .failed
+        default: return .notPermitted
+        }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -40,8 +45,8 @@ import UserNotifications
         content.userInfo = [Self.playlistKey: playlistID]
         do {
             try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
-            return true
-        } catch { return false }
+            return .delivered
+        } catch { return .failed }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
@@ -65,7 +70,7 @@ import UserNotifications
 @MainActor final class SilentAcquisitionNotifier: PlaylistAcquisitionNotifying {
     var onOpenPlaylist: ((String) -> Void)?
     func requestAuthorizationIfUndetermined() async {}
-    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> Bool { false }
+    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> AcquisitionNotificationDelivery { .notPermitted }
 }
 
 /// Short, bounded app execution while iOS has woken the app (for example after a

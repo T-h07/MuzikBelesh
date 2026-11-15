@@ -389,43 +389,6 @@ import XCTest
         let awaited16 = try await h.trackCount()
         XCTAssertEqual(awaited16, 2)
     }
-
-    func testCompletionNotificationIsAccurateDeduplicatedAndPermissionIndependent() async throws {
-        let h = try harness()
-        h.notifier.permitted = false // Denied permission never affects downloads.
-        h.preparer.fail(z, with: .videoUnavailable)
-        let full = try await h.playlist("Full", [x, y])
-        let partial = try await h.playlist("Partial", [x, z])
-        try await h.until("Full playlist offline") { try await h.allReady(full.session) }
-        try await h.until("Partial result reported") { h.notifier.partial.count == 1 }
-        await h.settle()
-        XCTAssertEqual(h.notifier.ready.count, 1, "Exactly one ready notification, only for the complete playlist")
-        XCTAssertTrue(h.notifier.ready[0].contains("All 2 songs in “Full”"))
-        XCTAssertTrue(h.notifier.partial[0].contains("1 of 2 songs"))
-        XCTAssertTrue(h.notifier.partial[0].contains("1 still need attention"))
-        // Relaunch never repeats delivered notifications.
-        await h.relaunch()
-        await h.settle()
-        XCTAssertEqual(h.notifier.ready.count, 1)
-        XCTAssertEqual(h.notifier.partial.count, 1)
-
-        // Manual Files fallback resolves the last song; the playlist then becomes eligible.
-        let entry = try await h.entries(partial.session)[1]
-        let file = h.fixture.root.appendingPathComponent("My Local Copy.m4a")
-        try AcquisitionToneAudio.write(to: file, seed: 99)
-        let imported = try await h.storage.importAudio(from: file)
-        try await h.repo.confirmImportedRecording(for: entry, trackID: imported.track.id)
-        try await h.until("Final song completes the playlist") { h.notifier.ready.count == 2 }
-        let resolved = try await h.entries(partial.session)
-        XCTAssertEqual(resolved.map(\.id), partial.entries.map(\.id), "No new occurrence is created")
-        XCTAssertEqual(resolved[1].localTrackID, imported.track.id)
-        let candidates = try await h.repo.candidates(entryID: entry.id)
-        XCTAssertEqual(candidates.filter { $0.decision == .accepted }.map(\.provider), ["local"])
-        XCTAssertEqual(candidates.first { $0.provider == "youtube" }?.evidence["supersededBy"], "local-file", "The YouTube decision is kept as evidence")
-        XCTAssertTrue(h.notifier.ready[1].contains("“Partial”"))
-        let awaited17 = try await h.allReady(partial.session)
-        XCTAssertTrue(awaited17)
-    }
 }
 
 extension GRDBPlaylistMigrationRepository {

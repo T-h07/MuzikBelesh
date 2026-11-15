@@ -41,5 +41,19 @@ enum AcquisitionSchema {
                 );
                 """)
         }
+        // Durable confirmed-download batches and real delivery outcomes (device hotfix).
+        // A batch is the set of links confirmed while the previous batch was unresolved;
+        // `resolvedBatch` records which batch's completion was handled and how.
+        migrator.registerMigration("v017_acquisition_notification_batches") { db in
+            try db.execute(sql: """
+                ALTER TABLE migration_acquisitions ADD COLUMN batch INTEGER NOT NULL DEFAULT 0 CHECK(batch >= 0);
+                ALTER TABLE migration_acquisition_controls ADD COLUMN currentBatch INTEGER NOT NULL DEFAULT 0 CHECK(currentBatch >= 0);
+                ALTER TABLE migration_acquisition_controls ADD COLUMN batchUpdatedAt DATETIME;
+                ALTER TABLE migration_acquisition_controls ADD COLUMN resolvedBatch INTEGER;
+                ALTER TABLE migration_acquisition_controls ADD COLUMN batchOutcome TEXT CHECK(batchOutcome IN ('delivered','notPermitted'));
+                ALTER TABLE migration_acquisition_controls ADD COLUMN readyOutcome TEXT CHECK(readyOutcome IN ('delivered','notPermitted'));
+                UPDATE migration_acquisition_controls SET readyOutcome = 'delivered' WHERE readyNotifiedAt IS NOT NULL;
+                """)
+        }
     }
 }

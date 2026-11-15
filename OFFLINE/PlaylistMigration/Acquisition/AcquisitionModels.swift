@@ -34,6 +34,8 @@ struct AcquisitionLinkRecord: Codable, FetchableRecord, PersistableRecord, Equat
     var createdAt: Date
     var updatedAt: Date
     var completedAt: Date?
+    /// Confirmed-download batch this occurrence belongs to (v017).
+    var batch: Int = 0
 
     /// Equality ignoring the modification stamp, so unchanged links are not rewritten.
     func sameContent(as other: AcquisitionLinkRecord) -> Bool {
@@ -46,9 +48,23 @@ struct AcquisitionControlRecord: Codable, FetchableRecord, PersistableRecord, Eq
     static let databaseTableName = "migration_acquisition_controls"
     var migrationID: String
     var userPaused: Bool
+    /// Set only after a "Playlist Ready Offline" notification was actually scheduled.
     var readyNotifiedAt: Date?
+    /// Superseded by confirmed-download batches; retained for schema compatibility.
     var partialNotifiedSummary: String?
     var updatedAt: Date
+    var currentBatch: Int = 0
+    /// Last time a link joined `currentBatch`; completion waits for a quiet period after it.
+    var batchUpdatedAt: Date? = nil
+    var resolvedBatch: Int? = nil
+    var batchOutcome: AcquisitionNotificationDelivery? = nil
+    var readyOutcome: AcquisitionNotificationDelivery? = nil
+}
+
+/// What happened to one notification. `.failed` is transient (scheduling error or
+/// permission not yet decided) and is never persisted as handled.
+enum AcquisitionNotificationDelivery: String, Codable, DatabaseValueConvertible, Sendable {
+    case delivered, notPermitted, failed
 }
 
 /// An occurrence whose user-confirmed YouTube recording should be acquired.
@@ -146,6 +162,7 @@ enum AcquisitionFailureCategory: String, Sendable, CaseIterable {
         case DownloadFailure.invalid.rawValue: return .verificationFailed
         case DownloadFailure.disk.rawValue: return .insufficientStorage
         case DownloadFailure.size.rawValue: return .tooLarge
+        case DownloadFailure.terminated.rawValue: return .network
         case "Audio could not be imported.": return .importFailed
         default: break
         }
@@ -169,6 +186,8 @@ enum AcquisitionDisplayState: Equatable, Sendable {
     case waitingForConnection
     case waitingForDevice
     case downloading(progress: Double?)
+    /// A background transfer exists but iOS has not delivered any bytes yet.
+    case waitingForSystem
     case verifying
     case playlistPaused
     case paused
@@ -187,6 +206,7 @@ enum AcquisitionDisplayState: Equatable, Sendable {
             // A percentage only when the transfer reported a real byte total.
             guard let progress else { return "Downloading" }
             return "Downloading — \(Int((min(1, max(0, progress)) * 100).rounded(.down)))%"
+        case .waitingForSystem: return "Waiting for iOS to start the transfer"
         case .verifying: return "Verifying audio"
         case .playlistPaused: return "Downloads paused"
         case .paused: return "Paused"
@@ -198,7 +218,7 @@ enum AcquisitionDisplayState: Equatable, Sendable {
         switch self { case .preparing, .downloading, .verifying: true; default: false }
     }
     var isPending: Bool {
-        switch self { case .queued, .preparing, .waitingForWiFi, .waitingForConnection, .waitingForDevice, .downloading, .verifying: true; default: false }
+        switch self { case .queued, .preparing, .waitingForWiFi, .waitingForConnection, .waitingForDevice, .downloading, .waitingForSystem, .verifying: true; default: false }
     }
     var needsAttention: Bool {
         switch self { case .failed, .unsupported: true; default: false }
@@ -224,6 +244,8 @@ struct PlaylistAcquisitionSummary: Equatable, Sendable {
     var unsupported = 0
     var awaitingReview = 0
     var userPaused = false
+    /// Low Power Mode or elevated device temperature limits transfers to one at a time.
+    var resourceLimited = false
 
     var attention: Int { failed + unsupported }
     var acquiring: Int { queued + downloading + waitingForWiFi + verifying }

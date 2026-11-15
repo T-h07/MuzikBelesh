@@ -79,7 +79,7 @@ final class HybridPlaylistTests: XCTestCase {
         let saved = try await upgradedRepo.session(id: session.id)
         XCTAssertEqual(saved, session)
         let migrations = try await upgraded.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
-        XCTAssertEqual(migrations.count, 16); XCTAssertEqual(migrations.last, "v016_playlist_audio_acquisition")
+        XCTAssertEqual(migrations.count, 17); XCTAssertEqual(migrations.last, "v017_acquisition_notification_batches")
     }
     func testExplicitResolutionDoesNotAppendManualOccurrence() async throws {
         let f = try LibraryFixture(count: 1), repo = f.storage.playlistMigrations

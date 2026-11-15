@@ -29,6 +29,10 @@ struct PlaylistAcquisitionControls: View {
             if summary.waitingForWiFi > 0 {
                 Text("Wi-Fi only is on. Downloads continue when Wi-Fi is available.").font(.caption).foregroundStyle(AppColors.textSecondary)
             }
+            if summary.resourceLimited && summary.acquiring > 0 {
+                Text("Low Power Mode or device temperature limits downloads to one at a time.").font(.caption).foregroundStyle(AppColors.textSecondary)
+                    .accessibilityIdentifier("acquisition-resource-limited")
+            }
             if let error = acquisition.lastError { Text(error).font(.caption).foregroundStyle(AppColors.error) }
             HStack(spacing: AppSpacing.sm) {
                 if summary.userPaused {

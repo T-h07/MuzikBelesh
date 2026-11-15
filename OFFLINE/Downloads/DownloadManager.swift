@@ -45,6 +45,12 @@ extension StoredDownloadState {
     /// Bounded execution granted while iOS has woken the suspended app (Phase 10.5).
     private let execution: (any BackgroundExecutionGranting)?
     private var opportunity: Int?
+    /// Staged (already transferred) audio being verified and imported. Verification uses
+    /// no network, so it never waits for, or occupies, a transfer slot.
+    private var verifying = Set<String>()
+    static let verificationLimit = 2
+    private let schedulerLog = Logger(subsystem: "com.th07.muzikbelesh", category: "DownloadScheduler")
+    private var lastDecision = ""
     private var staging: URL? { storage?.paths.applicationSupport.appendingPathComponent("DownloadStaging", isDirectory: true) }
 
     init(storage: StorageCoordinator?, preferences: YouTubePreferences, preparer: any YouTubeDownloadPreparing,
@@ -179,21 +185,54 @@ extension StoredDownloadState {
                                     quality: quality.rawValue, dateAdded: Date(), dateModified: Date())
         do { try storage.downloads.save(job); jobs.append(job); schedule() } catch { failStorage() }
     }
+    /// Transfer slots in use: app workers preparing or transferring (not verifying staged
+    /// audio) plus system transfers that no app worker is tracking. Each job counts once.
+    var transferSlotsInUse: Int {
+        workers.keys.filter { !verifying.contains($0) }.count + backgroundTransfers
+    }
+    private var backgroundTransfers: Int { jobs.filter { $0.transferGeneration != nil && workers[$0.id] == nil }.count }
     private func schedule() {
-        guard !halted, foreground || opportunity != nil, !reconciling, !resourcePolicy.defersNewWork else { return }
+        let limit = resourcePolicy.downloadLimit(preferences.simultaneous)
+        guard !halted, foreground || opportunity != nil, !reconciling, !resourcePolicy.defersNewWork else {
+            let reason = halted ? "halted" : !(foreground || opportunity != nil) ? "suspended, waiting for iOS execution"
+                : reconciling ? "reconciling background transfers" : "resource policy defers new work"
+            logDecision(limit: limit, blocked: reason)
+            return
+        }
         let waiting = preferences.wifiOnly && !wifi
+        var blocked: [String] = []
+        // Position order is the user's queue order: interrupted and recovered jobs keep
+        // their earlier positions and are considered before newer jobs.
         for job in jobs where job.state.pending {
             let staged = UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
             let desired: StoredDownloadState = waiting && !staged ? .waitingForWiFi : .queued
             if job.state != desired { update(job.id) { $0.state = desired } }
-            let slots = workers.count + jobs.filter { $0.transferGeneration != nil && workers[$0.id] == nil }.count
-            guard staged || (!waiting && connected), slots < resourcePolicy.downloadLimit(preferences.simultaneous), workers[job.id] == nil else { continue }
-            guard update(job.id, { $0.state = staged ? .verifying : .resolving }) else { return }
+            guard workers[job.id] == nil else { continue }
+            if staged {
+                guard verifying.count < Self.verificationLimit else { blocked.append("verification capacity"); continue }
+                guard update(job.id, { $0.state = .verifying }) else { return }
+                verifying.insert(job.id)
+                workers[job.id] = Task { await run(job) }
+                continue
+            }
+            guard !waiting else { blocked.append("waiting for Wi-Fi"); continue }
+            guard connected else { blocked.append("no network"); continue }
+            guard transferSlotsInUse < limit else { blocked.append("no free transfer slot"); continue }
+            guard update(job.id, { $0.state = .resolving }) else { return }
             workers[job.id] = Task { await run(job) }
         }
+        logDecision(limit: limit, blocked: blocked.first.map { "\(blocked.count) not started: \($0)" } ?? "none")
+    }
+    /// One line per distinct scheduler decision (no per-progress spam).
+    private func logDecision(limit: Int, blocked: String) {
+        let eligible = jobs.filter { $0.state.pending }.count
+        let line = "configured=\(preferences.simultaneous) effectiveLimit=\(limit) lowPower=\(resourcePolicy.lowPower) resourceLimited=\(resourcePolicy.conservesResources) appTransferWorkers=\(workers.count - verifying.count) verifying=\(verifying.count) backgroundTransfers=\(backgroundTransfers) eligiblePending=\(eligible) blocked=\(blocked)"
+        guard line != lastDecision else { return }
+        lastDecision = line
+        schedulerLog.info("\(line, privacy: .public)")
     }
     private func run(_ job: StoredDownloadJob) async {
-        defer { workers[job.id] = nil; rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; schedule(); endOpportunityIfIdle() }
+        defer { workers[job.id] = nil; verifying.remove(job.id); rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; schedule(); endOpportunityIfIdle() }
         guard let storage, let staging, let videoID = job.sourceIdentifier, UUID(uuidString: job.id) != nil else { return }
         let file = staging.appendingPathComponent(job.id + ".m4a")
         do {
@@ -398,7 +437,10 @@ extension DownloadManager {
             discardIncoming(job)
             update(job.id) {
                 $0.clearSystemTask()
-                if failure == .rejected && $0.refreshedGeneration != true {
+                if failure == .terminated {
+                    // Requeued at its original position, ahead of newer jobs.
+                    $0.state = .queued; $0.errorMessage = nil
+                } else if failure == .rejected && $0.refreshedGeneration != true {
                     $0.refreshedGeneration = true; $0.attempts = ($0.attempts ?? 0) + 1; $0.state = .queued
                 } else {
                     $0.state = failure == .connection ? .interrupted : .failed

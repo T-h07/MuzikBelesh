@@ -108,9 +108,10 @@ jobs:
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
           SUITES=(PlaylistAcquisitionTests PlaylistAcquisitionSchedulingTests PlaylistAcquisitionRecoveryTests
+                  PlaylistAcquisitionDeviceRecoveryTests PlaylistAcquisitionNotificationTests
                   BackgroundDownloadTests DownloadTests)
           # Schema-count contracts live in the persistence suites; a focused run includes them.
-          if [[ "${{ inputs.acquisition_only == true }}" == true ]]; then SUITES+=(PlaylistMigrationPersistenceTests HybridPlaylistTests Phase2StorageTests Phase4LibraryMigrationTests PlaylistImportIntegrationTests); fi
+          if [[ "${{ inputs.acquisition_only == true }}" == true ]]; then SUITES+=(PlaylistMigrationPersistenceTests HybridPlaylistTests Phase2StorageTests Phase4LibraryMigrationTests PlaylistImportIntegrationTests ReleaseReliabilityTests YouTubeAudioTests YouTubeProviderTests); fi
           ONLY=(); REQUIRE=()
           for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
           xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/AcquisitionUnits.xcresult             "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-acquisition.log

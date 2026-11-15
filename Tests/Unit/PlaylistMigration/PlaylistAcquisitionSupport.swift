@@ -11,6 +11,7 @@ import XCTest
 actor GatedAcquisitionTransfer: AudioTransferring {
     private var holding: Bool
     private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var waiterIDs: [UUID: String] = [:]
     private(set) var started: [String] = []
     private(set) var active = 0
     private(set) var maxActive = 0
@@ -26,7 +27,7 @@ actor GatedAcquisitionTransfer: AudioTransferring {
         let id = url.lastPathComponent
         started.append(id); active += 1; maxActive = max(maxActive, active); activeAtStart.append(active)
         defer { active -= 1 }
-        if holding { try await hold() }
+        if holding { try await hold(id) }
         try Task.checkCancellation()
         if var list = failures[id], !list.isEmpty {
             let failure = list.removeFirst(); failures[id] = list
@@ -41,20 +42,28 @@ actor GatedAcquisitionTransfer: AudioTransferring {
         }
     }
 
-    private func hold() async throws {
+    private func hold(_ id: String) async throws {
         let token = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                waiters[token] = continuation
+                waiters[token] = continuation; waiterIDs[token] = id
             }
         } onCancel: {
             Task { await self.cancel(token) }
         }
     }
-    private func cancel(_ token: UUID) { waiters.removeValue(forKey: token)?.resume(throwing: CancellationError()) }
+    private func cancel(_ token: UUID) { waiterIDs[token] = nil; waiters.removeValue(forKey: token)?.resume(throwing: CancellationError()) }
 
     /// Releases transfers already waiting; later transfers still wait.
-    func releaseWaiting() { let pending = waiters.values; waiters.removeAll(); pending.forEach { $0.resume() } }
+    func releaseWaiting() { let pending = waiters.values; waiters.removeAll(); waiterIDs.removeAll(); pending.forEach { $0.resume() } }
+    /// Releases one recording's waiting transfer, in any order.
+    func release(_ id: String) {
+        for (token, value) in waiterIDs where value == id {
+            waiterIDs[token] = nil
+            waiters.removeValue(forKey: token)?.resume()
+        }
+    }
+    var waitingIDs: [String] { Array(waiterIDs.values).sorted() }
     func releaseAll() { holding = false; releaseWaiting() }
     func hold(_ value: Bool) { holding = value }
     var waiting: Int { waiters.count }
@@ -102,13 +111,21 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
 @MainActor final class RecordingAcquisitionNotifier: PlaylistAcquisitionNotifying {
     var onOpenPlaylist: ((String) -> Void)?
     var permitted = true
+    /// Number of upcoming deliveries that fail transiently.
+    var transientFailures = 0
     private(set) var authorizationRequests = 0
     private(set) var attempts: [(identifier: String, title: String, body: String)] = []
-    var ready: [String] { attempts.filter { $0.title == "Playlist Ready Offline" }.map(\.body) }
-    var partial: [String] { attempts.filter { $0.title == "Playlist Downloads Finished" }.map(\.body) }
+    /// Only notifications that were actually scheduled.
+    private(set) var delivered: [(title: String, body: String)] = []
+    var ready: [String] { delivered.filter { $0.title == "Playlist Ready Offline" }.map(\.body) }
+    var batches: [String] { delivered.filter { $0.title.hasPrefix("Confirmed Downloads") }.map(\.body) }
+    var batchTitles: [String] { delivered.filter { $0.title.hasPrefix("Confirmed Downloads") }.map(\.title) }
     func requestAuthorizationIfUndetermined() async { authorizationRequests += 1 }
-    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> Bool {
-        attempts.append((identifier, title, body)); return permitted
+    func deliver(identifier: String, title: String, body: String, playlistID: String) async -> AcquisitionNotificationDelivery {
+        attempts.append((identifier, title, body))
+        if transientFailures > 0 { transientFailures -= 1; return .failed }
+        guard permitted else { return .notPermitted }
+        delivered.append((title, body)); return .delivered
     }
 }
 
@@ -128,13 +145,19 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
     weak var owner: DownloadManager?
     var tasks: [SystemDownload] = []
     var created = 0
-    func inventory() async -> [SystemDownload] { tasks }
+    /// Every created task's job, in creation order.
+    private(set) var createdJobs: [String] = []
+    var holdInventory = false
+    func inventory() async -> [SystemDownload] {
+        while holdInventory { try? await Task.sleep(for: .milliseconds(10)) }
+        return tasks
+    }
     func create(url: URL, job: String, generation: String, strict: Bool) throws -> SystemDownload {
         created += 1
         let number = created
         let item = SystemDownload(session: strict ? BackgroundTransfers.wifi : BackgroundTransfers.mobile, number: number,
                                   description: job + "/" + generation, received: 0, expected: -1, resumeIfSuspended: {}, cancel: {})
-        tasks.append(item)
+        tasks.append(item); createdJobs.append(job)
         return item
     }
     func cancel(session: String, number: Int) { tasks.removeAll { $0.number == number } }
@@ -148,13 +171,18 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
     let preparer = AcquisitionTestPreparer()
     let notifier = RecordingAcquisitionNotifier()
     private(set) var transfer: GatedAcquisitionTransfer
+    /// Non-nil in background-URLSession mode (the production path on device).
+    private(set) var system: AcquisitionTestSystem?
+    let quiet: TimeInterval
     private(set) var downloads: DownloadManager!
     private(set) var coordinator: PlaylistAcquisitionCoordinator!
     var storage: StorageCoordinator { fixture.storage }
     var repo: GRDBPlaylistMigrationRepository { fixture.storage.playlistMigrations }
 
-    init(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true) throws {
+    init(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true, systemTransfers: Bool = false, quiet: TimeInterval = 0.2) throws {
         fixture = try LibraryFixture(count: 0)
+        self.quiet = quiet
+        system = systemTransfers ? AcquisitionTestSystem() : nil
         prefs = YouTubePreferences(defaults: UserDefaults(suiteName: "acquisition-" + UUID().uuidString)!)
         prefs.simultaneous = limit
         prefs.wifiOnly = wifiOnly
@@ -165,9 +193,11 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
     /// Simulated app relaunch: the old instances stop completely (no observers, timers,
     /// workers or writes remain, as after process termination), then new ones are built
     /// over the same SQLite store and recover from persisted state alone.
-    func relaunch(start: Bool = true, transfer replacement: GatedAcquisitionTransfer? = nil, connected: Bool = true, wifi: Bool = true) async {
+    func relaunch(start: Bool = true, transfer replacement: GatedAcquisitionTransfer? = nil, system nextSystem: AcquisitionTestSystem? = nil,
+                  connected: Bool = true, wifi: Bool = true) async {
         await terminate()
         if let replacement { transfer = replacement }
+        if let nextSystem { system = nextSystem }
         build(start: start, connected: connected, wifi: wifi)
     }
 
@@ -180,14 +210,37 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
 
     private func build(start: Bool, connected: Bool, wifi: Bool) {
         downloads = DownloadManager(storage: storage, preferences: prefs, preparer: preparer, transfer: transfer,
-                                    artwork: YouTubeArtworkLoader(), observeNetwork: false)
+                                    artwork: YouTubeArtworkLoader(), observeNetwork: false, system: system)
+        if system != nil { downloads.setForeground(true) }
         downloads.setPath(connected: connected, wifi: wifi)
         coordinator = PlaylistAcquisitionCoordinator(storage: storage, downloads: downloads, preferences: prefs, notifier: notifier,
-                                                     retryDelay: { _ in 0.05 }, debounce: .milliseconds(10))
+                                                     retryDelay: { _ in 0.05 }, debounce: .milliseconds(10), batchQuietPeriod: quiet)
         if start { coordinator.start() }
     }
 
     static func video(_ index: Int) -> String { String(format: "acq%08d", index) }
+
+    /// Recording of a background task's job.
+    func video(of task: SystemDownload) throws -> String? {
+        let jobID = task.description?.split(separator: "/").first.map(String.init)
+        return try jobs().first { $0.id == jobID }?.sourceIdentifier
+    }
+    func systemTask(for video: String) throws -> SystemDownload? {
+        try system?.tasks.first { try self.video(of: $0) == video }
+    }
+    /// iOS delivers a finished background transfer: the file moves to staging, then the
+    /// terminal callback promotes it. Verification and import follow in the app.
+    func finishSystemTransfer(_ video: String, seed: Int? = nil) throws {
+        guard let system, let task = try systemTask(for: video) else { XCTFail("No system task for \(video)"); return }
+        let file = fixture.root.appendingPathComponent(UUID().uuidString + ".m4a")
+        try AcquisitionToneAudio.write(to: file, seed: seed ?? AcquisitionToneAudio.seed(video))
+        let bytes = try XCTUnwrap(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        let response = HTTPURLResponse(url: URL(string: "https://rr1---sn-test.googlevideo.com/videoplayback")!, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "audio/mp4", "Content-Length": String(bytes)])
+        downloads.backgroundFile(task, response: response, location: file)
+        system.tasks.removeAll { $0.number == task.number }
+        downloads.backgroundEnded(task, failure: nil)
+    }
 
     /// Imports a playlist and, for each non-nil recording, saves one pending YouTube
     /// candidate; `confirm` selects it exactly as the review queue does.
@@ -255,8 +308,9 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
 
 extension XCTestCase {
     /// Creates a harness whose instances are terminated before the fixture is removed.
-    @MainActor func harness(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true) throws -> AcquisitionHarness {
-        let value = try AcquisitionHarness(limit: limit, wifiOnly: wifiOnly, holding: holding, start: start)
+    @MainActor func harness(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true,
+                            systemTransfers: Bool = false, quiet: TimeInterval = 0.2) throws -> AcquisitionHarness {
+        let value = try AcquisitionHarness(limit: limit, wifiOnly: wifiOnly, holding: holding, start: start, systemTransfers: systemTransfers, quiet: quiet)
         addTeardownBlock { await value.terminate() }
         return value
     }
