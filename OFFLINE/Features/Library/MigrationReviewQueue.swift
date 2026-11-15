@@ -33,7 +33,7 @@ import SwiftUI
             items = try await repository.resolutionOverview(migrationID: migrationID).items.filter { Self.queueCategories.contains($0.category) }
             loaded = true; caughtUp = items.isEmpty
             await show(0)
-        } catch { error = "Songs couldn't be loaded." }
+        } catch { self.error = "Songs couldn't be loaded." }
     }
     func show(_ position: Int) async {
         guard items.indices.contains(position) else { return }
