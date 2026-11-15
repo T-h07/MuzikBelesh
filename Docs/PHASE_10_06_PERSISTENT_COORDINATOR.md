@@ -391,4 +391,25 @@ Modified:
 
 ## Verification log
 
-_Filled in from the focused GitHub Actions runs below._
+| Run | Commit | Scope | Result |
+|---|---|---|---|
+| [43770154710](https://github.com/T-h07/MuzikBelesh/actions/runs/43770154710) | `e68f437` | `coordinator_only` | Build passed. 166 tests: 164 passed, 2 failed (T01, T02 assertion errors, see below) |
+| [43771744443](https://github.com/T-h07/MuzikBelesh/actions/runs/43771744443) | `ecf4596` | `coordinator_only` | **166 tests, 0 failures, 0 skipped** (`PlaylistMigrationCoordinatorTests` 32/32 in 128.7 s) |
+
+Suites in the passing run: `PlaylistMigrationCoordinatorTests` plus `MatchingLifecycleTests`,
+`MatchingPauseResumeTests`, `MatchingReliabilityTests`, `FinalDiscoveryReliabilityTests`,
+`YouTubeDiscoveryReliabilityTests`, `MatchingIndependentSearchTests`, `PlaylistMatchingIntegrationTests`,
+all six `PlaylistAcquisition*` suites, `BackgroundDownloadTests`, `DownloadTests`,
+`PlaylistMigrationPersistenceTests`, `HybridPlaylistTests`, `Phase2StorageTests`,
+`Phase4LibraryMigrationTests`, `PlaylistImportIntegrationTests`.
+
+First-run failures were wrong test expectations, not coordinator defects. Songs searched after
+confirmed downloads correctly also receive local-library suggestions (local-first matching), so
+"exactly 2 suggestions" (T02) and "70 no-match songs" (T01) were invalid. The assertions now check
+the actual invariants: no recording stored twice per occurrence, exactly 2 YouTube suggestions, and
+empty searches never gaining a YouTube suggestion or a selection. No assertion about coordinator
+behavior was weakened.
+
+Not yet verified natively: the migration UI suites (`PlaylistMigrationUITests`, `ReviewQueueUITests`,
+`PlaylistFileImportUITests`) and the remaining Phase 10.4 matching/import suites that only the
+default focused run executes; the unsigned IPA build; physical-device acceptance.
