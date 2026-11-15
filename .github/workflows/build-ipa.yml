@@ -14,6 +14,7 @@ jobs:
   package:
     runs-on: macos-15
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
       BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
     steps:
       - uses: actions/checkout@v4

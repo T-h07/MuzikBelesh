@@ -37,6 +37,7 @@ private struct RootTabsView: View {
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
         .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .inactive { container.playlistMatching?.setForeground(phase == .active) }
             if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
             if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
             else { searchFocus = nil }
@@ -48,6 +49,7 @@ private struct RootTabsView: View {
         } message: { Text(library.error ?? "") }
         .task(id: "\(scenePhase)-\(shareRevision)") {
             guard scenePhase == .active else { return }
+            await container.playlistMatching?.restoreIfNeeded()
             do {
                 guard let share = try await coordinator.shareHandoff.next() else { return }
                 // A library editor, document picker, or nested sheet may own the presentation.

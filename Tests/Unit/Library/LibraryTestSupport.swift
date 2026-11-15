@@ -74,3 +74,25 @@ final class LibraryFixture {
     for _ in 0..<300 { if predicate() { return }; try? await Task.sleep(for: .milliseconds(10)) }
     XCTFail("Library observation did not reach the expected state within three seconds", file: file, line: line)
 }
+
+/// Holds a non-Sendable fixture inside a teardown block without moving it across actors.
+private final class TeardownRetainer: @unchecked Sendable {
+    let value: AnyObject
+    init(_ value: AnyObject) { self.value = value }
+}
+
+extension XCTestCase {
+    /// `LibraryFixture` deletes its database directory in `deinit`. A local fixture can be
+    /// released as soon as its last use, or when a throwing assertion leaves the test early,
+    /// while repository work is still running ("vnode unlinked while in use"). Registering
+    /// it here keeps the database until teardown.
+    func retainUntilTeardown(_ fixture: LibraryFixture) {
+        let holder = TeardownRetainer(fixture)
+        addTeardownBlock { withExtendedLifetime(holder) {} }
+    }
+    /// Cancels and awaits background work before teardown releases fixtures. Teardown
+    /// blocks run last-registered first, so call this after `retainUntilTeardown`.
+    func cancelAndAwaitAtTeardown<Success: Sendable>(_ task: Task<Success, any Error>) {
+        addTeardownBlock { task.cancel(); _ = try? await task.value }
+    }
+}

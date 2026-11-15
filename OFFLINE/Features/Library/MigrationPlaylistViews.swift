@@ -6,9 +6,10 @@ struct MigrationPlaylistPlaybackHeader: View {
     let playlistID: String
     var body: some View {
         let rows = library.migrationRows(playlistID)
-        let ready = library.snapshot.migrationPresentations[playlistID]?.progress.ready ?? 0
+        let manual = library.manualRows(playlistID)
+        let ready = (library.snapshot.migrationPresentations[playlistID]?.progress.ready ?? 0) + manual.filter(\.available).count
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("\(rows.count) songs • \(ready) available offline")
+            Text("\(rows.count) imported • \(manual.count) manually added • \(rows.count + manual.count) total • \(ready) available offline")
                 .font(.caption).foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("migration-playlist-count")
             HStack {
                 Button { Task { await library.playMigration(playlistID: playlistID) } } label: {
@@ -96,6 +97,7 @@ struct MigrationSourceMetadataView: View {
 
 struct MigrationPlaylistDashboard: View {
     @EnvironmentObject private var library: MusicLibraryService
+    @EnvironmentObject private var container: AppContainer
     let playlistID: String
     @State private var expanded = false
     var body: some View {
@@ -108,9 +110,14 @@ struct MigrationPlaylistDashboard: View {
                         .frame(minHeight: 44)
                 }.accessibilityIdentifier("migration-dashboard-toggle")
                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-                Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
-                MigrationProgressOverview(progress: value.progress)
+                if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
+                    PlaylistMatchingControls(model: model, session: value.session, repository: repository,
+                                             playlistID: playlistID, lookup: container.youtubeManualLookup)
+                    MigrationResolutionSummaryLink(playlistID: playlistID, session: value.session, repository: repository)
+                }
                 if expanded {
+                    Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
+                    MigrationProgressOverview(progress: value.progress)
                     LabeledContent("Original playlist", value: value.session.sourcePlaylistName)
                     LabeledContent("Source provider", value: value.session.source.displayName)
                     LabeledContent("Original entries", value: String(value.session.expectedEntryCount))
@@ -159,8 +166,10 @@ struct MigrationProgressOverview: View {
 
 struct MigrationOccurrenceDetailView: View {
     @EnvironmentObject private var library: MusicLibraryService
+    @EnvironmentObject private var container: AppContainer
     let playlistID: String
     let occurrenceID: UUID
+    @State private var resolving: PlaylistMigrationEntry?
     var body: some View {
         List {
             if let value = library.snapshot.migrationPresentations[playlistID], let row = value.rowsByID[occurrenceID] {
@@ -169,15 +178,28 @@ struct MigrationOccurrenceDetailView: View {
                     Text(row.effectiveStatus.displayName).accessibilityIdentifier("migration-inspector-status")
                     Text(row.playableTrack == nil ? "No verified local audio available" : "Verified local audio associated and available")
                     if let id = row.entry.localTrackID { Text("Associated recording: \(id)").font(.caption) }
+                    if row.entry.localTrackID == nil && [.pending, .matching, .needsReview, .unavailable, .failed].contains(row.entry.status) {
+                        Button("Resolve Existing Placeholder") { resolving = row.entry }.frame(minHeight: 44)
+                        Text("Choose and confirm an existing local recording for this Spotify occurrence. To append a separate occurrence, use Add Songs in the playlist.").font(.caption)
+                    }
+                    if let model = container.playlistMatching, row.entry.localTrackID == nil,
+                       [.needsReview, .unavailable, .failed].contains(row.entry.status) {
+                        MigrationRetrySongButton(model: model, entry: row.entry)
+                    }
                 }
-                Section("Entry Issues") {
-                    let issues = value.issuesByEntry[occurrenceID] ?? []
-                    if issues.isEmpty { Text("No recorded issues for this entry.") }
-                    ForEach(issues) { MigrationIssueView(issue: $0, position: row.entry.position) }
+                if let repository = library.storage?.playlistMigrations {
+                    MigrationCandidateInspection(entry: row.entry, repository: repository, lookup: container.youtubeManualLookup)
+                }
+                // Matching reasons are shown in plain language under the suggestions;
+                // only import-level issues remain listed here.
+                let issues = (value.issuesByEntry[occurrenceID] ?? []).filter { $0.code != "matching-attempt" }
+                if !issues.isEmpty {
+                    Section("Issues") { ForEach(issues) { MigrationIssueView(issue: $0, position: row.entry.position) } }
                 }
             } else { Text("This migration entry is no longer available.") }
         }.scrollContentBackground(.hidden).screenBackground()
             .navigationTitle("Source Entry").navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $resolving) { ResolveMigrationPlaceholderView(entry: $0) }
     }
 }
 

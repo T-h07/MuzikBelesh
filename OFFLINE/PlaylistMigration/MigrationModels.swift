@@ -43,7 +43,8 @@ enum PlaylistMigrationEntryStatus: String, Codable, CaseIterable, Sendable {
         if self == next { return true }
         switch self {
         case .pending: return [.matching, .needsReview, .matched, .ready, .failed, .skipped].contains(next)
-        case .matching: return [.needsReview, .matched, .ready, .unavailable, .failed, .skipped].contains(next)
+        // matching → pending: an interrupted in-flight search with nothing saved is simply unfinished.
+        case .matching: return [.pending, .needsReview, .matched, .ready, .unavailable, .failed, .skipped].contains(next)
         case .needsReview: return [.matching, .matched, .unavailable, .skipped].contains(next)
         case .matched: return [.queued, .ready, .needsReview, .failed, .skipped].contains(next)
         case .queued: return [.downloading, .failed, .skipped, .needsReview].contains(next)

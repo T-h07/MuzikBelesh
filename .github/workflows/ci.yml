@@ -32,6 +32,19 @@ concurrency:
   cancel-in-progress: true
 permissions: {contents: read, actions: read}
 jobs:
+  # Level A: seconds on Linux, before any macOS simulator time is spent.
+  static-checks:
+    name: static-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Test hygiene and workflow selectors
+        run: python3 Scripts/check-test-hygiene.py
+      - name: Matching correction contracts
+        run: python3 Scripts/verify-matching-corrections.py
   migration-persistence:
     if: inputs.verification_scope == 'migration'
     uses: ./.github/workflows/playlist-migration.yml
@@ -39,6 +52,7 @@ jobs:
     # Exhaustive gates run on independent fresh simulators: a timeout in one
     # device cannot terminate unrelated UI suites or consume their time budget.
     if: inputs.verification_scope == '' || inputs.verification_scope == 'complete'
+    needs: [static-checks]
     name: regression-${{ matrix.scope }}
     runs-on: macos-15
     timeout-minutes: 40
@@ -58,6 +72,7 @@ jobs:
       CI_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
       DEVICE_NAME: ${{ matrix.device }}
       TEST_SCOPE: ${{ matrix.scope }}
+      GITHUB_SHA_TESTED: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -97,18 +112,29 @@ jobs:
           set -euo pipefail
           TEST_RUN="$(find build/TestProducts/Build/Products -maxdepth 1 -name '*.xctestrun' -print -quit)"
           test -f "$TEST_RUN"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA_TESTED"
+          # run_suite LABEL ALLOWANCE "RESULT-CHECK ARGUMENTS" XCODEBUILD_SELECTORS...
+          # The result bundle, not the log, decides: a required suite that executed zero tests,
+          # a skipped test or a test without a final result fails the shard. Requirements name
+          # suites (or derive them from the test sources); no global test counts.
           run_suite() {
-            local label="$1" default_allowance="$2"
-            shift 2
+            local label="$1" default_allowance="$2" checks="$3"
+            shift 3
             xcodebuild -xctestrun "$TEST_RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath "build/$label.xcresult" "$@" -test-timeouts-enabled YES -default-test-execution-time-allowance "$default_allowance" -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee "build/$label.log"
+            # shellcheck disable=SC2086 # deliberate word splitting of the argument list
+            python3 Scripts/check-test-results.py "$label" "build/$label.xcresult" $checks
           }
           case "$TEST_SCOPE" in
             unit-accessibility)
-              run_suite Units 60 -only-testing:OFFLINETests
-              run_suite StandardAccessibility 60 -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation
+              # Live YouTube checks are opt-in (XCTSkip without MB_YOUTUBE_LIVE) and run in their
+              # own step; excluding them keeps "no skipped tests" a meaningful gate here.
+              run_suite Units 60 "--expect-suites-in Tests/Unit:OFFLINETests --except OFFLINETests/YouTubeLiveTests" \
+                -only-testing:OFFLINETests -skip-testing:OFFLINETests/YouTubeLiveTests
+              run_suite StandardAccessibility 60 "--require OFFLINEUITests/YouTubeUITests" \
+                -only-testing:OFFLINEUITests/YouTubeUITests/testReleasePlayerControlsWithLargeTextAndRepeatedPresentation
               ;;
             compact)
-              run_suite Compact 120 \
+              run_suite Compact 120 "--require OFFLINEUITests/LibraryManagementUITests --min-tests 5" \
                 -only-testing:OFFLINEUITests/LibraryManagementUITests/testLibraryAlbumArtistAndSortingLayouts \
                 -only-testing:OFFLINEUITests/LibraryManagementUITests/testSearchSubmitDismissesKeyboardAndCanReopen \
                 -only-testing:OFFLINEUITests/LibraryManagementUITests/testEmptyAlbumCreationAndSearchPersistAfterRelaunch \
@@ -116,13 +142,17 @@ jobs:
                 -only-testing:OFFLINEUITests/LibraryManagementUITests/testAlbumYearAndDescriptionSurviveRelaunch
               ;;
             library)
-              run_suite LibraryUI 60 -only-testing:OFFLINEUITests/LibraryManagementUITests
+              run_suite LibraryUI 60 "--require OFFLINEUITests/LibraryManagementUITests" -only-testing:OFFLINEUITests/LibraryManagementUITests
               ;;
             other-ui)
-              run_suite OtherUI 60 -only-testing:OFFLINEUITests -skip-testing:OFFLINEUITests/LibraryManagementUITests
+              run_suite OtherUI 60 "--expect-suites-in Tests/UITests:OFFLINEUITests --except OFFLINEUITests/LibraryManagementUITests" \
+                -only-testing:OFFLINEUITests -skip-testing:OFFLINEUITests/LibraryManagementUITests
               ;;
             *) echo "Unknown regression scope: $TEST_SCOPE" >&2; exit 1 ;;
           esac
+      - name: Test counts for every result bundle
+        if: always()
+        run: python3 Scripts/check-test-results.py --report build/*.xcresult
       - name: Export finalized attachments
         if: always()
         run: |

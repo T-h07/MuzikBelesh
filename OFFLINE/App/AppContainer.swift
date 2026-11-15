@@ -16,11 +16,17 @@ final class AppContainer: ObservableObject {
     let storage: StorageCoordinator?
     let library: MusicLibraryService
     let playlistImport: PlaylistImportViewModel?
+    let playlistMatching: PlaylistMatchingViewModel?
     let youtubeSearch: YouTubeSearchService
     let youtubeMetadata: any YouTubeMetadataProvider
     let youtubeResolver: any YouTubeAudioResolver
     let youtubePreparer: any YouTubeDownloadPreparing
     let youtubeLibrary: any YouTubeLibraryChecking
+    let youtubeManualLookup: YouTubeManualLookup
+    let discoverySources: DiscoverySourceSettings
+    /// Short-timeout, cookie-free, no-redirect HTTPS transport for third-party search APIs.
+    let searxTransport = SearXNGURLSessionTransport()
+    let invidiousPool: InvidiousInstancePool
     let youtubePreferences: YouTubePreferences
     let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
@@ -34,6 +40,9 @@ final class AppContainer: ObservableObject {
         let resolver = youtubeAudioResolver ?? YouTubeKitAudioResolver(metadata: metadata, transport: transport)
         self.youtubeSearch = YouTubeSearchService(provider: youtubeSearchProvider ?? web)
         self.youtubeMetadata = metadata
+        self.youtubeManualLookup = YouTubeManualLookup(metadata: metadata, transport: transport)
+        self.discoverySources = DiscoverySourceSettings(defaults: youtubeDefaults)
+        self.invidiousPool = InvidiousInstancePool(transport: searxTransport)
         self.youtubeResolver = resolver
         self.youtubePreparer = YouTubeDownloadPreparer(resolver: resolver)
         self.youtubeLibrary = YouTubeLibraryLookup(database: self.storage?.database.dbQueue, paths: self.storage?.paths)
@@ -43,6 +52,20 @@ final class AppContainer: ObservableObject {
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
+        if let storage = self.storage {
+            // Order: public Invidious, optional SearXNG, direct YouTube fallback. Injected
+            // fixture search (UI tests) keeps matching offline and deterministic.
+            var sources: [any ExternalCandidateDiscovery] = []
+            if youtubeSearchProvider == nil {
+                sources.append(PublicInvidiousDiscovery(settings: discoverySources, pool: invidiousPool))
+                sources.append(ConfiguredSearXNGDiscovery(settings: discoverySources, transport: searxTransport))
+            }
+            let settings = discoverySources
+            sources.append(GatedDiscovery(base: YouTubeSearchProviderAdapter(search: self.youtubeSearch, metadata: self.youtubeMetadata),
+                                          enabled: { settings.useDirectYouTube }))
+            self.playlistMatching = PlaylistMatchingViewModel(service: PlaylistMigrationMatchingService(
+                repository: storage.playlistMigrations, providers: sources), repository: storage.playlistMigrations)
+        } else { self.playlistMatching = nil }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)

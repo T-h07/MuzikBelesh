@@ -69,6 +69,7 @@ struct PlaylistImportView: View {
                     Section("Confirm Import") {
                         let selected = model.selectedCandidates
                         Text("\(selected.count) selected • \(selected.compactMap(\.entryCount).reduce(0, +)) source entries • \(selected.count) new destinations")
+                            .accessibilityIdentifier("playlist-import-selection-summary")
                         Text("\(model.duplicate.values.filter { if case .existing = $0 { return true }; return false }.count) existing duplicates • \(report.candidates.count - selected.count) invalid or excluded playlists")
                         Button("Import Selected Playlists") { model.commit() }
                             .disabled(!model.canCommit).accessibilityIdentifier("playlist-import-confirm")

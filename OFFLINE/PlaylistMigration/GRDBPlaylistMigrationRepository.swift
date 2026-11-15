@@ -122,20 +122,34 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
         }
     }
     func associateVerifiedTrack(entryID: UUID, trackID: String) async throws {
-        guard let track = try await db.read({ try StoredTrack.fetchOne($0, key: trackID) }), MigrationLocalAudio.isAvailable(track, paths: paths) else { throw PlaylistMigrationStorageError.invalidLocalTrack }
-        let url = try paths.musicURL(relativePath: track.fileRelativePath)
-        let audio = AudioFileService()
-        _ = try await audio.validate(url)
-        guard try audio.sha256(url: url) == track.contentSHA256 else { throw PlaylistMigrationStorageError.invalidLocalTrack }
+        let track = try await verifiedMatchingAudio(trackID: trackID)
         try await db.write { [self] db in
-            guard let current = try StoredTrack.fetchOne(db, key: trackID), current == track,
-                  MigrationLocalAudio.isAvailable(current, paths: paths),
-                  try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM library_file_operations WHERE kind = 'delete-track' AND ownerID = ?", arguments: [trackID]) == 0 else { throw PlaylistMigrationStorageError.invalidLocalTrack }
+            try validateMatchingAudio(track, db: db)
             var record = try Self.requiredEntry(entryID, db: db)
             try PlaylistMigrationValidation.requireEntryTransition(record.status, to: .ready)
             record.localTrackID = trackID; record.status = .ready; record.updatedAt = Date()
             try record.update(db)
         }
+    }
+    /// Shared by legacy association and atomic matching acceptance. Decoding and
+    /// SHA-256 hashing stay outside the write transaction and off the main actor.
+    private func verifiedMatchingAudio(trackID: String) async throws -> StoredTrack {
+        guard let track = try await db.read({ try StoredTrack.fetchOne($0, key: trackID) }), MigrationLocalAudio.isAvailable(track, paths: paths) else { throw PlaylistMigrationStorageError.invalidLocalTrack }
+        let url = try paths.musicURL(relativePath: track.fileRelativePath)
+        let audio = AudioFileService()
+        do {
+            _ = try await audio.validate(url)
+            guard try audio.sha256(url: url) == track.contentSHA256 else { throw PlaylistMigrationStorageError.invalidLocalTrack }
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw PlaylistMigrationStorageError.invalidLocalTrack
+        }
+        return track
+    }
+    private func validateMatchingAudio(_ track: StoredTrack, db: Database) throws {
+            guard let current = try StoredTrack.fetchOne(db, key: track.id), current == track,
+                  MigrationLocalAudio.isAvailable(current, paths: paths),
+                  try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM library_file_operations WHERE kind = 'delete-track' AND ownerID = ?", arguments: [track.id]) == 0 else { throw PlaylistMigrationStorageError.invalidLocalTrack }
     }
     func removeLocalAssociation(entryID: UUID) async throws {
         try await db.write { db in
@@ -213,6 +227,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
         try await db.write { db in
             guard var value = try MigrationCandidateRecord.fetchOne(db, key: id.uuidString) else { throw PlaylistMigrationStorageError.notFound }
             value.decision = decision; value.updatedAt = Date(); try value.update(db)
+            try MatchingCheckpoint.deleteOne(db, key: value.entryID)
         }
     }
     func issues(migrationID: UUID) async throws -> [PlaylistMigrationIssue] {
@@ -247,6 +262,283 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
         try await db.write { db in
             let session = try Self.requiredSession(id, db: db)
             _ = try StoredPlaylist.deleteOne(db, key: session.destinationPlaylistID)
+        }
+    }
+}
+
+/// Optimistic ownership uses existing canonical timestamps plus full candidate
+/// snapshots. No schema change or reinterpretation of older candidate records.
+struct MatchingSessionLease: Sendable {
+    let id: UUID
+    let revision: Date
+}
+struct MatchingEntryLease: Sendable {
+    let session: MatchingSessionLease
+    let entry: PlaylistMigrationEntry
+    let previousCandidates: [PlaylistMigrationCandidate]
+}
+
+extension GRDBPlaylistMigrationRepository {
+    /// Explicit resolution is different from adding an independent playlist item.
+    /// The user has inspected both sets of metadata and acknowledged uncertainty.
+    func confirmLocalRecording(for expected: PlaylistMigrationEntry, trackID: String) async throws {
+        let track = try await verifiedMatchingAudio(trackID: trackID)
+        try await db.write { [self] db in
+            var entry = try Self.requiredEntry(expected.id, db: db)
+            guard try entry.model() == expected, entry.localTrackID == nil,
+                  [.pending, .matching, .needsReview, .failed, .unavailable].contains(entry.status) else { throw SongMatchingError.staleAttempt }
+            try validateMatchingAudio(track, db: db)
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            guard !previous.contains(where: { $0.decision == .accepted }),
+                  !previous.contains(where: { $0.provider == "local" && $0.providerTrackID == trackID && $0.decision == .rejected }) else { throw PlaylistMigrationStorageError.invalidCandidate }
+            if entry.status != .matching {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .ready)
+            let artist = try track.artistID.flatMap { try StoredArtist.fetchOne(db, key: $0)?.name }
+            guard [track.title, artist ?? ""].allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else { throw PlaylistMigrationStorageError.unsafeDiagnostics }
+            let old = previous.first { $0.provider == "local" && $0.providerTrackID == trackID }
+            let candidate = PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: expected.id, provider: "local", providerTrackID: trackID,
+                title: track.title, artist: artist, durationMs: track.durationMs, confidence: nil,
+                evidence: ["matchingAlgorithmVersion": "manual-10.4", "sourceOccurrenceID": entry.id, "acceptance": "Explicit user confirmation after metadata inspection",
+                    "selectionExplanation": "The user confirmed this recording. Managed audio decoding and SHA-256 verification passed.",
+                    "confidenceClassification": "User confirmed; no automatic identity claim", "currentAttempt": "true", "rank": "1"], decision: .accepted)
+            try MigrationCandidateRecord(candidate, createdAt: Date()).save(db)
+            entry.status = .ready; entry.localTrackID = trackID; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false, outcome: "local", updatedAt: Date()).save(db)
+        }
+    }
+    private static func nextMatchingRevision(_ old: Date) -> Date { max(Date(), old.addingTimeInterval(0.01)) }
+    private static func matchingCandidates(_ id: UUID, db: Database) throws -> [PlaylistMigrationCandidate] {
+        try MigrationCandidateRecord.filter(Column("entryID") == id.uuidString).order(Column("id")).fetchAll(db).map { try $0.model() }
+    }
+    private static func requireMatchingSession(_ lease: MatchingSessionLease, db: Database) throws -> MigrationSessionRecord {
+        let record = try requiredSession(lease.id, db: db)
+        guard record.status == .matching, record.updatedAt == lease.revision else { throw SongMatchingError.staleAttempt }
+        return record
+    }
+    private static func requireMatchingEntry(_ lease: MatchingEntryLease, db: Database) throws -> MigrationEntryRecord {
+        _ = try requireMatchingSession(lease.session, db: db)
+        let record = try requiredEntry(lease.entry.id, db: db)
+        guard try record.model() == lease.entry,
+              try matchingCandidates(lease.entry.id, db: db) == lease.previousCandidates,
+              record.status == .matching, record.localTrackID == nil else { throw SongMatchingError.staleAttempt }
+        return record
+    }
+    func beginMatching(migrationID: UUID) async throws -> MatchingSessionLease {
+        try Task.checkCancellation()
+        return try await db.write { db in
+            var session = try Self.requiredSession(migrationID, db: db)
+            guard [.metadataReady, .matching, .awaitingReview, .partiallyCompleted, .paused, .failed].contains(session.status) else { throw SongMatchingError.staleAttempt }
+            try Self.verify(session, db: db)
+            try PlaylistMigrationValidation.requireSessionTransition(session.status, to: .matching)
+            session.status = .matching; session.updatedAt = Self.nextMatchingRevision(session.updatedAt)
+            session.failureInformation = nil; try session.update(db)
+            let canonical = try Self.requiredSession(migrationID, db: db)
+            return MatchingSessionLease(id: migrationID, revision: canonical.updatedAt)
+        }
+    }
+    /// Eligibility. Ordinary resume (`retryFailed == false`) claims only unfinished
+    /// work: never-searched/in-flight occurrences, provider-deferred searches, and
+    /// occurrences whose checkpoint was cleared (e.g. after a rejection) or predates the
+    /// current algorithm. Failed searches are retried only on explicit request.
+    func claimMatchingEntry(_ entry: PlaylistMigrationEntry, session: MatchingSessionLease, retryFailed: Bool = true) async throws -> MatchingEntryLease? {
+        try Task.checkCancellation()
+        return try await db.write { db in
+            _ = try Self.requireMatchingSession(session, db: db)
+            var current = try Self.requiredEntry(entry.id, db: db)
+            guard current.migrationID == session.id.uuidString, try current.model() == entry,
+                  current.localTrackID == nil, [.pending, .matching, .needsReview, .unavailable, .failed].contains(current.status) else { return nil }
+            let candidates = try Self.matchingCandidates(entry.id, db: db)
+            guard !candidates.contains(where: { $0.decision == .accepted }) else { return nil }
+            let checkpoint = try MatchingCheckpoint.fetchOne(db, key: entry.id.uuidString)
+            if let checkpoint, checkpoint.algorithm == CandidateScoringEngine.algorithmVersion, !checkpoint.retryable,
+               [.needsReview, .unavailable].contains(current.status) { return nil }
+            if !retryFailed, ![.pending, .matching].contains(current.status), let checkpoint,
+               checkpoint.algorithm == CandidateScoringEngine.algorithmVersion, checkpoint.outcome != "discoveryDeferred" {
+                return nil // Completed or failed: not part of an ordinary resume.
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(current.status, to: .matching)
+            current.status = .matching; current.updatedAt = Self.nextMatchingRevision(current.updatedAt); try current.update(db)
+            return try MatchingEntryLease(session: session, entry: Self.requiredEntry(entry.id, db: db).model(), previousCandidates: candidates)
+        }
+    }
+    /// All candidates, their evidence, the decision and the entry state commit together.
+    func commitMatching(_ lease: MatchingEntryLease, decision: SongMatchDecision,
+                        local: MatchingLocalRecording? = nil, librarySnapshot: MatchingLibrarySnapshot? = nil, issue: String? = nil,
+                        discoveryFailed: Bool = false, deferred: Bool = false) async throws {
+        try Task.checkCancellation()
+        var verified: StoredTrack?
+        if decision.outcome == .local {
+            guard let local, let top = decision.ranked.first, top.recording == local.recording,
+                  top.gates.isEmpty else { throw PlaylistMigrationStorageError.invalidCandidate }
+            verified = try await verifiedMatchingAudio(trackID: local.track.id)
+            guard verified == local.track else { throw SongMatchingError.staleAttempt }
+        } else if local != nil { throw PlaylistMigrationStorageError.invalidCandidate }
+        try Task.checkCancellation()
+        let verifiedTrack = verified
+        try await db.write { [self] db in
+            try Task.checkCancellation()
+            var entry = try Self.requireMatchingEntry(lease, db: db)
+            if let selected = decision.ranked.first, decision.outcome == .local {
+                guard !lease.previousCandidates.contains(where: {
+                    $0.provider == selected.recording.provider && $0.providerTrackID == selected.recording.identity && $0.decision == .rejected
+                }) else { throw SongMatchingError.staleAttempt }
+            }
+            if let verifiedTrack, let local {
+                // A new/edited competitor invalidates uniqueness established by the
+                // shared index. This check and acceptance share the write transaction.
+                guard let librarySnapshot, try librarySnapshot.unchanged(in: db) else { throw SongMatchingError.staleAttempt }
+                try validateMatchingAudio(verifiedTrack, db: db)
+                let artist = try verifiedTrack.artistID.flatMap { try StoredArtist.fetchOne(db, key: $0)?.name }
+                let album = try verifiedTrack.albumID.flatMap { try StoredAlbum.fetchOne(db, key: $0)?.title }
+                guard artist == local.recording.artist, album == local.recording.album else { throw SongMatchingError.staleAttempt }
+            }
+            // Retain old evidence, but distinguish historical proposals from this attempt.
+            for old in lease.previousCandidates where old.decision == .pending {
+                var stored = try MigrationCandidateRecord(old, createdAt: Date())
+                if let existing = try MigrationCandidateRecord.fetchOne(db, key: old.id.uuidString) { stored.createdAt = existing.createdAt }
+                var evidence = old.evidence; evidence["currentAttempt"] = "false"
+                stored.evidence = try migrationJSON(evidence); try stored.update(db)
+            }
+            var identities = Set<String>()
+            for (index, score) in decision.ranked.prefix(40).enumerated() {
+                let item = score.recording
+                guard identities.insert(item.provider + ":" + item.identity).inserted else { continue }
+                let old = lease.previousCandidates.first { $0.provider == item.provider && $0.providerTrackID == item.identity }
+                // Explicit decisions are immutable to discovery, including rejected rows.
+                if let old, old.decision != .pending { continue }
+                var evidence = score.evidence
+                evidence.removeValue(forKey: "thumbnailURL")
+                evidence["selectionExplanation"] = decision.explanation
+                evidence["topCandidateMargin"] = String(decision.margin)
+                evidence["evaluatedAt"] = ISO8601DateFormatter().string(from: Date())
+                evidence["sourceOccurrenceID"] = entry.id
+                evidence["outcome"] = decision.outcome.rawValue
+                evidence["rank"] = String(index + 1)
+                evidence["currentAttempt"] = "true"
+                evidence["acceptance"] = index == 0 && verifiedTrack != nil ? "Automatic verified local association" : "Pending review"
+                if let channel = item.channel { evidence["channel"] = channel }
+                if let source = item.discoverySource, item.provider == "youtube" { evidence["discoveryProvider"] = String(source.prefix(60)) }
+                if let thumbnail = MatchingCandidateArtwork.safe(item.thumbnailURL) { evidence["thumbnailURL"] = thumbnail.absoluteString }
+                let candidate = PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: lease.entry.id, provider: item.provider,
+                    providerTrackID: item.identity, title: item.fullTitle ?? item.title, artist: item.artist, durationMs: item.durationMs,
+                    confidence: score.score / 100, evidence: evidence, decision: index == 0 && verifiedTrack != nil ? .accepted : .pending)
+                guard candidate.confidence.map({ $0.isFinite && (0...1).contains($0) }) == true,
+                      !candidate.title.isEmpty, candidate.durationMs.map({ $0 >= 0 }) ?? true else { throw PlaylistMigrationStorageError.invalidCandidate }
+                // Display metadata is not diagnostic text. A song named "Secret"
+                // must not be rejected as a credential; credential syntax still is.
+                let metadata = [candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist].compactMap { $0 }
+                    + evidence.filter { $0.key != "thumbnailURL" }.flatMap { [$0.key, $0.value] }
+                guard metadata.allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else {
+                    throw PlaylistMigrationStorageError.unsafeDiagnostics
+                }
+                let created = try MigrationCandidateRecord.fetchOne(db, key: candidate.id.uuidString)?.createdAt ?? Date()
+                try MigrationCandidateRecord(candidate, createdAt: created).save(db)
+            }
+            let next: PlaylistMigrationEntryStatus = verifiedTrack != nil ? .ready : decision.outcome == .noMatch ? (discoveryFailed ? .failed : .unavailable) : .needsReview
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: next)
+            entry.status = next; entry.localTrackID = verifiedTrack?.id; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt)
+            try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion,
+                retryable: discoveryFailed || issue != nil,
+                outcome: deferred ? "discoveryDeferred" : discoveryFailed ? "discoveryFailed" : decision.outcome.rawValue, updatedAt: Date()).save(db)
+            // One reusable attempt issue per occurrence; historical candidates remain intact.
+            let oldIssue = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt").fetchOne(db)
+            let message = issue ?? (decision.outcome == .noMatch ? decision.explanation : nil)
+            if let message {
+                try MigrationPersistentText.validate([message])
+                try MigrationIssueRecord(PlaylistMigrationIssue(id: oldIssue.flatMap { UUID(uuidString: $0.id) } ?? UUID(), migrationID: lease.session.id,
+                    entryID: lease.entry.id, code: "matching-attempt", message: message, technicalDetails: nil,
+                    severity: .warning, resolution: .open, createdAt: oldIssue?.createdAt ?? Date(), resolvedAt: nil)).save(db)
+            } else if var oldIssue {
+                oldIssue.resolution = .resolved; oldIssue.resolvedAt = Date(); oldIssue.updatedAt = Date(); try oldIssue.update(db)
+            }
+        }
+    }
+    /// An occurrence failure is recoverable only while this session still owns
+    /// the job. Never overwrite a concurrent user decision or a newer worker.
+    func recordMatchingFailure(_ lease: MatchingEntryLease, category: MatchingFailureCategory) async throws {
+        try await db.write { db in
+            _ = try Self.requireMatchingSession(lease.session, db: db)
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: lease.entry.id.uuidString) else { return }
+            let unchanged = try entry.model() == lease.entry && Self.matchingCandidates(lease.entry.id, db: db) == lease.previousCandidates
+            if !unchanged && (entry.localTrackID != nil || entry.status == .skipped) { return }
+            if unchanged && entry.status == .matching && entry.localTrackID == nil {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .failed)
+                entry.status = .failed; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+                try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: true,
+                    outcome: category.rawValue, updatedAt: Date()).save(db)
+            }
+            let old = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt").fetchOne(db)
+            try MigrationIssueRecord(PlaylistMigrationIssue(id: old.flatMap { UUID(uuidString: $0.id) } ?? UUID(), migrationID: lease.session.id,
+                entryID: lease.entry.id, code: "matching-attempt", message: category.message, technicalDetails: "Category: " + category.rawValue,
+                severity: .warning, resolution: .open, createdAt: old?.createdAt ?? Date(), resolvedAt: nil)).save(db)
+        }
+    }
+    func finishMatching(_ lease: MatchingSessionLease, paused: Bool) async throws {
+        try await db.write { db in
+            var session = try Self.requireMatchingSession(lease, db: db)
+            let entries = try Self.entries(db, migrationID: lease.id.uuidString)
+            // A cancelled/interrupted attempt never leaves an active-looking entry. With
+            // nothing saved it returns to `pending` (unfinished), never "needs review".
+            for entry in entries where entry.status == .matching {
+                var record = try Self.requiredEntry(entry.id, db: db)
+                let next: PlaylistMigrationEntryStatus = try Self.matchingCandidates(entry.id, db: db).isEmpty ? .pending : .needsReview
+                try PlaylistMigrationValidation.requireEntryTransition(record.status, to: next)
+                record.status = next; record.updatedAt = Self.nextMatchingRevision(record.updatedAt); try record.update(db)
+            }
+            let next: PlaylistMigrationStatus = paused ? .paused : entries.contains { $0.status == .ready } ? .partiallyCompleted : .awaitingReview
+            try PlaylistMigrationValidation.requireSessionTransition(session.status, to: next)
+            session.status = next; session.updatedAt = Self.nextMatchingRevision(session.updatedAt); try session.update(db)
+        }
+    }
+    func matchingSummary(migrationID: UUID) async throws -> SongMatchingProgress {
+        try await db.read { db in
+            let entries = try Self.entries(db, migrationID: migrationID.uuidString)
+            let candidates = try MigrationCandidateRecord.fetchAll(db, sql: """
+                SELECT c.* FROM migration_candidates c JOIN migration_entries e ON e.id = c.entryID
+                WHERE e.migrationID = ? AND (c.decision = 'accepted' OR
+                    (json_extract(c.evidence, '$.currentAttempt') = 'true' AND json_extract(c.evidence, '$.rank') = '1'))
+                """, arguments: [migrationID.uuidString]).map { try $0.model() }
+            let localIDs = Set(candidates.filter { $0.provider == "local" && $0.decision == .accepted }.map(\.entryID))
+            let recommendedIDs = Set(candidates.filter { $0.decision == .pending && $0.evidence["outcome"] == "recommended" }.map(\.entryID))
+            var result = SongMatchingProgress(total: entries.count)
+            let discoveryFailures = Set(try String.fetchAll(db, sql: """
+                SELECT e.id FROM migration_entries e
+                LEFT JOIN migration_matching_checkpoints c ON c.entryID = e.id
+                WHERE e.migrationID = ? AND (c.outcome = 'discoveryFailed' OR (COALESCE(c.outcome, '') != 'discoveryDeferred' AND EXISTS (
+                    SELECT 1 FROM migration_issues i WHERE i.entryID = e.id AND i.code = 'matching-attempt'
+                    AND i.resolution = 'open' AND i.message LIKE 'External discovery%')))
+                """, arguments: [migrationID.uuidString]))
+            let checkpoints = Dictionary(try MatchingCheckpoint.fetchAll(db, sql: """
+                SELECT c.* FROM migration_matching_checkpoints c JOIN migration_entries e ON e.id = c.entryID WHERE e.migrationID = ?
+                """, arguments: [migrationID.uuidString]).map { ($0.entryID, $0.outcome) }, uniquingKeysWith: { first, _ in first })
+            result.candidates = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_candidates c JOIN migration_entries e ON e.id = c.entryID WHERE e.migrationID = ?", arguments: [migrationID.uuidString]) ?? 0
+            for entry in entries {
+                let unresolvedEntry = entry.localTrackID == nil && ![.skipped, .matched, .ready].contains(entry.status)
+                let outcome = checkpoints[entry.id.uuidString]
+                let deferred = outcome == "discoveryDeferred" && unresolvedEntry
+                let discoveryFailed = !deferred && discoveryFailures.contains(entry.id.uuidString) && unresolvedEntry
+                if discoveryFailed { result.discoveryFailed += 1 }
+                if deferred { result.externalDeferred += 1 }
+                if let outcome, ["recommended", "review", "noMatch", "discoveryFailed"].contains(outcome) { result.externalAttempted += 1 }
+                if let outcome, ["recommended", "review", "noMatch"].contains(outcome) { result.externalSucceeded += 1 }
+                if outcome == "discoveryFailed" { result.discoveryFailedRequests += 1 }
+                if entry.status == .ready {
+                    if localIDs.contains(entry.id) { result.localMatches += 1 } else { result.alreadyLocal += 1 }
+                } else if entry.status == .needsReview {
+                    if recommendedIDs.contains(entry.id) { result.recommended += 1 } else { result.review += 1 }
+                } else if entry.status == .matched { result.selected += 1
+                } else if entry.status == .unavailable && !discoveryFailed && !deferred { result.noMatch += 1 }
+                else if entry.status == .failed && !discoveryFailed && !deferred { result.failed += 1 }
+                if [.pending, .matching].contains(entry.status) { result.deferred += 1 }
+                if ![.pending, .matching].contains(entry.status) { result.processed += 1 }
+            }
+            result.discoveryPaused = try Self.requiredSession(migrationID, db: db).status == .paused && result.discoveryFailed + result.externalDeferred > 0
+            result.message = try MigrationIssueRecord.filter(Column("migrationID") == migrationID.uuidString && Column("code") == "matching-attempt" && Column("resolution") == "open")
+                .order(Column("updatedAt").desc).fetchOne(db)?.message
+            return result
         }
     }
 }
@@ -325,3 +617,296 @@ private struct MigrationIssueRecord: Codable, FetchableRecord, PersistableRecord
         try PlaylistMigrationIssue(id: migrationUUID(id), migrationID: migrationUUID(migrationID), entryID: entryID.map(migrationUUID), code: code, message: message, technicalDetails: technicalDetails, severity: severity, resolution: resolution, createdAt: createdAt, resolvedAt: resolvedAt)
     }
 }
+
+/// Manual browser-assisted selection. A confirmed YouTube candidate marks the
+/// occurrence `matched` only: no track, file or download is created, so it is
+/// never presented as playable or offline-ready.
+extension GRDBPlaylistMigrationRepository {
+    static func manualYouTubeCandidate(for entry: PlaylistMigrationEntry, video: YouTubeVideo, metadataVerified: Bool,
+                                       id: UUID = UUID()) throws -> PlaylistMigrationCandidate {
+        guard YouTubeURLValidator.isValidID(video.id) else { throw YouTubeError.invalidVideoID }
+        let fullTitle = MatchingSafeText.metadata(video.title.trimmingCharacters(in: .whitespacesAndNewlines))
+        let title = fullTitle.isEmpty ? "YouTube video " + video.id : String(fullTitle.prefix(500))
+        let channel = video.channel.map { MatchingSafeText.metadata($0) }.flatMap { $0.isEmpty ? nil : $0 }
+        let durationMs = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil }
+        let credits = YouTubeSearchProviderAdapter.credits(title)
+        let recording = SongRecording(provider: "youtube", identity: video.id, title: credits.title, artist: credits.artist,
+                                      durationMs: durationMs, performerEstablished: credits.artist != nil,
+                                      available: video.availability == .available, fullTitle: title, channel: channel)
+        // Scored for information only; strict gates are shown, never relaxed.
+        let score = CandidateScoringEngine().score(source: entry.source, candidate: recording)
+        var evidence = score.evidence
+        evidence.removeValue(forKey: "thumbnailURL")
+        evidence["matchingAlgorithmVersion"] = "manual-youtube-10.4.5"
+        evidence["sourceOccurrenceID"] = entry.id.uuidString
+        evidence["selectionMethod"] = "manual"
+        evidence["acceptance"] = "Explicit user confirmation of a pasted YouTube link. Audio is not downloaded or verified."
+        evidence["selectionExplanation"] = "User-selected YouTube video. Not available offline until acquired and verified."
+        evidence["confidenceClassification"] = score.gates.isEmpty ? "User confirmed" : "User confirmed despite automatic checks"
+        evidence["hardGateFailures"] = score.gates.joined(separator: ", ")
+        evidence["metadataSource"] = metadataVerified ? "verified" : "unavailable"
+        evidence["currentAttempt"] = "true"; evidence["rank"] = "1"; evidence["outcome"] = "manual"
+        if let channel { evidence["channel"] = channel }
+        if let thumbnail = MatchingCandidateArtwork.safe(video.thumbnailURL) ?? MatchingCandidateArtwork.safe(URL(string: "https://i.ytimg.com/vi/" + video.id + "/hqdefault.jpg")) {
+            evidence["thumbnailURL"] = thumbnail.absoluteString
+        }
+        let confidence = min(1, max(0, score.score / 100))
+        return PlaylistMigrationCandidate(id: id, entryID: entry.id, provider: "youtube", providerTrackID: video.id, title: title,
+            artist: credits.artist, durationMs: durationMs, confidence: confidence.isFinite ? confidence : 0, evidence: evidence, decision: .accepted)
+    }
+
+    /// Requires the caller's last-read entry; a running worker or concurrent edit wins.
+    @discardableResult
+    func confirmYouTubeCandidate(for expected: PlaylistMigrationEntry, video: YouTubeVideo, metadataVerified: Bool) async throws -> PlaylistMigrationCandidate {
+        _ = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: metadataVerified)
+        return try await db.write { db in
+            var entry = try Self.requiredEntry(expected.id, db: db)
+            guard try entry.model() == expected, entry.localTrackID == nil,
+                  [.pending, .needsReview, .failed, .unavailable].contains(entry.status) else { throw SongMatchingError.staleAttempt }
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            guard !previous.contains(where: { $0.decision == .accepted }) else { throw PlaylistMigrationStorageError.invalidCandidate }
+            let old = previous.first { $0.provider == "youtube" && $0.providerTrackID == video.id }
+            let candidate = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: metadataVerified, id: old?.id ?? UUID())
+            let metadata = [candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist].compactMap { $0 }
+                + candidate.evidence.filter { $0.key != "thumbnailURL" }.flatMap { [$0.key, $0.value] }
+            guard metadata.allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else { throw PlaylistMigrationStorageError.unsafeDiagnostics }
+            let created = try MigrationCandidateRecord.fetchOne(db, key: candidate.id.uuidString)?.createdAt ?? Date()
+            try MigrationCandidateRecord(candidate, createdAt: created).save(db)
+            if entry.status == .unavailable {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matched)
+            entry.status = .matched; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false,
+                                   outcome: "manual", updatedAt: Date()).save(db)
+            if var issue = try MigrationIssueRecord.filter(Column("entryID") == entry.id && Column("code") == "matching-attempt"
+                && Column("resolution") == "open").fetchOne(db) {
+                issue.resolution = .resolved; issue.resolvedAt = Date(); issue.updatedAt = Date(); try issue.update(db)
+            }
+            return candidate
+        }
+    }
+
+    /// Rejects the accepted YouTube selection. The occurrence returns to review and
+    /// becomes eligible for discovery again; the rejected video is never re-proposed.
+    func rejectYouTubeSelection(entryID: UUID, candidateID: UUID) async throws {
+        try await db.write { db in
+            var entry = try Self.requiredEntry(entryID, db: db)
+            guard var record = try MigrationCandidateRecord.fetchOne(db, key: candidateID.uuidString),
+                  record.entryID == entryID.uuidString, record.provider == "youtube", record.decision == .accepted else {
+                throw PlaylistMigrationStorageError.invalidCandidate
+            }
+            guard entry.localTrackID == nil, entry.status == .matched else { throw SongMatchingError.staleAttempt }
+            record.decision = .rejected; record.updatedAt = Date(); try record.update(db)
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .needsReview)
+            entry.status = .needsReview; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint.deleteOne(db, key: entry.id)
+        }
+    }
+}
+
+// MARK: - Phase 10.4.6 candidate review, resolution and Phase 10.5 handoff
+
+enum MigrationResolutionCategory: String, CaseIterable, Sendable {
+    case confirmed, needsReview, discoveryFailed, discoveryDeferred, noCandidate, awaiting, skipped
+    var title: String {
+        switch self {
+        case .confirmed: "Confirmed"
+        case .needsReview: "Needs Review"
+        case .discoveryFailed: "Discovery Failed"
+        case .discoveryDeferred: "External Discovery Deferred"
+        case .noCandidate: "No Candidate Found"
+        case .awaiting: "Awaiting Discovery"
+        case .skipped: "Skipped"
+        }
+    }
+    var isUnresolved: Bool { ![.confirmed, .skipped].contains(self) }
+}
+
+struct MigrationResolutionItem: Identifiable, Equatable, Sendable {
+    let entry: PlaylistMigrationEntry
+    let category: MigrationResolutionCategory
+    let reason: String?
+    let pendingCandidates: Int
+    var id: UUID { entry.id }
+}
+
+struct MigrationResolutionOverview: Equatable, Sendable {
+    let items: [MigrationResolutionItem]
+    func count(_ category: MigrationResolutionCategory) -> Int { items.filter { $0.category == category }.count }
+    var resolved: Int { count(.confirmed) }
+    var unresolved: Int { items.filter { $0.category.isUnresolved && $0.category != .needsReview }.count }
+    /// Example: "Resolved 157/200 — 25 Need Review — 18 Unresolved"
+    var summary: String { "Resolved \(resolved)/\(items.count) — \(count(.needsReview)) Need Review — \(unresolved) Unresolved" }
+}
+
+enum MigrationAcquisitionStatus: String, Sendable {
+    /// Verified managed local audio is already associated (offline-ready).
+    case localAudioVerified
+    /// A recording was selected but no audio exists yet. Phase 10.5 owns acquisition.
+    case awaitingAcquisition
+}
+
+/// Durable, read-only contract for Phase 10.5. One item per resolved occurrence.
+struct MigrationAcquisitionHandoff: Equatable, Sendable {
+    let occurrenceID: UUID
+    let position: Int
+    let source: PlaylistMigrationSourceTrack
+    let candidate: PlaylistMigrationCandidate?
+    let provider: String?
+    let providerIdentity: String?
+    let canonicalURL: URL?
+    let userConfirmed: Bool
+    let acquisitionStatus: MigrationAcquisitionStatus
+    let localTrackID: String?
+}
+
+extension GRDBPlaylistMigrationRepository {
+    private static let selectableStatuses: [PlaylistMigrationEntryStatus] = [.pending, .needsReview, .failed, .unavailable]
+
+    func entry(id: UUID) async throws -> PlaylistMigrationEntry {
+        try await db.read { db in try Self.requiredEntry(id, db: db).model() }
+    }
+
+    /// Accepts one already-discovered candidate for its exact occurrence. Exactly one
+    /// accepted candidate per occurrence is enforced inside the write transaction.
+    /// Local candidates go through managed-audio verification; YouTube candidates
+    /// mark the occurrence `matched` only, never downloaded.
+    @discardableResult
+    func selectCandidate(for expected: PlaylistMigrationEntry, candidateID: UUID) async throws -> PlaylistMigrationCandidate {
+        let stored = try await candidates(entryID: expected.id)
+        guard let target = stored.first(where: { $0.id == candidateID }), target.decision == .pending else {
+            throw PlaylistMigrationStorageError.invalidCandidate
+        }
+        if target.provider == "local", let trackID = target.providerTrackID {
+            try await confirmLocalRecording(for: expected, trackID: trackID)
+            return try await candidates(entryID: expected.id).first { $0.decision == .accepted } ?? target
+        }
+        guard target.provider == "youtube", let videoID = target.providerTrackID, YouTubeURLValidator.isValidID(videoID) else {
+            throw PlaylistMigrationStorageError.invalidCandidate
+        }
+        return try await db.write { db in
+            var entry = try Self.requiredEntry(expected.id, db: db)
+            guard try entry.model() == expected, entry.localTrackID == nil,
+                  Self.selectableStatuses.contains(entry.status) else { throw SongMatchingError.staleAttempt }
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            guard !previous.contains(where: { $0.decision == .accepted }),
+                  var record = try MigrationCandidateRecord.fetchOne(db, key: candidateID.uuidString),
+                  record.entryID == expected.id.uuidString, record.decision == .pending else { throw PlaylistMigrationStorageError.invalidCandidate }
+            var evidence = try record.model().evidence
+            evidence["selectionMethod"] = "reviewed-candidate"
+            evidence["acceptance"] = "Explicit user confirmation of a discovered YouTube candidate. Audio is not downloaded or verified."
+            evidence["userConfirmedAt"] = ISO8601DateFormatter().string(from: Date())
+            record.evidence = try migrationJSON(evidence)
+            record.decision = .accepted; record.updatedAt = Date(); try record.update(db)
+            if entry.status == .unavailable {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matched)
+            entry.status = .matched; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false,
+                                   outcome: "selected", updatedAt: Date()).save(db)
+            try Self.resolveAttemptIssue(entry.id, db: db)
+            guard try Self.matchingCandidates(expected.id, db: db).filter({ $0.decision == .accepted }).count == 1 else {
+                throw PlaylistMigrationStorageError.invalidCandidate // Rolls back the transaction.
+            }
+            return try record.model()
+        }
+    }
+
+    /// Rejects a pending candidate, or the accepted YouTube selection (returning the
+    /// occurrence to review). Rejected identities are never re-proposed by discovery.
+    func rejectCandidate(entryID: UUID, candidateID: UUID) async throws {
+        let accepted = try await candidates(entryID: entryID).first { $0.id == candidateID }?.decision == .accepted
+        if accepted { return try await rejectYouTubeSelection(entryID: entryID, candidateID: candidateID) }
+        try await db.write { db in
+            let entry = try Self.requiredEntry(entryID, db: db)
+            guard entry.status != .matching else { throw SongMatchingError.staleAttempt }
+            guard var record = try MigrationCandidateRecord.fetchOne(db, key: candidateID.uuidString),
+                  record.entryID == entryID.uuidString, record.decision == .pending else { throw PlaylistMigrationStorageError.invalidCandidate }
+            record.decision = .rejected; record.updatedAt = Date(); try record.update(db)
+        }
+    }
+
+    /// Makes one unresolved occurrence eligible for the next matching run. Confirmed
+    /// occurrences and accepted decisions are never reopened here.
+    func markRetryable(entryID: UUID) async throws {
+        try await db.write { db in
+            let entry = try Self.requiredEntry(entryID, db: db)
+            guard entry.localTrackID == nil, Self.selectableStatuses.contains(entry.status),
+                  try !Self.matchingCandidates(entryID, db: db).contains(where: { $0.decision == .accepted }) else { throw SongMatchingError.staleAttempt }
+            if var checkpoint = try MatchingCheckpoint.fetchOne(db, key: entry.id) {
+                checkpoint.retryable = true; checkpoint.updatedAt = Date(); try checkpoint.update(db)
+            }
+        }
+    }
+
+    private static func resolveAttemptIssue(_ entryID: String, db: Database) throws {
+        if var issue = try MigrationIssueRecord.filter(Column("entryID") == entryID && Column("code") == "matching-attempt"
+            && Column("resolution") == "open").fetchOne(db) {
+            issue.resolution = .resolved; issue.resolvedAt = Date(); issue.updatedAt = Date(); try issue.update(db)
+        }
+    }
+
+    func resolutionOverview(migrationID: UUID) async throws -> MigrationResolutionOverview {
+        try await db.read { db in
+            let entries = try Self.entries(db, migrationID: migrationID.uuidString)
+            let candidates = Dictionary(grouping: try MigrationCandidateRecord.fetchAll(db, sql: """
+                SELECT c.* FROM migration_candidates c JOIN migration_entries e ON e.id = c.entryID WHERE e.migrationID = ?
+                """, arguments: [migrationID.uuidString]), by: \.entryID)
+            let checkpoints = try MatchingCheckpoint.fetchAll(db, sql: """
+                SELECT c.* FROM migration_matching_checkpoints c JOIN migration_entries e ON e.id = c.entryID WHERE e.migrationID = ?
+                """, arguments: [migrationID.uuidString]).reduce(into: [String: String]()) { $0[$1.entryID] = $1.outcome }
+            let issues = try MigrationIssueRecord.filter(Column("migrationID") == migrationID.uuidString && Column("resolution") == "open")
+                .order(Column("updatedAt").desc).fetchAll(db).reduce(into: [String: String]()) { if let id = $1.entryID, $0[id] == nil { $0[id] = $1.message } }
+            return MigrationResolutionOverview(items: entries.map { entry in
+                let key = entry.id.uuidString, rows = candidates[key] ?? []
+                let accepted = rows.contains { $0.decision == .accepted }
+                let category: MigrationResolutionCategory
+                switch entry.status {
+                case .ready where entry.localTrackID != nil: category = .confirmed
+                case .matched where accepted: category = .confirmed
+                case .skipped: category = .skipped
+                case .pending, .matching: category = checkpoints[key] == "discoveryDeferred" ? .discoveryDeferred : .awaiting
+                default:
+                    if checkpoints[key] == "discoveryDeferred" { category = .discoveryDeferred }
+                    else if entry.status == .needsReview { category = .needsReview }
+                    else if entry.status == .unavailable { category = .noCandidate }
+                    else { category = .discoveryFailed }
+                }
+                return MigrationResolutionItem(entry: entry, category: category, reason: issues[key],
+                                               pendingCandidates: rows.filter { $0.decision == .pending }.count)
+            })
+        }
+    }
+
+    /// Handoff for Phase 10.5. Throws if an occurrence has more than one accepted
+    /// candidate, which the write paths make impossible.
+    func acquisitionHandoff(migrationID: UUID) async throws -> [MigrationAcquisitionHandoff] {
+        let overview = try await resolutionOverview(migrationID: migrationID)
+        var result: [MigrationAcquisitionHandoff] = []
+        for item in overview.items where item.category == .confirmed {
+            let accepted = try await candidates(entryID: item.entry.id).filter { $0.decision == .accepted }
+            guard accepted.count <= 1 else { throw PlaylistMigrationStorageError.invalidCandidate }
+            let candidate = accepted.first
+            let method = candidate?.evidence["selectionMethod"] ?? ""
+            let confirmed = ["manual", "reviewed-candidate"].contains(method) || candidate?.evidence["matchingAlgorithmVersion"] == "manual-10.4"
+            let local = item.entry.status == .ready && item.entry.localTrackID != nil
+            result.append(.init(occurrenceID: item.entry.id, position: item.entry.position, source: item.entry.source, candidate: candidate,
+                provider: candidate?.provider ?? (local ? "local" : nil), providerIdentity: candidate?.providerTrackID ?? item.entry.localTrackID,
+                canonicalURL: candidate.flatMap(MatchingCandidateArtwork.watchURL), userConfirmed: confirmed,
+                acquisitionStatus: local ? .localAudioVerified : .awaitingAcquisition, localTrackID: item.entry.localTrackID))
+        }
+        return result
+    }
+}
+
+#if DEBUG
+extension GRDBPlaylistMigrationRepository {
+    /// UI-test fixture seeding only (AppBootstrap `--review-queue-fixture`). Keeps the
+    /// candidate record type private to this file.
+    static func insertFixtureCandidate(_ candidate: PlaylistMigrationCandidate, db: Database) throws {
+        try MigrationCandidateRecord(candidate, createdAt: Date()).insert(db)
+    }
+}
+#endif

@@ -46,7 +46,10 @@ targets:
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        UIBackgroundModes: [audio]
+        UIBackgroundModes: [audio, processing]
+        BGTaskSchedulerPermittedIdentifiers: ['com.th07.muzikbelesh.matching.*']
+        NSAppTransportSecurity: {NSAllowsArbitraryLoads: false, NSAllowsLocalNetworking: true}
+        NSLocalNetworkUsageDescription: Muzik Belesh connects to the SearXNG search server you configure on your local network to find song candidates.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh
