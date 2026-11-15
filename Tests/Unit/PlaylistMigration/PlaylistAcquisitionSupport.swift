@@ -147,6 +147,8 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
     var created = 0
     /// Every created task's job, in creation order.
     private(set) var createdJobs: [String] = []
+    /// Task numbers the app cancelled (Pause, policy, stalled-transfer repair).
+    private(set) var cancelled = Set<Int>()
     var holdInventory = false
     func inventory() async -> [SystemDownload] {
         while holdInventory { try? await Task.sleep(for: .milliseconds(10)) }
@@ -156,11 +158,14 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
         created += 1
         let number = created
         let item = SystemDownload(session: strict ? BackgroundTransfers.wifi : BackgroundTransfers.mobile, number: number,
-                                  description: job + "/" + generation, received: 0, expected: -1, resumeIfSuspended: {}, cancel: {})
+                                  description: job + "/" + generation, received: 0, expected: -1, resumeIfSuspended: {},
+                                  cancel: { [weak self] in self?.cancel(session: "", number: number) })
         tasks.append(item); createdJobs.append(job)
         return item
     }
-    func cancel(session: String, number: Int) { tasks.removeAll { $0.number == number } }
+    func cancel(session: String, number: Int) { cancelled.insert(number); tasks.removeAll { $0.number == number } }
+    /// iOS loses a task without delivering any callback.
+    func vanish(_ number: Int) { tasks.removeAll { $0.number == number } }
 }
 
 /// One isolated library plus the production DownloadManager and coordinator wired the
@@ -179,9 +184,15 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
     var storage: StorageCoordinator { fixture.storage }
     var repo: GRDBPlaylistMigrationRepository { fixture.storage.playlistMigrations }
 
-    init(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true, systemTransfers: Bool = false, quiet: TimeInterval = 0.2) throws {
+    let execution: RecordingBackgroundExecution?
+    let stallThreshold: TimeInterval
+
+    init(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true, systemTransfers: Bool = false, quiet: TimeInterval = 0.2,
+         backgroundExecution: Bool = false, stallThreshold: TimeInterval = 90) throws {
         fixture = try LibraryFixture(count: 0)
         self.quiet = quiet
+        self.execution = backgroundExecution ? RecordingBackgroundExecution() : nil
+        self.stallThreshold = stallThreshold
         system = systemTransfers ? AcquisitionTestSystem() : nil
         prefs = YouTubePreferences(defaults: UserDefaults(suiteName: "acquisition-" + UUID().uuidString)!)
         prefs.simultaneous = limit
@@ -210,7 +221,8 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
 
     private func build(start: Bool, connected: Bool, wifi: Bool) {
         downloads = DownloadManager(storage: storage, preferences: prefs, preparer: preparer, transfer: transfer,
-                                    artwork: YouTubeArtworkLoader(), observeNetwork: false, system: system)
+                                    artwork: YouTubeArtworkLoader(), observeNetwork: false, system: system, execution: execution,
+                                    recoveryInterval: .milliseconds(100), stallThreshold: stallThreshold)
         if system != nil { downloads.setForeground(true) }
         downloads.setPath(connected: connected, wifi: wifi)
         coordinator = PlaylistAcquisitionCoordinator(storage: storage, downloads: downloads, preferences: prefs, notifier: notifier,
@@ -309,8 +321,10 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
 extension XCTestCase {
     /// Creates a harness whose instances are terminated before the fixture is removed.
     @MainActor func harness(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true,
-                            systemTransfers: Bool = false, quiet: TimeInterval = 0.2) throws -> AcquisitionHarness {
-        let value = try AcquisitionHarness(limit: limit, wifiOnly: wifiOnly, holding: holding, start: start, systemTransfers: systemTransfers, quiet: quiet)
+                            systemTransfers: Bool = false, quiet: TimeInterval = 0.2,
+                            backgroundExecution: Bool = false, stallThreshold: TimeInterval = 90) throws -> AcquisitionHarness {
+        let value = try AcquisitionHarness(limit: limit, wifiOnly: wifiOnly, holding: holding, start: start, systemTransfers: systemTransfers, quiet: quiet,
+                                           backgroundExecution: backgroundExecution, stallThreshold: stallThreshold)
         addTeardownBlock { await value.terminate() }
         return value
     }

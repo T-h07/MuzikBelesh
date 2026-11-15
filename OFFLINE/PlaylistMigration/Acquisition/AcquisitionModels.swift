@@ -185,6 +185,10 @@ enum AcquisitionDisplayState: Equatable, Sendable {
     case waitingForWiFi
     case waitingForConnection
     case waitingForDevice
+    /// Every download slot is in use; `limited` when Low Power Mode or temperature lowered the limit.
+    case waitingForSlot(limited: Bool)
+    /// iOS is not currently giving the app execution time (app in the background).
+    case waitingForExecution
     case downloading(progress: Double?)
     /// A background transfer exists but iOS has not delivered any bytes yet.
     case waitingForSystem
@@ -202,6 +206,8 @@ enum AcquisitionDisplayState: Equatable, Sendable {
         case .waitingForWiFi: return "Waiting for Wi-Fi"
         case .waitingForConnection: return "Waiting for connection"
         case .waitingForDevice: return "Waiting for device to cool"
+        case .waitingForSlot(let limited): return limited ? "Waiting for a download slot (Low Power Mode or temperature limit)" : "Waiting for a download slot"
+        case .waitingForExecution: return "Waiting for iOS to resume the app"
         case .downloading(let progress):
             // A percentage only when the transfer reported a real byte total.
             guard let progress else { return "Downloading" }
@@ -218,7 +224,7 @@ enum AcquisitionDisplayState: Equatable, Sendable {
         switch self { case .preparing, .downloading, .verifying: true; default: false }
     }
     var isPending: Bool {
-        switch self { case .queued, .preparing, .waitingForWiFi, .waitingForConnection, .waitingForDevice, .downloading, .waitingForSystem, .verifying: true; default: false }
+        switch self { case .queued, .preparing, .waitingForWiFi, .waitingForConnection, .waitingForDevice, .waitingForSlot, .waitingForExecution, .downloading, .waitingForSystem, .verifying: true; default: false }
     }
     var needsAttention: Bool {
         switch self { case .failed, .unsupported: true; default: false }

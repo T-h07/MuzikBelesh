@@ -108,7 +108,7 @@ jobs:
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
           SUITES=(PlaylistAcquisitionTests PlaylistAcquisitionSchedulingTests PlaylistAcquisitionRecoveryTests
-                  PlaylistAcquisitionDeviceRecoveryTests PlaylistAcquisitionNotificationTests
+                  PlaylistAcquisitionDeviceRecoveryTests PlaylistAcquisitionNotificationTests PlaylistAcquisitionQueueStallTests
                   BackgroundDownloadTests DownloadTests)
           # Schema-count contracts live in the persistence suites; a focused run includes them.
           if [[ "${{ inputs.acquisition_only == true }}" == true ]]; then SUITES+=(PlaylistMigrationPersistenceTests HybridPlaylistTests Phase2StorageTests Phase4LibraryMigrationTests PlaylistImportIntegrationTests ReleaseReliabilityTests YouTubeAudioTests YouTubeProviderTests); fi

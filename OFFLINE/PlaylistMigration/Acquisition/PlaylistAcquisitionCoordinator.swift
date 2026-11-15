@@ -89,6 +89,10 @@ import OSLog
         // `$jobs` publishes the new value before the property changes.
         downloads.$jobs.sink { [weak self] jobs in self?.jobsChanged(jobs) }.store(in: &subscriptions)
         downloads.$resourcePolicy.sink { [weak self] policy in self?.resourceLimited = policy.conservesResources }.store(in: &subscriptions)
+        // Wait reasons change with foreground, network and policy, not only job rows.
+        downloads.$schedulingRevision.dropFirst().sink { [weak self] _ in
+            Task { @MainActor in guard let self else { return }; self.refreshDisplay(self.downloads.jobs) }
+        }.store(in: &subscriptions)
         requestReconcile(immediately: true)
     }
 
@@ -178,7 +182,7 @@ import OSLog
             if let state = displayStates[row.id] {
                 switch state {
                 case .availableOffline: value.verifying += 1 // Association visible before the snapshot catches up.
-                case .queued, .preparing, .waitingForConnection, .waitingForDevice, .waitingForSystem: value.queued += 1
+                case .queued, .preparing, .waitingForConnection, .waitingForDevice, .waitingForSystem, .waitingForSlot, .waitingForExecution: value.queued += 1
                 case .downloading: value.downloading += 1
                 case .waitingForWiFi: value.waitingForWiFi += 1
                 case .verifying: value.verifying += 1
@@ -518,10 +522,18 @@ import OSLog
         }
         guard let job else { return paused ? .playlistPaused : .queued }
         switch job.state {
-        case .queued:
+        case .queued, .waitingForWiFi:
             if paused { return .playlistPaused }
-            return downloads.stateLabel(for: job) == "Waiting for device to cool" ? .waitingForDevice : .queued
-        case .waitingForWiFi: return paused ? .playlistPaused : .waitingForWiFi
+            // Never a generic "Queued" when the scheduler knows why the job is waiting.
+            switch downloads.queueWait(for: job) {
+            case .resourceDeferred: return .waitingForDevice
+            case .waitingForExecution: return .waitingForExecution
+            case .waitingForWiFi: return .waitingForWiFi
+            case .noNetwork: return .waitingForConnection
+            case .waitingForSlot(let limited): return .waitingForSlot(limited: limited)
+            case .verificationCapacity: return .verifying
+            case .eligible, .reconciling, .none: return job.state == .waitingForWiFi ? .waitingForWiFi : .queued
+            }
         case .resolving: return .preparing
         case .downloading:
             if downloads.stateLabel(for: job) == "Waiting for Wi-Fi" { return .waitingForWiFi }

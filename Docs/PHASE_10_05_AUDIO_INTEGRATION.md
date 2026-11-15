@@ -335,3 +335,44 @@ Schema-count assertions are updated for v017 (17 migrations). The superseded par
 * `OFFLINE/Features/Library/PlaylistAcquisitionViews.swift`
 * Tests: `PlaylistAcquisitionDeviceTests.swift` (new), `PlaylistAcquisitionSupport.swift`, `PlaylistAcquisitionTests.swift`, and the schema-count suites
 * `.github/workflows/playlist-migration.yml`
+
+## 21. Queue stall hotfix (device report on `2df4982`)
+
+**Symptom.** In a 48-song playlist, 12 songs were offline and song #14 stayed "Queued" with nothing visibly downloading. It started only after the user pressed Pause Downloads and then Continue Downloads.
+
+**Why Pause/Continue helped.** Pause calls `DownloadManager.stop()` for each playlist job. `stop()` cancels the job's background URLSession task and clears its transfer reservation. Continue requeues the jobs, and `schedule()` then creates fresh tasks while the app is in the foreground. Ordinary scheduling never does that: `reconcileSystem()` keeps every task iOS still lists as surviving, whether or not it is moving bytes.
+
+**Proven root cause.** The bounded background execution window added in Phase 10.5 lets `schedule()` create new tasks while iOS has woken the suspended app. iOS treats tasks created in the background as discretionary and may defer them indefinitely. Such a task delivered no bytes but still held a transfer slot, so `transferSlotsInUse` stayed at the limit and the last queued song never started. That is why the stall appeared around background execution and the final jobs. The other suspected causes were checked and ruled out:
+
+* An unsupported recording is a failed job and never occupies a slot.
+* A task that vanished without a callback was released only by the next foreground reconciliation; that case is now also covered while the app stays active.
+
+**Fixes.**
+* **Deferred background tasks are recreated in the foreground.** Tasks created while the app is not in the foreground are tracked. When the app becomes active, reconciliation cancels any surviving zero-byte reservation that was created in the background, or that has waited longer than `stallThreshold` (90 s), and requeues the job at its original position, so it is recreated as a foreground task. This happens at most once per job per activation, so it cannot loop.
+* **A foreground-only health check.** It runs every 20 s and stops whenever the app leaves the foreground; it never runs while the app is suspended. It acts only when an eligible job is waiting:
+  * if capacity exists, it schedules, covering a missed event;
+  * if every slot is held by reservations that made no progress since the previous check, it refreshes the URLSession inventory, which releases vanished tasks and recreates stalled ones.
+* **Per-song wait reasons.** Each waiting song now shows one of:
+  * waiting for a download slot (noting a Low Power Mode or temperature limit when that applies);
+  * waiting for iOS to resume the app;
+  * waiting for Wi-Fi;
+  * waiting for a connection;
+  * waiting for the device to cool;
+  * verifying audio;
+  * queued, which now only means eligible to start.
+
+  Reasons refresh on foreground, network and policy changes, not only when job rows change.
+* **Diagnostics.** The `DownloadScheduler` log records `queuedWithoutProgress` (once per job per reason). Each entry includes the job ID and position, foreground state, connection and Wi-Fi policy, the effective limit, worker count, background task count, stale reservation count, resource flags and the exact reason. A separate `recreatedStalledTransfer` entry records each repair.
+
+Pause/Continue remain user controls: recovery never resumes a paused playlist, and it never creates duplicate jobs, files or transfers. No schema change was needed.
+
+**Tests** (`PlaylistAcquisitionQueueStallTests`, background-URLSession mode):
+* a background-created task that never starts is recreated on foreground return, exactly once, after which Pause/Continue still work;
+* a task that vanished without a callback is released by the health check, with no duplicates;
+* the final remaining job starts after earlier songs complete;
+* pending work starts when the app returns to the foreground;
+* the queue restarts after the network returns;
+* lifting thermal or Low Power restrictions restarts the queue;
+* an unsupported recording never blocks the next eligible one.
+
+**Still dependent on iOS.** Whether a background-created task starts at all is up to iOS. The fix guarantees only that, once the app is active, a zero-byte deferred task no longer blocks the queue.
