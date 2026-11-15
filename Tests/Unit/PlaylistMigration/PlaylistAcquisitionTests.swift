@@ -312,7 +312,12 @@ import XCTest
         manager.backgroundEnded(first, failure: nil)
         for _ in 0..<300 where system.created < 2 { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(system.created, 2, "The freed slot is filled while iOS grants execution")
-        XCTAssertEqual(manager.jobs.first { $0.sourceIdentifier == AcquisitionHarness.video(1) }?.state, .completed, "Staged audio verified and imported")
+        // Verification has its own capacity, so the next transfer may start before the
+        // first song's import finishes; both must happen inside the same window.
+        let firstVideo = AcquisitionHarness.video(1)
+        for _ in 0..<300 where manager.jobs.first(where: { $0.sourceIdentifier == firstVideo })?.state != .completed { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(manager.jobs.first { $0.sourceIdentifier == firstVideo }?.state, .completed, "Staged audio verified and imported")
+        XCTAssertEqual(system.created, 2, "No extra transfer beyond the limit")
         for _ in 0..<100 where execution.active > 0 { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(execution.began, 1); XCTAssertEqual(execution.active, 0, "The window ends once no app work remains")
     }
