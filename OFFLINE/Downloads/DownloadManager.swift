@@ -39,6 +39,9 @@ extension StoredDownloadState {
     @Published private(set) var resourcePolicy = ResourcePolicy()
     private var foreground = true
     private var storageFailed = false
+    /// Set by `invalidate()`: this instance never writes or schedules again.
+    private var invalidated = false
+    private var halted: Bool { storageFailed || invalidated }
     /// Bounded execution granted while iOS has woken the suspended app (Phase 10.5).
     private let execution: (any BackgroundExecutionGranting)?
     private var opportunity: Int?
@@ -91,6 +94,18 @@ extension StoredDownloadState {
         preferences.$simultaneous.dropFirst().sink { [weak self] _ in Task { @MainActor in self?.schedule() } }.store(in: &subscriptions)
     }
     deinit { monitor.cancel() }
+    /// Ends this instance's ownership of the queue, as process termination would: cancels
+    /// app workers (their persisted state is recovered by the next instance), stops
+    /// observers and refuses every later write. System transfers are left to iOS.
+    func invalidate() {
+        guard !invalidated else { return }
+        invalidated = true
+        subscriptions.removeAll()
+        monitor.cancel()
+        workers.values.forEach { $0.cancel() }
+        if system?.owner === self { system?.owner = nil }
+        endOpportunity()
+    }
     func setPath(connected: Bool, wifi: Bool) {
         let regainedConnection = connected && (!self.connected || (wifi && !self.wifi))
         self.connected = connected
@@ -133,7 +148,7 @@ extension StoredDownloadState {
     func job(for videoID: String) -> StoredDownloadJob? { jobs.first { $0.sourceIdentifier == videoID } }
     private func failStorage() { storageFailed = true; issue = "Download storage is unavailable. Reopen the app to retry." }
     @discardableResult private func update(_ id: String, _ change: (inout StoredDownloadJob) -> Void) -> Bool {
-        guard !storageFailed, let index = jobs.firstIndex(where: { $0.id == id }), let storage else { return false }
+        guard !halted, let index = jobs.firstIndex(where: { $0.id == id }), let storage else { return false }
         var job = jobs[index]
         change(&job)
         job.dateModified = Date()
@@ -146,13 +161,13 @@ extension StoredDownloadState {
     /// audio is genuinely missing or invalid. Main-actor isolation plus the unique
     /// per-video index make concurrent calls for one recording yield one job.
     func acquisitionJob(for video: YouTubeVideo, quality: AudioQuality) -> (job: StoredDownloadJob, created: Bool)? {
-        guard !storageFailed, storage != nil, YouTubeURLValidator.isValidID(video.id) else { return nil }
+        guard !halted, storage != nil, YouTubeURLValidator.isValidID(video.id) else { return nil }
         if let existing = job(for: video.id) { return (existing, false) }
         enqueue(video, quality: quality)
         return job(for: video.id).map { ($0, true) }
     }
     func enqueue(_ video: YouTubeVideo, quality: AudioQuality) {
-        guard !storageFailed, let storage, YouTubeURLValidator.isValidID(video.id) else { return }
+        guard !halted, let storage, YouTubeURLValidator.isValidID(video.id) else { return }
         if let existing = job(for: video.id) {
             if existing.state == .completed { retry(existing.id, repair: true) }
             return
@@ -165,7 +180,7 @@ extension StoredDownloadState {
         do { try storage.downloads.save(job); jobs.append(job); schedule() } catch { failStorage() }
     }
     private func schedule() {
-        guard !storageFailed, foreground || opportunity != nil, !reconciling, !resourcePolicy.defersNewWork else { return }
+        guard !halted, foreground || opportunity != nil, !reconciling, !resourcePolicy.defersNewWork else { return }
         let waiting = preferences.wifiOnly && !wifi
         for job in jobs where job.state.pending {
             let staged = UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
@@ -260,7 +275,7 @@ extension StoredDownloadState {
         if update(id, { $0.trackID = trackID; $0.finishedAt = Date(); $0.state = .completed; $0.progress = 1 }) { try? FileManager.default.removeItem(at: file) }
     }
     private func progress(_ id: String, attempt: UUID, bytes: Int64, total: Int64, now: TimeInterval) {
-        guard attempts[id] == attempt, jobs.first(where: { $0.id == id })?.state == .downloading else { return }
+        guard !halted, attempts[id] == attempt, jobs.first(where: { $0.id == id })?.state == .downloading else { return }
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         guard samples[id, default: TransferRate()].record(bytes: bytes, at: now) else { return }
         rates[id] = samples[id]?.bytesPerSecond
@@ -331,7 +346,7 @@ extension DownloadManager {
         if let file = incoming(job) { try? FileManager.default.removeItem(at: file) }
     }
     private func reconcileSystem() {
-        guard let system, !reconciling, !storageFailed else { return }
+        guard let system, !reconciling, !halted else { return }
         reconciling = true
         let before = jobs.filter { $0.transferGeneration != nil }
         Task {

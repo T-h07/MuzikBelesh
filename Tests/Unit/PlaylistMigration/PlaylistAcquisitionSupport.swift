@@ -159,11 +159,26 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
         prefs.simultaneous = limit
         prefs.wifiOnly = wifiOnly
         transfer = GatedAcquisitionTransfer(holding: holding)
-        launch(start: start)
+        build(start: start, connected: true, wifi: true)
     }
 
-    func launch(start: Bool = true, transfer replacement: GatedAcquisitionTransfer? = nil, connected: Bool = true, wifi: Bool = true) {
+    /// Simulated app relaunch: the old instances stop completely (no observers, timers,
+    /// workers or writes remain, as after process termination), then new ones are built
+    /// over the same SQLite store and recover from persisted state alone.
+    func relaunch(start: Bool = true, transfer replacement: GatedAcquisitionTransfer? = nil, connected: Bool = true, wifi: Bool = true) async {
+        await terminate()
         if let replacement { transfer = replacement }
+        build(start: start, connected: connected, wifi: wifi)
+    }
+
+    /// Ends the current instances. Called before every relaunch and at test teardown, so
+    /// the fixture's database is never deleted while still in use.
+    func terminate() async {
+        await coordinator?.invalidate()
+        downloads?.invalidate()
+    }
+
+    private func build(start: Bool, connected: Bool, wifi: Bool) {
         downloads = DownloadManager(storage: storage, preferences: prefs, preparer: preparer, transfer: transfer,
                                     artwork: YouTubeArtworkLoader(), observeNetwork: false)
         downloads.setPath(connected: connected, wifi: wifi)
@@ -185,13 +200,19 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
         let entries = try await repo.entries(migrationID: session.id)
         for (index, video) in videos.enumerated() {
             guard let video else { continue }
-            let candidate = PlaylistMigrationCandidate(id: UUID(), entryID: entries[index].id, provider: "youtube", providerTrackID: video,
-                title: "Artist - \(name) song \(index)", artist: "Artist", durationMs: 2000, confidence: 0.9,
-                evidence: ["currentAttempt": "true", "rank": "1", "outcome": "review", "channel": "Channel"], decision: .pending)
-            try await storage.database.dbQueue.write { try GRDBPlaylistMigrationRepository.insertFixtureCandidate(candidate, db: $0) }
-            if confirm { try await repo.selectCandidate(for: entries[index], candidateID: candidate.id) }
+            try await self.confirm(entries[index], video: video, select: confirm)
         }
         return (session, try await repo.entries(migrationID: session.id))
+    }
+
+    /// Saves one pending YouTube candidate for an occurrence and, when `select`, confirms
+    /// it through the same repository path the review queue uses.
+    func confirm(_ entry: PlaylistMigrationEntry, video: String, select: Bool = true) async throws {
+        let candidate = PlaylistMigrationCandidate(id: UUID(), entryID: entry.id, provider: "youtube", providerTrackID: video,
+            title: "Artist - \(entry.source.title)", artist: "Artist", durationMs: 2000, confidence: 0.9,
+            evidence: ["currentAttempt": "true", "rank": "1", "outcome": "review", "channel": "Channel"], decision: .pending)
+        try await storage.database.dbQueue.write { try GRDBPlaylistMigrationRepository.insertFixtureCandidate(candidate, db: $0) }
+        if select { try await repo.selectCandidate(for: entry, candidateID: candidate.id) }
     }
 
     func entries(_ session: PlaylistMigrationSession) async throws -> [PlaylistMigrationEntry] {
@@ -212,13 +233,31 @@ final class AcquisitionTestPreparer: YouTubeDownloadPreparing, @unchecked Sendab
             if try await condition() { return }
             try await Task.sleep(for: .milliseconds(25))
         }
-        XCTFail("\(message) did not happen within \(timeout)s", file: file, line: line)
+        let state = await describe()
+        XCTFail("\(message) did not happen within \(timeout)s. \(state)", file: file, line: line)
         throw CancellationError()
+    }
+
+    /// Queue state for CI failure messages (no simulator access from Windows).
+    func describe() async -> String {
+        let jobs = ((try? self.jobs()) ?? []).map { "\($0.sourceIdentifier ?? "?"):\($0.state.rawValue)\($0.errorMessage.map { "(" + $0 + ")" } ?? "")" }
+        let links = ((try? await self.links()) ?? []).map { "\($0.providerIdentity):\($0.state.rawValue):r\($0.retries)" }
+        let started = await transfer.started
+        return "jobs=\(jobs) links=\(links) started=\(started) managerIssue=\(downloads.issue ?? "none") coordinatorError=\(coordinator.lastError ?? "none")"
     }
 
     /// Lets queued debounced passes finish and asserts nothing else changes.
     func settle() async {
         try? await Task.sleep(for: .milliseconds(300))
         await coordinator.reconcileNow()
+    }
+}
+
+extension XCTestCase {
+    /// Creates a harness whose instances are terminated before the fixture is removed.
+    @MainActor func harness(limit: Int = 3, wifiOnly: Bool = false, holding: Bool = false, start: Bool = true) throws -> AcquisitionHarness {
+        let value = try AcquisitionHarness(limit: limit, wifiOnly: wifiOnly, holding: holding, start: start)
+        addTeardownBlock { await value.terminate() }
+        return value
     }
 }

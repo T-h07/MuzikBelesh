@@ -35,6 +35,8 @@ import OSLog
     private var observation: (any DatabaseCancellable)?
     private var subscriptions = Set<AnyCancellable>()
     private var running = false
+    /// Set by `invalidate()`: no further passes, writes or downloads requests.
+    private var invalidated = false
     private var rerun = false
     private var pending: Task<Void, Never>?
     private var retryTimer: Task<Void, Never>?
@@ -79,6 +81,20 @@ import OSLog
         // `$jobs` publishes the new value before the property changes.
         downloads.$jobs.sink { [weak self] jobs in self?.jobsChanged(jobs) }.store(in: &subscriptions)
         requestReconcile(immediately: true)
+    }
+
+    /// Stops this coordinator as process termination would: cancels observation, timers
+    /// and pending passes, aborts an in-flight pass before its next write, and returns
+    /// once it has stopped. Persisted links and controls are left for the next instance.
+    func invalidate() async {
+        guard !invalidated else { return }
+        invalidated = true
+        observation?.cancel(); observation = nil
+        subscriptions.removeAll()
+        pending?.cancel(); pending = nil
+        retryTimer?.cancel(); retryTimer = nil
+        notifier.onOpenPlaylist = nil
+        while running { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     // MARK: User intent
@@ -175,6 +191,7 @@ import OSLog
     // MARK: Scheduling of passes
 
     func requestReconcile(immediately: Bool = false) {
+        guard !invalidated else { return }
         if running { rerun = true; return }
         guard pending == nil else { return }
         let delay = immediately ? Duration.zero : debounce
@@ -188,6 +205,7 @@ import OSLog
 
     /// Runs (or joins) a pass and returns after it, including any rerun it requested.
     func reconcileNow() async {
+        guard !invalidated else { return }
         if running { rerun = true; while running { try? await Task.sleep(for: .milliseconds(20)) }; return }
         running = true
         let token = execution?.begin("Playlist downloads") { }
@@ -199,7 +217,7 @@ import OSLog
             rerun = false
             await pass()
             passes += 1
-        } while rerun
+        } while rerun && !invalidated
     }
 
     private func jobsChanged(_ jobs: [StoredDownloadJob]) {
@@ -220,6 +238,7 @@ import OSLog
     private func pass() async {
         let plan: AcquisitionPlan
         do { plan = try await repository.plan() } catch { report(error); return }
+        guard !invalidated else { return }
         playlists = plan.playlists
         controls = plan.controls
         pausedMigrations = Set(plan.controls.values.filter(\.userPaused).map(\.migrationID))
@@ -368,6 +387,7 @@ import OSLog
         }
 
         // 6. Persist (only what changed), then attach verified results.
+        guard !invalidated else { return }
         let changed = current.values.filter { link in original[link.entryID].map { !$0.sameContent(as: link) } ?? true }
         do {
             try await repository.delete(entryIDs: removed.map(\.entryID))
@@ -375,8 +395,10 @@ import OSLog
         } catch { report(error) }
         links = current
         for (trackID, group) in associations where !group.isEmpty {
+            guard !invalidated else { return }
             await associate(trackID: trackID, group)
         }
+        guard !invalidated else { return }
 
         // 7. Retry timer, presentation and notifications.
         scheduleRetry(at: earliestRetry)

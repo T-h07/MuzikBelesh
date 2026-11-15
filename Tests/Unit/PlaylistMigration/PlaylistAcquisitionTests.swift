@@ -9,7 +9,7 @@ import XCTest
     private let x = AcquisitionHarness.video(1), y = AcquisitionHarness.video(2), z = AcquisitionHarness.video(3)
 
     func testConfirmedRecordingsAutoEnqueueUnconfirmedNeverDoAndOrderIsPreserved() async throws {
-        let h = try AcquisitionHarness()
+        let h = try harness()
         let confirmed = try await h.playlist("Mixed", [x, nil, y])
         // A saved recommendation that the user never confirmed.
         let (pendingOnly, _) = try await h.playlist("Recommendations", [z], confirm: false)
@@ -35,7 +35,7 @@ import XCTest
     }
 
     func testDuplicateOccurrencesAndPlaylistsShareOneJobAndOneStoredFile() async throws {
-        let h = try AcquisitionHarness()
+        let h = try harness()
         let a = try await h.playlist("A", [x, y, x])
         let b = try await h.playlist("B", [x])
         try await h.until("Both playlists offline") {
@@ -56,7 +56,7 @@ import XCTest
         // Repeated reconciliation (refreshes, relaunches) is idempotent.
         let linksBefore = try await h.links()
         for _ in 0..<3 { await h.coordinator.reconcileNow() }
-        h.launch()
+        await h.relaunch()
         await h.settle()
         XCTAssertEqual(try h.jobs().count, 2)
         let awaited3 = try await h.links().sorted { $0.entryID < $1.entryID }.map(\.state)
@@ -68,7 +68,7 @@ import XCTest
     }
 
     func testCompletedAndActiveDownloadsAreReusedNotRestarted() async throws {
-        let h = try AcquisitionHarness(holding: true)
+        let h = try harness(holding: true)
         let a = try await h.playlist("A", [x])
         try await h.until("Transfer started") { await h.transfer.waiting == 1 }
         // A second playlist confirms the same recording while it is downloading.
@@ -92,7 +92,7 @@ import XCTest
     }
 
     func testOneFailureNeverBlocksTheQueueAndDecisionsSurvive() async throws {
-        let h = try AcquisitionHarness(limit: 1)
+        let h = try harness(limit: 1)
         h.preparer.fail(y, with: .noCompatibleAudio)           // Permanent: unsupported source.
         await h.transfer.fail(z, [.rejected, .rejected])          // Recoverable: succeeds after one automatic retry.
         let p = try await h.playlist("Failures", [x, y, z])
@@ -120,7 +120,7 @@ import XCTest
     }
 
     func testChangedDecisionWhileDownloadingIsNeverAssociated() async throws {
-        let h = try AcquisitionHarness(holding: true)
+        let h = try harness(holding: true)
         let p = try await h.playlist("Stale", [x])
         try await h.until("Transfer started") { await h.transfer.waiting == 1 }
         let awaited6 = try await h.repo.candidates(entryID: p.entries[0].id).first { $0.decision == .accepted }
@@ -156,7 +156,7 @@ import XCTest
 /// bounded background execution.
 @MainActor final class PlaylistAcquisitionSchedulingTests: XCTestCase {
     func testLimitIsGlobalAcrossOrdinaryAndPlaylistDownloadsAndFollowsChanges() async throws {
-        let h = try AcquisitionHarness(limit: 1, holding: true)
+        let h = try harness(limit: 1, holding: true)
         h.downloads.enqueue(YouTubeVideo(id: AcquisitionHarness.video(90), title: "Ordinary download"), quality: .standard)
         try await h.until("Ordinary transfer started") { await h.transfer.waiting == 1 }
         let p = try await h.playlist("Limits", (1...3).map(AcquisitionHarness.video))
@@ -186,31 +186,49 @@ import XCTest
     }
 
     func testPauseIsDurableAcrossRelaunchAndContinueResumes() async throws {
-        let h = try AcquisitionHarness(limit: 1, holding: true)
-        let p = try await h.playlist("Pause", (1...3).map(AcquisitionHarness.video))
+        let h = try harness(limit: 1, holding: true)
+        let videos = (1...4).map(AcquisitionHarness.video)
+        let p = try await h.playlist("Pause", [videos[0], videos[1], videos[2], nil])
         let migrationID = p.session.id.uuidString
+        // Precondition: every confirmed song is durably enqueued before the pause.
+        try await h.until("Three jobs enqueued") { try h.jobs().count == 3 }
         try await h.until("First transfer started") { await h.transfer.waiting == 1 }
         await h.coordinator.pause(migrationID: migrationID)
         try await h.until("All playlist jobs paused") { try h.jobs().allSatisfy { $0.state == .paused } }
         await h.transfer.releaseAll()
+        // A song confirmed while paused is queued durably (link) but starts no download.
+        try await h.confirm(p.entries[3], video: videos[3])
+        try await h.until("Paused confirmation linked") { try await h.links().count == 4 }
         await h.settle()
         var started = await h.transfer.started
         XCTAssertEqual(started.count, 1, "No new download starts while paused")
+        XCTAssertEqual(try h.jobs().count, 3, "A paused playlist creates no new download job")
         XCTAssertEqual(h.coordinator.displayStates[p.entries[1].id], .playlistPaused)
+        XCTAssertEqual(h.coordinator.displayStates[p.entries[3].id], .playlistPaused)
+
         // Relaunch: the pause is user intent and is never resumed automatically (Invariant F).
-        h.launch()
+        await h.relaunch()
         await h.settle()
         XCTAssertTrue(h.coordinator.pausedMigrations.contains(migrationID))
         started = await h.transfer.started
         XCTAssertEqual(started.count, 1)
-        XCTAssertEqual(try h.jobs().count, 3, "The queue survives reconstruction")
+        XCTAssertEqual(try h.jobs().count, 3, "The download queue survives reconstruction")
+        XCTAssertTrue(try h.jobs().allSatisfy { $0.state == .paused }, "Paused jobs stay paused after relaunch")
+        let links = try await h.links()
+        XCTAssertEqual(links.count, 4, "Every confirmed song keeps its durable acquisition link")
+        XCTAssertTrue(links.allSatisfy { $0.state == .waiting })
+        XCTAssertEqual(links.filter { $0.downloadJobID == nil }.map(\.providerIdentity), [videos[3]])
+
         await h.coordinator.continueDownloads(migrationID: migrationID)
         try await h.until("Playlist offline after Continue") { try await h.allReady(p.session) }
         XCTAssertFalse(h.coordinator.pausedMigrations.contains(migrationID))
+        XCTAssertEqual(try h.jobs().count, 4)
+        started = await h.transfer.started
+        XCTAssertEqual(Set(started), Set(videos), "Continue resumed every song, including the one confirmed while paused")
     }
 
     func testPausingOnePlaylistKeepsASharedDownloadRunningForAnother() async throws {
-        let h = try AcquisitionHarness(holding: true)
+        let h = try harness(holding: true)
         let x = AcquisitionHarness.video(1)
         let a = try await h.playlist("A", [x])
         let b = try await h.playlist("B", [x])
@@ -236,8 +254,8 @@ import XCTest
     }
 
     func testWiFiOnlyBlocksCellularAndResumesOnWiFiAndStricterPolicyStopsTransfers() async throws {
-        let h = try AcquisitionHarness(wifiOnly: true, start: false)
-        h.launch(wifi: false)
+        let h = try harness(wifiOnly: true, start: false)
+        await h.relaunch(wifi: false)
         let p = try await h.playlist("Network", [AcquisitionHarness.video(1)])
         try await h.until("Waiting for Wi-Fi shown") { h.coordinator.displayStates[p.entries[0].id] == .waitingForWiFi }
         await h.settle()
@@ -274,6 +292,7 @@ import XCTest
         let system = AcquisitionTestSystem(), execution = RecordingBackgroundExecution()
         let manager = DownloadManager(storage: fixture.storage, preferences: prefs, preparer: AcquisitionTestPreparer(), transfer: GatedAcquisitionTransfer(),
                                       artwork: YouTubeArtworkLoader(), observeNetwork: false, system: system, execution: execution)
+        addTeardownBlock { await manager.invalidate() }
         manager.setForeground(true)
         manager.setPath(connected: true, wifi: true)
         manager.enqueue(YouTubeVideo(id: AcquisitionHarness.video(1), title: "First"), quality: .standard)
@@ -304,13 +323,13 @@ import XCTest
     private let x = AcquisitionHarness.video(1), y = AcquisitionHarness.video(2), z = AcquisitionHarness.video(3)
 
     func testInterruptedProcessIsReconciledAndRepeatedLaunchesAreIdempotent() async throws {
-        let h = try AcquisitionHarness(limit: 1, holding: true)
+        let h = try harness(limit: 1, holding: true)
         let p = try await h.playlist("Relaunch", [x, y])
         try await h.until("Transfer in flight") { await h.transfer.waiting == 1 }
-        // The process "dies" mid-transfer: the old transfer never returns.
-        h.launch(transfer: GatedAcquisitionTransfer())
+        // The process dies mid-transfer: its in-flight transfer and work end with it.
+        await h.relaunch(transfer: GatedAcquisitionTransfer())
         try await h.until("Recovered playlist offline") { try await h.allReady(p.session) }
-        for _ in 0..<2 { h.launch(); await h.settle() }
+        for _ in 0..<2 { await h.relaunch(); await h.settle() }
         XCTAssertEqual(try h.jobs().count, 2, "Recovery never duplicates queue records")
         let awaited11 = try await h.trackCount()
         XCTAssertEqual(awaited11, 2, "Recovery never duplicates files")
@@ -322,7 +341,7 @@ import XCTest
     }
 
     func testImportedButUnassociatedTrackIsAssociatedWithoutDownloadingAgain() async throws {
-        let h = try AcquisitionHarness(start: false)
+        let h = try harness(start: false)
         // Audio was imported before the process ended; the association never committed.
         h.downloads.enqueue(YouTubeVideo(id: x, title: "Imported earlier"), quality: .standard)
         try await h.until("Earlier download imported") { try h.jobs().first?.state == .completed }
@@ -344,7 +363,7 @@ import XCTest
     }
 
     func testFailedVerificationNeverMarksReadyAndIdenticalAudioIsStoredOnce() async throws {
-        let h = try AcquisitionHarness(limit: 1)
+        let h = try harness(limit: 1)
         await h.transfer.corrupt(x)
         await h.transfer.seed(y, 42); await h.transfer.seed(z, 42) // Different identities, identical bytes.
         let p = try await h.playlist("Verify", [x, y, z])
@@ -372,7 +391,7 @@ import XCTest
     }
 
     func testCompletionNotificationIsAccurateDeduplicatedAndPermissionIndependent() async throws {
-        let h = try AcquisitionHarness()
+        let h = try harness()
         h.notifier.permitted = false // Denied permission never affects downloads.
         h.preparer.fail(z, with: .videoUnavailable)
         let full = try await h.playlist("Full", [x, y])
@@ -385,7 +404,7 @@ import XCTest
         XCTAssertTrue(h.notifier.partial[0].contains("1 of 2 songs"))
         XCTAssertTrue(h.notifier.partial[0].contains("1 still need attention"))
         // Relaunch never repeats delivered notifications.
-        h.launch()
+        await h.relaunch()
         await h.settle()
         XCTAssertEqual(h.notifier.ready.count, 1)
         XCTAssertEqual(h.notifier.partial.count, 1)
