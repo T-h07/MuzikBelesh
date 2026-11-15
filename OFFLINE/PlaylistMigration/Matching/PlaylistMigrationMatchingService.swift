@@ -69,14 +69,27 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
     let scoring: CandidateScoringEngine
     let policy: MatchDecisionPolicy
     let restriction: ProviderRestrictionPolicy
+    /// Phase 10.6: provider-wide restriction deadlines shared across runs, migrations and
+    /// launches. Nil keeps the original per-run behavior exactly.
+    let cooldowns: (any ProviderCooldownPersisting)?
+    private let now: @Sendable () -> Date
     private var running = false
     /// Final report of the last completed run (read by the view model after `run` returns).
     private(set) var lastReport = SongMatchingProgress()
+    /// Occurrences the last run actually claimed (coordinator pass accounting).
+    private(set) var lastClaimed = 0
     init(repository: GRDBPlaylistMigrationRepository, providers: [any ExternalCandidateDiscovery],
-         configuration: SongMatchingConfiguration = .standard, restriction: ProviderRestrictionPolicy = .standard) {
+         configuration: SongMatchingConfiguration = .standard, restriction: ProviderRestrictionPolicy = .standard,
+         cooldowns: (any ProviderCooldownPersisting)? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
         self.repository = repository; self.providers = Array(providers.prefix(3)); self.restriction = restriction
+        self.cooldowns = cooldowns; self.now = now
         scoring = CandidateScoringEngine(configuration: configuration)
         policy = MatchDecisionPolicy(configuration: configuration)
+    }
+
+    /// Enabled discovery sources for the next run, in preference order.
+    func enabledProviderNames() -> [String] {
+        providers.map { $0.forRun() }.filter(\.isEnabled).map(\.discoveryName)
     }
 
     /// Read-only protocol adapter. Lifecycle callers use run() so decisions are
@@ -108,6 +121,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
              progress: @escaping @Sendable (SongMatchingProgress) async -> Void) async throws {
         guard !running else { throw SongMatchingError.busy }
         running = true
+        lastClaimed = 0
         defer { running = false }
         let session = try await repository.beginMatching(migrationID: migrationID)
         do {
@@ -124,6 +138,33 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             // Independent health per source: restriction cooldowns/probes and failure streaks.
             var restrictions = Array(repeating: ProviderHealth(), count: runProviders.count)
             let clock = ContinuousClock()
+            // Durable cooldowns (Phase 10.6): a source still restricted by an earlier run,
+            // migration or launch is not called; its songs are deferred after local
+            // matching and the coordinator resumes them once the deadline has passed.
+            var cooldownWrites: [String: PersistedProviderCooldown?] = [:]
+            var cooling = Set<String>()
+            if let cooldowns, let saved = try? await cooldowns.providerCooldowns() {
+                let wall = now()
+                for number in runProviders.indices {
+                    let name = runProviders[number].discoveryName
+                    guard let entry = saved[name] else { continue }
+                    cooling.insert(name)
+                    restrictions[number].probes = min(entry.probes, restriction.cooldowns.count)
+                    if entry.expiresAt > wall {
+                        restrictions[number].suspended = true
+                        restrictions[number].reason = entry.reason ?? "Search temporarily limited."
+                    }
+                }
+            }
+            func flushCooldowns() async {
+                guard let cooldowns, !cooldownWrites.isEmpty else { return }
+                let writes = cooldownWrites
+                cooldownWrites.removeAll()
+                for (name, write) in writes {
+                    if let value = write { try? await cooldowns.saveProviderCooldown(value) }
+                    else { try? await cooldowns.clearProviderCooldown(name) }
+                }
+            }
             await progress(report)
             for entry in entries {
                 try Task.checkCancellation()
@@ -158,10 +199,21 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                         var attempted = false, foundCandidates = false, failedAny = false
                         var connectivityOnly = true, sawConnectivityFailure = false
                         var attemptedProviders = Set<Int>(), skipped = Set<Int>()
-                        func escalate(_ number: Int, _ reason: String) {
+                        func escalate(_ number: Int, _ reason: String, retryAfter: Duration? = nil) {
                             restrictions[number].probes += 1; restrictions[number].reason = reason; restrictions[number].failStreak = 0
+                            var wait = restriction.suspendedCooldown
                             if restrictions[number].probes > restriction.cooldowns.count { restrictions[number].suspended = true }
-                            else { restrictions[number].retryAt = clock.now.advanced(by: restriction.cooldowns[restrictions[number].probes - 1]) }
+                            else {
+                                wait = restriction.cooldowns[restrictions[number].probes - 1]
+                                // A valid Retry-After is honored, bounded to one hour.
+                                if let retryAfter, retryAfter > .zero { wait = max(wait, min(retryAfter, .seconds(3600))) }
+                                restrictions[number].retryAt = clock.now.advanced(by: wait)
+                            }
+                            guard cooldowns != nil else { return }
+                            let name = runProviders[number].discoveryName, stamp = now()
+                            cooling.insert(name)
+                            cooldownWrites[name] = .some(PersistedProviderCooldown(provider: name, expiresAt: stamp.addingTimeInterval(wait.matchingSeconds),
+                                probes: restrictions[number].probes, reason: String(reason.prefix(300)), updatedAt: stamp))
                         }
                         func songFailure(_ number: Int) {
                             restrictions[number].failStreak += 1
@@ -190,6 +242,8 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                 if found.failure == .networkUnavailable { sawConnectivityFailure = true } else { connectivityOnly = false }
                                 if found.failures.isEmpty {
                                     restrictions[number] = ProviderHealth()
+                                    let healthy = runProviders[number].discoveryName
+                                    if cooling.remove(healthy) != nil { cooldownWrites[healthy] = .some(nil) }
                                     if !found.recordings.isEmpty { foundCandidates = true }
                                     return
                                 }
@@ -202,7 +256,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                 if let failure = found.failure {
                                     MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: name)
                                 }
-                                if providerWide { escalate(number, reason) }
+                                if providerWide { escalate(number, reason, retryAfter: found.retryAfter) }
                                 else if found.searchFailed && found.failure != .networkUnavailable { songFailure(number) }
                             } catch {
                                 if Task.isCancelled || error is CancellationError { throw CancellationError() }
@@ -230,7 +284,16 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                 skipped.insert(number); report.recordSkip(runProviders[number].discoveryName); continue
                             }
                             try await attempt(number)
+                            await flushCooldowns()
                             if foundCandidates { break }
+                        }
+                        // Durable mode: a long restriction is never waited out while holding the
+                        // single worker. The song is deferred and resumed after the deadline.
+                        if !attempted, let limit = restriction.inlineWaitLimit, cooldowns != nil,
+                           let number = skipped.min(by: { (restrictions[$0].retryAt ?? clock.now) < (restrictions[$1].retryAt ?? clock.now) }),
+                           clock.now.duration(to: restrictions[number].retryAt ?? clock.now) > limit {
+                            for value in skipped { restrictions[value].suspended = true }
+                            skipped.removeAll()
                         }
                         // Pass 2: every usable source is cooling down. Respect the restriction:
                         // wait for the earliest one, then make one fresh search for THIS occurrence.
@@ -239,6 +302,7 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                             await progress(report)
                             try await restriction.sleep(max(.zero, clock.now.duration(to: restrictions[number].retryAt ?? clock.now)))
                             try await attempt(number)
+                            await flushCooldowns()
                         }
                         report.discoveryPaused = !providers.isEmpty && runProviders.indices.allSatisfy { restrictions[$0].suspended }
                         if attempted { report.externalAttempted += 1 }
@@ -309,6 +373,8 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                 await progress(report)
                 if connectivityStreak >= 3 { report.waitingForConnection = true; break }
             }
+            await flushCooldowns()
+            lastClaimed = claimed
             MatchingDiagnostics.run(session: migrationID, claimed: claimed, skippedCompleted: skippedCompleted,
                                     retryFailed: retryFailed, offline: report.waitingForConnection)
             try Task.checkCancellation()
@@ -328,4 +394,9 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             throw error
         }
     }
+}
+
+extension Duration {
+    /// Seconds as a floating-point value (cooldown deadlines are stored as wall-clock dates).
+    var matchingSeconds: TimeInterval { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
 }

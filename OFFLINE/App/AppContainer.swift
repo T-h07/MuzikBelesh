@@ -19,6 +19,8 @@ final class AppContainer: ObservableObject {
     let playlistMatching: PlaylistMatchingViewModel?
     /// Phase 10.5 automatic acquisition. Nil when storage is unavailable or disabled.
     let playlistAcquisition: PlaylistAcquisitionCoordinator?
+    /// Phase 10.6: the single owner of migration lifecycle decisions. Nil without storage.
+    let migrationCoordinator: PlaylistMigrationCoordinator?
     let youtubeSearch: YouTubeSearchService
     let youtubeMetadata: any YouTubeMetadataProvider
     let youtubeResolver: any YouTubeAudioResolver
@@ -55,6 +57,8 @@ final class AppContainer: ObservableObject {
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
+        var matchingService: PlaylistMigrationMatchingService?
+        let coordinatorStore = self.storage.map { MigrationCoordinatorRepository(db: $0.database.dbQueue) }
         if let storage = self.storage {
             // Order: public Invidious, optional SearXNG, direct YouTube fallback. Injected
             // fixture search (UI tests) keeps matching offline and deterministic.
@@ -66,8 +70,11 @@ final class AppContainer: ObservableObject {
             let settings = discoverySources
             sources.append(GatedDiscovery(base: YouTubeSearchProviderAdapter(search: self.youtubeSearch, metadata: self.youtubeMetadata),
                                           enabled: { settings.useDirectYouTube }))
-            self.playlistMatching = PlaylistMatchingViewModel(service: PlaylistMigrationMatchingService(
-                repository: storage.playlistMigrations, providers: sources), repository: storage.playlistMigrations)
+            // Durable provider cooldowns are shared by every migration and survive launches.
+            let service = PlaylistMigrationMatchingService(repository: storage.playlistMigrations, providers: sources,
+                                                           restriction: .durable, cooldowns: coordinatorStore)
+            matchingService = service
+            self.playlistMatching = PlaylistMatchingViewModel(service: service, repository: storage.playlistMigrations)
         } else { self.playlistMatching = nil }
         // Startup order: storage/database, library snapshot, DownloadManager (which begins
         // background-transfer reconciliation), then acquisition reconciliation.
@@ -77,6 +84,15 @@ final class AppContainer: ObservableObject {
             self.playlistAcquisition = coordinator
             coordinator.start()
         } else { self.playlistAcquisition = nil }
+        // Last in the startup order: it waits for transfer reconciliation, then restores
+        // persisted migration intent and schedules eligible work.
+        if let storage = self.storage, let coordinatorStore, let matchingService, let matching = self.playlistMatching {
+            let foreground = backgroundTransfers == nil || UIApplication.shared.applicationState != .background
+            let migrationCoordinator = PlaylistMigrationCoordinator(repository: coordinatorStore, migrations: storage.playlistMigrations,
+                matching: matching, service: matchingService, acquisition: playlistAcquisition, downloads: downloads, foreground: foreground)
+            self.migrationCoordinator = migrationCoordinator
+            Task { await migrationCoordinator.start() }
+        } else { self.migrationCoordinator = nil }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)

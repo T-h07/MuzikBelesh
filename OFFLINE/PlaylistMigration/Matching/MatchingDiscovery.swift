@@ -47,6 +47,9 @@ struct MatchingDiscoveryResult: Sendable {
     var failure: YouTubeError? = nil
     var pauseDiscovery = false
     var searchFailed = false
+    /// A provider-supplied Retry-After for a provider-wide restriction (HTTP 429), when
+    /// the transport exposes one. Honored, bounded, in place of the default cooldown.
+    var retryAfter: Duration? = nil
 }
 protocol ExternalCandidateDiscovery: Sendable {
     /// Providers must honor cancellation and return bounded metadata only.
@@ -120,7 +123,14 @@ struct ProviderRestrictionPolicy: Sendable {
     /// With more than one source, a source with three consecutive failures is skipped
     /// (not waited on) for this long while the others continue.
     var healthCooldown: Duration = .seconds(60)
+    /// Durable mode only (a cooldown store is configured): the longest restriction waited
+    /// out inside a run. Longer ones defer the song to the coordinator. Nil: always wait.
+    var inlineWaitLimit: Duration? = nil
+    /// Cooldown persisted after every probe was also restricted (provider suspended).
+    var suspendedCooldown: Duration = .seconds(900)
     static let standard = ProviderRestrictionPolicy(cooldowns: [.seconds(30), .seconds(120), .seconds(300)])
+    /// Production policy with the Phase 10.6 coordinator.
+    static let durable = ProviderRestrictionPolicy(cooldowns: [.seconds(30), .seconds(120), .seconds(300)], inlineWaitLimit: .seconds(30))
     static let noWait = ProviderRestrictionPolicy(cooldowns: [.zero, .zero], sleep: { _ in try Task.checkCancellation() }, healthCooldown: .zero)
 }
 

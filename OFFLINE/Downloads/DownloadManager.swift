@@ -17,6 +17,12 @@ extension StoredDownloadState {
     }
 }
 
+struct NetworkPathSnapshot: Equatable, Sendable {
+    var known = false
+    var connected = false
+    var wifi = false
+}
+
 @MainActor final class DownloadManager: ObservableObject {
     @Published private(set) var jobs: [StoredDownloadJob] = []
     @Published private(set) var rates: [String: Double] = [:]
@@ -26,7 +32,11 @@ extension StoredDownloadState {
     private let preparer: any YouTubeDownloadPreparing
     private let transfer: any AudioTransferring
     private let system: (any SystemDownloading)?
-    private var reconciling = false
+    /// Background-transfer inventory reconciliation in progress. Published so dependent
+    /// services (Phase 10.6 coordinator) start only after transfer ownership is known.
+    @Published private(set) var reconciling = false
+    /// Last connectivity reported to this manager (`known == false` until the first update).
+    @Published private(set) var networkPath = NetworkPathSnapshot()
     private let artwork: YouTubeArtworkLoader
     private let monitor = NWPathMonitor()
     private var subscriptions = Set<AnyCancellable>()
@@ -136,6 +146,8 @@ extension StoredDownloadState {
         let regainedConnection = connected && (!self.connected || (wifi && !self.wifi))
         self.connected = connected
         self.wifi = wifi
+        let snapshot = NetworkPathSnapshot(known: true, connected: connected, wifi: wifi)
+        if networkPath != snapshot { networkPath = snapshot }
         if system == nil && (!connected || (preferences.wifiOnly && !wifi)) { policyChanged(strict: true) }
         if regainedConnection {
             for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
