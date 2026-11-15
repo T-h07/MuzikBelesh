@@ -28,7 +28,9 @@ final class PlaylistMigrationUITests: XCTestCase {
         open("Imported placeholders")
         XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 imported • 0 manually added • 500 total • 0 available offline")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
-        XCTAssertFalse(app.buttons["playlist-add-songs"].exists); XCTAssertFalse(app.buttons["playlist-reorder"].exists)
+        // Hybrid playlists (80bdeba): songs can be added manually to an imported playlist,
+        // but its source order is preserved, so it is never reorderable.
+        XCTAssertTrue(app.buttons["playlist-add-songs"].exists); XCTAssertFalse(app.buttons["playlist-reorder"].exists)
         app.swipeUp()
         XCTAssertTrue(app.staticTexts["Original song 0"].exists)
         XCTAssertTrue(app.staticTexts["Original artist"].firstMatch.exists)

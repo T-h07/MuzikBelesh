@@ -25,14 +25,14 @@ final class PlaylistFileImportUITests: XCTestCase {
         } while Date() < deadline
         return nil
     }
-    /// A List-row Toggle's accessibility frame spans the whole row, so tapping its centre
-    /// hits the label, which does not flip the switch on iOS 26. Tap the switch itself and
-    /// wait for the value to change.
+    /// A List-row Toggle's accessibility frame (and, on iOS 26, its nested switch's frame)
+    /// spans the whole row, so tapping the element's centre hits the label and does not
+    /// flip the switch (CI run 43735713704). The switch is trailing-aligned: tap 30 pt in
+    /// from the row's trailing edge, inside the control, and wait for the value to change.
     private func toggle(_ row: XCUIElement) {
         let before = row.value as? String ?? ""
-        let inner = row.switches.firstMatch
-        if inner.exists && inner.isHittable { inner.tap() }
-        else { row.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap() }
+        let width = max(row.frame.width, 1)
+        row.coordinate(withNormalizedOffset: CGVector(dx: max(0.5, (width - 30) / width), dy: 0.5)).tap()
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before), object: row)
         XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: 3), .completed, "Toggle \(row.identifier) did not change from \(before)")
     }
