@@ -60,7 +60,7 @@ Per-song display (derived from link + job): Available offline · Queued · Prepa
 
 ## 3. Database changes
 
-One additive migration, `v016_playlist_audio_acquisition` (`OFFLINE/PlaylistMigration/Acquisition/AcquisitionSchema.swift`). No shipped migration was edited; schema-count assertions in two persistence tests were updated from 15 to 16.
+Two additive migrations: `v016_playlist_audio_acquisition` and, in the device hotfix, `v017_acquisition_notification_batches` (§20). The first is `v016_playlist_audio_acquisition` (`OFFLINE/PlaylistMigration/Acquisition/AcquisitionSchema.swift`). No shipped migration was edited; schema-count assertions in two persistence tests were updated from 15 to 16.
 
 `migration_acquisitions` — PK `entryID` (cascade with the occurrence), `migrationID` (cascade), `candidateID` (the accepted decision the link was made for), `provider` (`youtube`), `providerIdentity`, `downloadJobID` (→ `download_jobs`, SET NULL), `createdJob`, `state` (CHECK), `trackID` (→ `tracks`, SET NULL), `failure`, `retries`, `nextRetryAt`, timestamps. Indexed by job, identity and playlist.
 
@@ -138,13 +138,13 @@ Repeated launches create no jobs, files, links or memberships (covered by tests)
 
 ## 13. Notifications
 
-`UNUserNotificationCenter`, through `PlaylistAcquisitionNotifying` (mocked in tests).
+`UNUserNotificationCenter`, through `PlaylistAcquisitionNotifying` (mocked in tests). Revised in the device hotfix (§20): two notification types, durable confirmed-download batches, and delivery outcomes that record only real scheduling.
 
-* **Ready**: only when every imported occurrence of the playlist is associated with present managed audio (`MigrationLocalAudio`), after the association itself decoded and hashed the file. Example: "All 200 songs in “My Spotify Favorites” are available offline. Open Muzik Belesh to start listening."
+* **Playlist Ready Offline**: only when every imported occurrence of the playlist is associated with present managed audio (`MigrationLocalAudio`), after the association itself decoded and hashed the file. Example: "All 200 songs in “My Spotify Favorites” are available offline."
+* **Confirmed Downloads Complete / Finished**: once per confirmed-download batch (§20).
 * Only playlists that Phase 10.5 acquired for are considered (no surprise notification after upgrading with an already-complete playlist).
-* Deduplicated by `readyNotifiedAt`. If the playlist later becomes incomplete (audio removed), the flag is cleared so a later, legitimate completion notifies again.
-* **Partial** (optional): once, when acquisition activity in this process ends with failed/unsupported songs: "177 of 200 songs in “X” are available offline. 23 still need attention." Never labelled offline-ready.
-* Permission is requested once, when the first playlist job is created, and only while undetermined. Denied permission never affects downloads; the event is still recorded so it is not repeated later.
+* If the playlist later becomes incomplete (audio removed), the ready state is cleared so a later, legitimate completion notifies again.
+* Permission is requested once, when the first playlist job is created, and only while undetermined. Denied permission never affects downloads.
 * Tapping a notification opens the playlist.
 * A notification can only be posted when iOS runs the app; after a force quit it is reconciled on the next launch, without duplication.
 
@@ -227,3 +227,111 @@ Modified:
 * `OFFLINE/Features/Library/MigrationPlaylistViews.swift`, `OFFLINE/Features/Downloads/DownloadsView.swift` — status, controls, playlist context.
 * `Tests/Unit/PlaylistMigration/PlaylistMigrationPersistenceTests.swift`, `HybridPlaylistTests.swift` — schema count 15 → 16.
 * `.github/workflows/playlist-migration.yml` — acquisition step and `acquisition_only` input.
+
+## 20. Device acceptance hotfix (iPhone 13 Pro Max, build `b549926`)
+
+Three defects were reported from physical testing. Each root cause below was established by tracing the code, and each fix has a deterministic test that reproduces the failing sequence. Behaviour that depends on iOS scheduling is listed separately; simulator tests cannot prove it.
+
+### Issue 1: force-quit recovery order and delayed offline availability
+
+**Proven root cause A (ordering).** After a force quit, iOS cancels the app's background transfers. On relaunch it reports them through `urlSession(_:task:didCompleteWithError:)` with `NSURLErrorCancelled` and `NSURLErrorBackgroundTaskCancelledReasonKey`. The delegate mapped every error to `.connection`, so `backgroundEnded` marked those jobs (songs 2–4) `.interrupted`. Interrupted jobs are not scheduled again until the network returns or the app comes to the foreground. Meanwhile the same callback called `schedule()`, which gave the freed slots to songs 5–7. That is why newer songs started first and the interrupted ones only resumed later.
+
+*Fix:* `DownloadFailure.background(_:)` classifies a system cancellation that carries a background-cancel reason as `.terminated`. `backgroundEnded(.terminated)` clears the system task and requeues the job at its original queue position. `schedule()` iterates in position order (the user's queue order), so songs 2–4 restart before 5–7. App-initiated cancels (Pause, Wi-Fi-only enforcement) carry no reason key and belong to an already-cleared generation, so they are unaffected. Late callbacks from superseded generations are still ignored (`SystemDownload.belongs`).
+
+**Proven root cause B (delayed availability).** A finished background transfer is staged, then an app worker verifies and imports it. That worker counted as a transfer slot, and staged jobs competed in position order with ordinary pending jobs. With songs 2–4 requeued ahead of them and the limit at 3, the freed slots went to 2–4's transfers. Songs 5–7, already downloaded, waited unverified until those transfers finished, so all six appeared at once.
+
+*Fix:* verifying staged audio uses no network, so it now has its own capacity (`DownloadManager.verificationLimit = 2`) separate from transfer slots. `transferSlotsInUse` counts only workers that are resolving or transferring, plus system transfers without a worker, and each job counts once. A completed recording is now verified, imported and associated immediately while other songs keep transferring. Nothing is marked ready before verification: association still decodes and SHA-256-hashes the audio outside the write transaction.
+
+The coordinator also stopped evaluating notifications for every playlist on every pass. Only playlists whose links changed are evaluated, so a full scan of unrelated playlists can no longer delay the next association.
+
+Traced transitions: `downloading → (terminated) queued at original position → resolving → downloading → staged → verifying (own capacity) → importing → completed → associating → ready → GRDB observation → MusicLibraryService snapshot`. The stall was at `staged → verifying`.
+
+### Issue 2: uneven concurrency
+
+**Proven root cause.** `YouTubeKitAudioResolver` serializes every resolution through one task chain. This is deliberate, because YouTubeKit shares a process-wide JS cache. But the serialized section also contained the anonymous metadata authorization check and the HEAD readiness probe, which can include two 2-second back-offs. Three eligible songs therefore started transferring one full resolution apart: one starts, the other two follow seconds later.
+
+*Fix:* only the YouTubeKit calls remain serialized. The authorization check runs before the serialized section and the readiness probe after it, each with its own 45-second bound. The extraction's bound now starts when it runs, not while it waits in the queue. Error mapping is unchanged.
+
+**Legitimate limiter (not a defect).** `ResourcePolicy.downloadLimit` caps transfers at 1 in Low Power Mode or when the thermal state is above nominal. This Phase 9 policy is unchanged and covered by `ReleaseReliabilityTests`. The playlist screen now says "Low Power Mode or device temperature limits downloads to one at a time" when it applies.
+
+**Diagnostics.** The scheduler logs one line per distinct decision under subsystem `com.th07.muzikbelesh`, category `DownloadScheduler`. Each line records:
+
+* configured and effective limits;
+* Low Power and resource-limited flags;
+* app transfer workers, verifying workers and background transfers;
+* eligible pending jobs;
+* why the first job did not start: `waiting for Wi-Fi`, `no network`, `no free transfer slot`, `verification capacity`, `reconciling background transfers`, `suspended, waiting for iOS execution` or `resource policy defers new work`.
+
+The UI distinguishes these per-song states:
+
+* preparing (stream resolution);
+* waiting for Wi-Fi or for a connection;
+* queued (no free slot);
+* waiting for iOS to start the transfer (a background task with no bytes yet);
+* downloading (bytes arriving);
+* verifying;
+* paused;
+* waiting for the device to cool.
+
+### Issue 3: notification after all confirmed recordings finish
+
+**Proven defect.** `reconcileNotifications()` ignored the result of `deliver(...)` and always persisted `readyNotifiedAt`, so a denied or failed notification was recorded as handled. Separately, only full-playlist completion produced a notification, so 16 confirmed songs in a 200-song playlist never produced one.
+
+**Design (v017, additive).**
+
+* **Schema.** New columns: `migration_acquisitions.batch`, and on `migration_acquisition_controls`: `currentBatch`, `batchUpdatedAt`, `resolvedBatch`, `batchOutcome`, `readyOutcome`. Existing rows join batch 0. An existing `readyNotifiedAt` becomes `readyOutcome = delivered`.
+* **Batches.** A batch is the set of occurrences confirmed (or retried) while the playlist's current batch is unresolved. Confirmations made during downloads, or shortly after the last download finished, join it. Once a batch's completion is handled, the next confirmation starts batch N+1.
+* **Completion.** A batch completes when every member is ready, failed or unsupported; none is downloading, verifying or associating; the playlist is not paused; and no confirmation has joined it for the quiet period (30 s in the app). It is reported once:
+  * **Confirmed Downloads Complete**: "All 16 confirmed songs in “X” are available offline. 184 songs still need attention."
+  * **Confirmed Downloads Finished** (some failed): "14 of 16 confirmed songs in “X” are available offline. 2 could not be downloaded. 186 songs still need attention."
+
+  Neither message claims the whole playlist is offline.
+* **Playlist Ready Offline** still requires every occurrence. Sending it also concludes the current batch, so no second notification follows.
+* **Delivery outcomes.**
+  * `delivered`: only after `UNUserNotificationCenter.add` succeeds. Only then is `readyNotifiedAt` set.
+  * `notPermitted`: the user denied notifications. Recorded as handled, never retried, never marked delivered.
+  * `failed`: a scheduling error, or permission not yet decided. Re-evaluated after the quiet period, at most 3 attempts per launch.
+* State survives relaunch and nothing is sent twice. A shared recording counts once per occurrence in each playlist's batch.
+
+### Tests added (deterministic, no live YouTube)
+
+`PlaylistAcquisitionDeviceRecoveryTests` uses background-URLSession mode with a gated session inventory:
+
+* a force-quit cancellation is classified as termination; app-initiated cancels are not;
+* three interrupted songs restart before newer ones, within the limit;
+* a stale-generation callback is ignored, and no stale reservation holds a slot;
+* every song becomes available offline as it completes, in any order;
+* repeated relaunches create no jobs, files or transfers;
+* a completed transfer is verified and associated without waiting for a transfer slot, and availability is checked in the database;
+* out-of-order completions associate independently while other transfers continue;
+* limits 1, 2 and 3 are filled promptly, each transfer is counted once, and a freed slot is refilled.
+
+`PlaylistAcquisitionNotificationTests`:
+
+* 16 confirmed songs in a 200-song playlist give exactly one confirmed-downloads notification, not repeated after relaunch;
+* confirmations during a batch join it, and a later confirmation sends exactly one more;
+* 200 verified occurrences send only Playlist Ready Offline;
+* denied permission records no delivered marker and is not retried;
+* transient failures get bounded retries, then deliver;
+* failed recordings produce an accurate partial report;
+* a Files import that completes the playlist sends the ready notification once.
+
+Schema-count assertions are updated for v017 (17 migrations). The superseded partial-notification test was replaced by the batch tests; its Files-import assertions are kept in `testFilesImportCompletesThePlaylistAndSendsTheReadyNotification`.
+
+### Still dependent on iOS (not provable in the simulator)
+
+* Whether and when iOS delivers the force-quit cancellation callbacks, and whether a relaunched session enumerates tasks. Both orders are handled (callback before or after reconciliation).
+* Transfers created while the app is in the background may be treated as discretionary and delayed. The UI shows "Waiting for iOS to start the transfer" until bytes arrive.
+* After a force quit nothing runs until the user opens the app. Notifications for work finished before the quit are reconciled at that launch.
+* Low Power Mode and thermal state legitimately reduce concurrency to one.
+* YouTubeKit extraction remains serialized, and its duration depends on YouTube's responses.
+* Batch notifications wait for the 30-second quiet period and need app execution time. If iOS suspends the app first, the notification is sent at the next opportunity.
+
+### Hotfix file manifest
+
+* `OFFLINE/Downloads/`: `DownloadManager.swift`, `TransferService.swift`, `BackgroundTransfers.swift`
+* `OFFLINE/YouTube/YouTubeKitAudioResolver.swift`
+* `OFFLINE/PlaylistMigration/Acquisition/`: `AcquisitionSchema.swift` (v017), `AcquisitionModels.swift`, `AcquisitionNotifications.swift`, `PlaylistAcquisitionCoordinator.swift`, `PlaylistAcquisitionRepository.swift`
+* `OFFLINE/Features/Library/PlaylistAcquisitionViews.swift`
+* Tests: `PlaylistAcquisitionDeviceTests.swift` (new), `PlaylistAcquisitionSupport.swift`, `PlaylistAcquisitionTests.swift`, and the schema-count suites
+* `.github/workflows/playlist-migration.yml`
