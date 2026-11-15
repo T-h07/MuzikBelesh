@@ -61,7 +61,15 @@ import XCTest
         XCTAssertLessThanOrEqual(interrupted, 2)
         let summary = try await h.summary(session)
         XCTAssertEqual(summary.processed, 500)
-        XCTAssertEqual(summary.noMatch, (1..<500).filter { $0 % 7 == 0 && $0 % 50 != 0 }.count)
+        // Songs whose search found nothing never receive a YouTube suggestion or a selection.
+        // (Songs searched after the downloads may get local-library suggestions instead.)
+        for index in stride(from: 7, to: 500, by: 7) where index % 50 != 0 {
+            let candidates = try await h.repo.candidates(entryID: after[index].id)
+            XCTAssertFalse(candidates.contains { $0.provider == "youtube" }, "Song \(index)")
+            XCTAssertFalse(candidates.contains { $0.decision == .accepted })
+            XCTAssertTrue([.unavailable, .needsReview].contains(after[index].status), "Song \(index)")
+        }
+        XCTAssertGreaterThanOrEqual(summary.noMatch, 17, "Pre-restart empty searches stay no-match")
     }
 
     func testT02RepeatedAndOverlappingRecoveryNeverDuplicatesWork() async throws {
@@ -100,7 +108,11 @@ import XCTest
         XCTAssertEqual(awaited1, 60)
         for entry in try await h.entries(session) {
             let candidates = try await h.repo.candidates(entryID: entry.id)
-            XCTAssertEqual(candidates.count, 2, "No duplicate suggestions for position \(entry.position)")
+            // Local-first matching may add library suggestions after the downloads; what must
+            // never happen is the same recording stored twice for one occurrence.
+            let identities = candidates.map { $0.provider + ":" + ($0.providerTrackID ?? "") }
+            XCTAssertEqual(identities.count, Set(identities).count, "No duplicate suggestions for position \(entry.position)")
+            XCTAssertEqual(candidates.filter { $0.provider == "youtube" }.count, 2, "Position \(entry.position)")
         }
         let awaited2 = try await h.count("migration_coordinator_state")
         XCTAssertEqual(awaited2, 1)
