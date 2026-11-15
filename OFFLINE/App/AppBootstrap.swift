@@ -72,7 +72,7 @@ import Foundation
                         title: "Candidate \(index + 1) for song \(entry.position + 1)", artist: "Review artist", durationMs: 200000,
                         confidence: 0.9 - Double(index) * 0.1,
                         evidence: ["channel": "Fixture Channel", "currentAttempt": "true", "rank": String(index + 1), "outcome": "review"], decision: .pending)
-                    try MigrationCandidateRecord(candidate, createdAt: Date()).insert(db)
+                    try GRDBPlaylistMigrationRepository.insertFixtureCandidate(candidate, db: db)
                 }
             }
         }

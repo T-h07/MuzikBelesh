@@ -900,3 +900,13 @@ extension GRDBPlaylistMigrationRepository {
         return result
     }
 }
+
+#if DEBUG
+extension GRDBPlaylistMigrationRepository {
+    /// UI-test fixture seeding only (AppBootstrap `--review-queue-fixture`). Keeps the
+    /// candidate record type private to this file.
+    static func insertFixtureCandidate(_ candidate: PlaylistMigrationCandidate, db: Database) throws {
+        try MigrationCandidateRecord(candidate, createdAt: Date()).insert(db)
+    }
+}
+#endif
