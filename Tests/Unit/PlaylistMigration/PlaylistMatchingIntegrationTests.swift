@@ -210,7 +210,7 @@ final class PlaylistMatchingIntegrationTests: XCTestCase {
         XCTAssertEqual(unchanged, lease.entry); XCTAssertTrue(saved.isEmpty)
         XCTAssertEqual(unchanged.source, input.entries[0])
     }
-    func testZeroOneFiveHundredAndThousandOccurrencesHaveBoundedCallsAndNoAcquisition() async throws {
+    func testZeroOneFiveHundredAndThousandOccurrencesAreEachSearchedIndependentlyWithoutAcquisition() async throws {
         for size in [0, 1, 500, 1000] {
             let fixture = try LibraryFixture(count: 0), repo = fixture.storage.playlistMigrations
             let input = source(Array(repeating: "Song", count: size)), session = try await create(input, fixture)
@@ -218,7 +218,11 @@ final class PlaylistMatchingIntegrationTests: XCTestCase {
             try await PlaylistMigrationMatchingService(repository: repo, providers: [provider]).run(migrationID: session.id) { _ in }
             let entries = try await repo.entries(migrationID: session.id)
             let calls = await provider.calls
-            XCTAssertEqual(calls, min(size, 3)); XCTAssertEqual(entries.map(\.source), input.entries)
+            // Per-song network failures never suspend discovery: exactly one search per occurrence.
+            XCTAssertEqual(calls, size); XCTAssertEqual(entries.map(\.source), input.entries)
+            let summary = try await repo.matchingSummary(migrationID: session.id)
+            XCTAssertEqual(summary.processed, size); XCTAssertEqual(summary.discoveryFailed, size)
+            XCTAssertEqual(summary.externalDeferred, 0); XCTAssertEqual(summary.noMatch, 0); XCTAssertFalse(summary.discoveryPaused)
             XCTAssertEqual(try count("tracks", fixture), 0); XCTAssertEqual(try count("download_jobs", fixture), 0)
         }
     }
