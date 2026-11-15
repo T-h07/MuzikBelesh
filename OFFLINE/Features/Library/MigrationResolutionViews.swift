@@ -77,6 +77,6 @@ struct MigrationRetrySongButton: View {
     let entry: PlaylistMigrationEntry
     var body: some View {
         Button("Retry This Song") { model.retry(entry.migrationID, entry: entry.id) }
-            .disabled(model.busy).frame(minHeight: 44).accessibilityIdentifier("migration-retry-song")
+            .buttonStyle(.matchingSecondary).disabled(model.busy).accessibilityIdentifier("migration-retry-song")
     }
 }

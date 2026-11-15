@@ -30,11 +30,18 @@ struct YouTubeArtwork: View {
     let url: URL?
     @State private var image: UIImage?
     var body: some View {
-        ZStack {
-            Rectangle().fill(AppColors.backgroundSecondary)
-            if let image { Image(uiImage: image).resizable().scaledToFill() }
-            else { Image(systemName: "play.rectangle").foregroundStyle(AppColors.textTertiary) }
-        }.clipped().accessibilityHidden(true)
+        // The base rectangle defines layout and hit area exactly. The scaled-to-fill image is
+        // an overlay that cannot grow the view and never receives touches: previously its
+        // invisible overflow (clipping hides drawing, not hit testing) covered the buttons
+        // of the card above it in candidate lists.
+        Rectangle().fill(AppColors.backgroundSecondary)
+            .overlay {
+                Group {
+                    if let image { Image(uiImage: image).resizable().scaledToFill() }
+                    else { Image(systemName: "play.rectangle").foregroundStyle(AppColors.textTertiary) }
+                }.allowsHitTesting(false)
+            }
+            .clipped().contentShape(Rectangle()).accessibilityHidden(true)
         .task(id: url) {
             image = nil
             guard let url else { return }

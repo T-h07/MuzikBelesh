@@ -229,27 +229,27 @@ struct PlaylistMatchingControls: View {
             if readError { Text("Progress couldn't be loaded. Reopen the playlist.").foregroundStyle(AppColors.error) }
             HStack(spacing: AppSpacing.sm) {
                 if active {
-                    Button { model.pause() } label: { Label("Pause Matching", systemImage: "pause.fill").frame(minHeight: 44) }
-                        .buttonStyle(.borderedProminent).accessibilityIdentifier("migration-pause-matching")
+                    Button { model.pause() } label: { Label("Pause Matching", systemImage: "pause") }
+                        .buttonStyle(.matchingPrimary).accessibilityIdentifier("migration-pause-matching")
                 } else if paused || interrupted {
-                    Button { model.resume(session.id) } label: { Label("Resume Matching", systemImage: "play.fill").frame(minHeight: 44) }
-                        .buttonStyle(.borderedProminent).disabled(model.busy).accessibilityIdentifier("migration-resume-matching")
+                    Button { model.resume(session.id) } label: { Label("Resume Matching", systemImage: "play") }
+                        .buttonStyle(.matchingPrimary).disabled(model.busy).accessibilityIdentifier("migration-resume-matching")
                 } else if !started {
-                    Button { model.start(session.id) } label: { Label("Find Matching Songs", systemImage: "magnifyingglass").frame(minHeight: 44) }
-                        .buttonStyle(.borderedProminent).disabled(model.busy || session.status.isTerminal)
+                    Button { model.start(session.id) } label: { Label("Find Matching Songs", systemImage: "magnifyingglass") }
+                        .buttonStyle(.matchingPrimary).disabled(model.busy || session.status.isTerminal)
                         .accessibilityIdentifier("migration-find-matches")
                 }
                 if let playlistID, progress.readyToReview + progress.needAttention > 0 {
                     NavigationLink {
                         MigrationReviewQueueView(model: MigrationReviewQueueModel(repository: repository, migrationID: session.id), lookup: lookup)
-                    } label: { Text("Review Songs").frame(minHeight: 44) }
-                        .buttonStyle(.bordered).accessibilityIdentifier("migration-review-songs")
+                    } label: { Text("Review Songs") }
+                        .buttonStyle(MatchingButtonStyle(kind: complete ? .primary : .secondary)).accessibilityIdentifier("migration-review-songs")
                         .id(playlistID)
                 }
             }
             if complete && retryable > 0 {
                 Button("Retry \(retryable) Song\(retryable == 1 ? "" : "s") That Failed") { model.retryFailedSongs(session.id) }
-                    .buttonStyle(.borderless).disabled(model.busy).frame(minHeight: 44)
+                    .buttonStyle(.matchingSecondary).disabled(model.busy)
                     .accessibilityIdentifier("migration-retry-failed")
             }
         }.tint(AppColors.accentPrimary)
@@ -362,18 +362,18 @@ struct MigrationCandidateInspection: View {
                             .font(.caption).foregroundStyle(AppColors.accentPrimary)
                     }
                     // Separate, explicitly styled controls: each has its own hit area in the row.
+                    if candidate.decision == .pending && canSelect {
+                        Button(candidate.provider == "youtube" ? "Use This Video" : "Use This Recording") { selecting = candidate }
+                            .buttonStyle(.matchingPrimaryWide)
+                            .accessibilityIdentifier("migration-candidate-select-" + candidate.id.uuidString)
+                    }
                     HStack(spacing: AppSpacing.sm) {
-                        if candidate.decision == .pending && canSelect {
-                            Button(candidate.provider == "youtube" ? "Use This Video" : "Use This Recording") { selecting = candidate }
-                                .buttonStyle(.borderedProminent).frame(minHeight: 44)
-                                .accessibilityIdentifier("migration-candidate-select-" + candidate.id.uuidString)
-                        }
                         if let url = MatchingCandidateArtwork.watchURL(candidate) {
-                            Button("Preview") { openURL(url) }.buttonStyle(.bordered).frame(minHeight: 44)
+                            Button("Preview") { openURL(url) }.buttonStyle(.matchingSecondaryWide)
                                 .accessibilityLabel("Preview on YouTube")
                         }
                         if candidate.decision == .pending && canSelect {
-                            Button("Not This One", role: .destructive) { reject(candidate) }.buttonStyle(.borderless).frame(minHeight: 44)
+                            Button("Not This One") { reject(candidate) }.buttonStyle(.matchingSecondaryWide)
                                 .accessibilityIdentifier("migration-candidate-reject-" + candidate.id.uuidString)
                         }
                     }
@@ -384,7 +384,7 @@ struct MigrationCandidateInspection: View {
                     accepted: candidates.first { $0.provider == "youtube" && $0.decision == .accepted }) { reload += 1 }
             }
             if canSelect, let url = YouTubeSearchProviderAdapter.browserSearchURL(entry.source) {
-                Button { openURL(url) } label: { Label("Search on YouTube", systemImage: "safari") }.buttonStyle(.borderless).frame(minHeight: 44)
+                Button { openURL(url) } label: { Label("Search on YouTube", systemImage: "safari") }.buttonStyle(.matchingSecondary)
             }
         }.confirmationDialog("Use this recording?", isPresented: Binding(get: { selecting != nil }, set: { if !$0 { selecting = nil } }),
                              titleVisibility: .visible, presenting: selecting) { candidate in
@@ -438,6 +438,7 @@ struct ManualYouTubeSelectionView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var confirming = false
+    @FocusState private var linkFocused: Bool
     private var selectable: Bool {
         entry.localTrackID == nil && [.pending, .needsReview, .failed, .unavailable].contains(entry.status)
     }
@@ -447,15 +448,16 @@ struct ManualYouTubeSelectionView: View {
                 Text("Selected: \(accepted.title)").font(.headline)
                 Text("Not downloaded yet.").font(.caption).foregroundStyle(AppColors.textSecondary)
                 Button("Change Video", role: .destructive) { reject(accepted) }
-                    .buttonStyle(.bordered).disabled(busy).frame(minHeight: 44).accessibilityIdentifier("migration-manual-reject")
+                    .buttonStyle(.matchingSecondary).disabled(busy).frame(minHeight: 44).accessibilityIdentifier("migration-manual-reject")
             } else if selectable {
                 Text("Paste a YouTube link").font(.headline)
                 HStack {
                     TextField("youtube.com/watch?v=…", text: $link)
+                        .focused($linkFocused).submitLabel(.search).onSubmit { look() }
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                         .onChange(of: link) { _, _ in preview = nil; message = nil }
                         .accessibilityIdentifier("migration-manual-link")
-                    Button("Look Up") { look() }.buttonStyle(.bordered)
+                    Button("Look Up") { look() }.buttonStyle(.matchingSecondary)
                         .disabled(busy || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).frame(minHeight: 44)
                         .accessibilityIdentifier("migration-manual-lookup")
                 }
@@ -486,16 +488,15 @@ struct ManualYouTubeSelectionView: View {
         if [.live, .upcoming, .unavailable].contains(video.availability) {
             Label("This video may not be playable", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(AppColors.error)
         }
-        HStack(spacing: AppSpacing.sm) {
-            Button("Use This Video") { confirming = true }.buttonStyle(.borderedProminent).disabled(busy).frame(minHeight: 44)
-                .accessibilityIdentifier("migration-manual-confirm")
-            if let url = video.canonicalURL {
-                Button("Preview on YouTube") { openURL(url) }.buttonStyle(.bordered).frame(minHeight: 44)
-                    .accessibilityIdentifier("migration-manual-preview")
-            }
+        Button("Use This Video") { linkFocused = false; confirming = true }.buttonStyle(.matchingPrimaryWide).disabled(busy)
+            .accessibilityIdentifier("migration-manual-confirm")
+        if let url = video.canonicalURL {
+            Button("Preview on YouTube") { openURL(url) }.buttonStyle(.matchingSecondaryWide)
+                .accessibilityIdentifier("migration-manual-preview")
         }
     }
     private func look() {
+        linkFocused = false
         busy = true; message = nil; preview = nil
         let input = link
         Task {
@@ -518,6 +519,9 @@ struct ManualYouTubeSelectionView: View {
             do {
                 if let onConfirm { try await onConfirm(preview) }
                 else { try await repository.confirmYouTubeCandidate(for: entry, video: preview.video, metadataVerified: preview.metadataVerified) }
+                // Saved: release the keyboard and clear input before the next song appears.
+                // On failure (catch below) the link and preview are kept.
+                linkFocused = false; KeyboardDismissal.dismiss()
                 self.preview = nil; link = ""; changed()
             } catch SongMatchingError.staleAttempt { message = "This song is being updated. Try again in a moment."
             } catch PlaylistMigrationStorageError.invalidCandidate { message = "This song already has a video. Change it first."

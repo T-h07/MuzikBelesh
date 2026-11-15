@@ -88,6 +88,14 @@ def test_consumer_matching_presentation():
     manual = (ROOT / "OFFLINE/Features/Library/PlaylistMatchingViewModel.swift").read_text(encoding="utf-8")
     body = manual[manual.index("struct ManualYouTubeSelectionView"):]
     assert "Link(" not in body, "ManualYouTubeSelectionView must use explicit, separately styled buttons"
+    queue = (ROOT / "OFFLINE/Features/Library/MigrationReviewQueue.swift").read_text(encoding="utf-8")
+    assert ".prefix(3)" not in queue, "All saved candidates must be reviewable"
+    artwork = (ROOT / "OFFLINE/YouTube/YouTubeArtwork.swift").read_text(encoding="utf-8")
+    assert "allowsHitTesting(false)" in artwork and ".overlay" in artwork, "Scaled artwork must not overflow into neighbouring hit areas"
+    # Matching-specific files only; the playlist Play button keeps the app-wide collection style.
+    for name in files[:3]:
+        source = (ROOT / name).read_text(encoding="utf-8")
+        assert ".borderedProminent" not in source, f"{name}: matching controls use the outlined style"
     print("PASS: consumer matching screens contain no developer diagnostics, raw HTTP/provider text or Link-based confirmation")
 
 

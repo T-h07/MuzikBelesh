@@ -88,6 +88,7 @@ jobs:
             -only-testing:OFFLINETests/SearXNGDiscoveryTests \
             -only-testing:OFFLINETests/InvidiousDiscoveryTests \
             -only-testing:OFFLINETests/MatchingPauseResumeTests \
+            -only-testing:OFFLINETests/MatchingReviewQueueTests \
             -only-testing:OFFLINETests/YouTubeProviderTests \
             -only-testing:OFFLINETests/MatchingLifecycleTests \
             -only-testing:OFFLINETests/MatchingArtworkTests \
@@ -102,6 +103,7 @@ jobs:
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
           xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUI.xcresult \
             -only-testing:OFFLINEUITests/PlaylistMigrationUITests \
+            -only-testing:OFFLINEUITests/ReviewQueueUITests \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 60 \
             -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-ui.log

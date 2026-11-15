@@ -110,14 +110,14 @@ struct MigrationPlaylistDashboard: View {
                         .frame(minHeight: 44)
                 }.accessibilityIdentifier("migration-dashboard-toggle")
                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-                Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
-                MigrationProgressOverview(progress: value.progress)
                 if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
                     PlaylistMatchingControls(model: model, session: value.session, repository: repository,
                                              playlistID: playlistID, lookup: container.youtubeManualLookup)
                     MigrationResolutionSummaryLink(playlistID: playlistID, session: value.session, repository: repository)
                 }
                 if expanded {
+                    Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
+                    MigrationProgressOverview(progress: value.progress)
                     LabeledContent("Original playlist", value: value.session.sourcePlaylistName)
                     LabeledContent("Source provider", value: value.session.source.displayName)
                     LabeledContent("Original entries", value: String(value.session.expectedEntryCount))

@@ -105,6 +105,9 @@ final class PlaylistFileImportUITests: XCTestCase {
         XCTAssertTrue(playlist.waitForExistence(timeout: 10)); playlist.tap()
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1000 songs • 0 available offline")
+        // Import metadata now lives in Migration Details; matching is the primary progress.
+        let details = app.buttons["migration-dashboard-toggle"]
+        scrollTo(details); details.tap()
         scrollTo(app.staticTexts["migration-unresolved-count"])
         XCTAssertEqual(app.staticTexts["migration-unresolved-count"].label, "Unresolved: 1000")
     }
