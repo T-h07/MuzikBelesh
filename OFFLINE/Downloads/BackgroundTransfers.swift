@@ -156,7 +156,7 @@ private final class BackgroundDelegate: NSObject, URLSessionDownloadDelegate, @u
         DispatchQueue.main.async { [weak service] in
             guard let service else { return }
             service.removeTask(task.taskIdentifier, in: name)
-            service.owner?.backgroundEnded(service.handle(task, in: name), failure: error == nil ? nil : .connection)
+            service.owner?.backgroundEnded(service.handle(task, in: name), failure: DownloadFailure.background(error))
         }
     }
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

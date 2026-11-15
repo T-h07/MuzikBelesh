@@ -3,6 +3,7 @@ import SwiftUI
 struct DownloadsView: View {
     @ObservedObject var manager: DownloadManager
     @EnvironmentObject private var library: MusicLibraryService
+    @EnvironmentObject private var container: AppContainer
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -18,6 +19,11 @@ struct DownloadsView: View {
                             VStack(alignment: .leading) {
                                 Text(job.title ?? "Audio").font(.headline)
                                 if let channel = job.channel { Text(channel).font(.caption) }
+                                // One shared queue: playlist-driven jobs show which playlists they serve.
+                                if let names = container.playlistAcquisition?.playlistNames(forJob: job.id), !names.isEmpty {
+                                    Text("For " + names.joined(separator: ", ")).font(.caption).foregroundStyle(AppColors.textSecondary)
+                                        .accessibilityIdentifier("download-playlists-" + (job.sourceIdentifier ?? job.id))
+                                }
                             }
                         }
                         Text(manager.stateLabel(for: job)).accessibilityIdentifier("download-state-" + (job.sourceIdentifier ?? job.id))

@@ -39,12 +39,43 @@ extension StoredDownloadState {
     @Published private(set) var resourcePolicy = ResourcePolicy()
     private var foreground = true
     private var storageFailed = false
+    /// Set by `invalidate()`: this instance never writes or schedules again.
+    private var invalidated = false
+    private var halted: Bool { storageFailed || invalidated }
+    /// Bounded execution granted while iOS has woken the suspended app (Phase 10.5).
+    private let execution: (any BackgroundExecutionGranting)?
+    private var opportunity: Int?
+    /// Staged (already transferred) audio being verified and imported. Verification uses
+    /// no network, so it never waits for, or occupies, a transfer slot.
+    private var verifying = Set<String>()
+    static let verificationLimit = 2
+    private let schedulerLog = Logger(subsystem: "com.th07.muzikbelesh", category: "DownloadScheduler")
+    private var lastDecision = ""
+    /// Jobs whose current system task was created while the app was not in the
+    /// foreground. iOS treats such tasks as discretionary and may defer them
+    /// indefinitely, so a zero-byte one is recreated when the app is active again.
+    private var createdInBackground = Set<String>()
+    /// Jobs whose stalled reservation was already recreated during this foreground
+    /// session: each job is repaired at most once per activation (no restart loops).
+    private var repairedThisActivation = Set<String>()
+    /// Foreground-only queue health check (cancelled whenever the app leaves the foreground).
+    private var watchdog: Task<Void, Never>?
+    private let recoveryInterval: Duration
+    private let stallThreshold: TimeInterval
+    private var progressAtLastCheck: [String: Int64] = [:]
+    private var lastStallLog: [String: String] = [:]
+    /// Bumped on lifecycle, network and policy changes so observers refresh wait reasons.
+    @Published private(set) var schedulingRevision = 0
     private var staging: URL? { storage?.paths.applicationSupport.appendingPathComponent("DownloadStaging", isDirectory: true) }
 
     init(storage: StorageCoordinator?, preferences: YouTubePreferences, preparer: any YouTubeDownloadPreparing,
          transfer: any AudioTransferring, artwork: YouTubeArtworkLoader, observeNetwork: Bool = true,
-         system: (any SystemDownloading)? = nil) {
+         system: (any SystemDownloading)? = nil, execution: (any BackgroundExecutionGranting)? = nil,
+         recoveryInterval: Duration = .seconds(20), stallThreshold: TimeInterval = 90) {
         self.system = system
+        self.execution = execution
+        self.recoveryInterval = recoveryInterval
+        self.stallThreshold = stallThreshold
         if system != nil { foreground = UIApplication.shared.applicationState != .background }
         self.storage = storage
         self.preferences = preferences
@@ -72,7 +103,7 @@ extension StoredDownloadState {
         } catch { failStorage() }
         if let system {
             system.owner = self
-            reconcileSystem()
+            reconcileSystem(repairStalled: foreground)
         }
         if observeNetwork {
             monitor.pathUpdateHandler = { [weak self] path in
@@ -85,8 +116,22 @@ extension StoredDownloadState {
             Task { @MainActor in self?.schedule() }
         }.store(in: &subscriptions)
         preferences.$simultaneous.dropFirst().sink { [weak self] _ in Task { @MainActor in self?.schedule() } }.store(in: &subscriptions)
+        if foreground { startWatchdog() }
     }
     deinit { monitor.cancel() }
+    /// Ends this instance's ownership of the queue, as process termination would: cancels
+    /// app workers (their persisted state is recovered by the next instance), stops
+    /// observers and refuses every later write. System transfers are left to iOS.
+    func invalidate() {
+        guard !invalidated else { return }
+        invalidated = true
+        subscriptions.removeAll()
+        monitor.cancel()
+        workers.values.forEach { $0.cancel() }
+        watchdog?.cancel(); watchdog = nil
+        if system?.owner === self { system?.owner = nil }
+        endOpportunity()
+    }
     func setPath(connected: Bool, wifi: Bool) {
         let regainedConnection = connected && (!self.connected || (wifi && !self.wifi))
         self.connected = connected
@@ -95,21 +140,95 @@ extension StoredDownloadState {
         if regainedConnection {
             for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
         }
+        schedulingRevision += 1
         schedule()
     }
     func setResourcePolicy(_ policy: ResourcePolicy) {
         guard policy != resourcePolicy else { return }
         resourcePolicy = policy
+        schedulingRevision += 1
         schedule()
     }
     func setForeground(_ active: Bool) {
         foreground = active
+        schedulingRevision += 1
         if active {
+            endOpportunity()
             rates.removeAll(); samples.removeAll()
-            reconcileSystem()
+            repairedThisActivation.removeAll()
+            // Refreshes the URLSession inventory, clears vanished reservations and
+            // recreates deferred zero-byte tasks, then schedules.
+            reconcileSystem(repairStalled: true)
             for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
             schedule()
+            startWatchdog()
+        } else {
+            watchdog?.cancel(); watchdog = nil
         }
+    }
+
+    // MARK: Queue health (foreground only)
+
+    /// Why a pending job is not transferring right now.
+    enum QueueWait: Equatable, Sendable {
+        case eligible, verificationCapacity, waitingForWiFi, noNetwork, waitingForExecution, resourceDeferred, reconciling
+        case waitingForSlot(limited: Bool)
+    }
+    func queueWait(for job: StoredDownloadJob) -> QueueWait? {
+        guard job.state.pending, workers[job.id] == nil else { return nil }
+        if resourcePolicy.defersNewWork { return .resourceDeferred }
+        if !(foreground || opportunity != nil) { return .waitingForExecution }
+        if reconciling { return .reconciling }
+        if isStaged(job) { return verifying.count < Self.verificationLimit ? .eligible : .verificationCapacity }
+        if preferences.wifiOnly && !wifi { return .waitingForWiFi }
+        if !connected { return .noNetwork }
+        let limit = resourcePolicy.downloadLimit(preferences.simultaneous)
+        if transferSlotsInUse >= limit { return .waitingForSlot(limited: limit < preferences.simultaneous) }
+        return .eligible
+    }
+    private func isStaged(_ job: StoredDownloadJob) -> Bool {
+        UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
+    }
+    private func startWatchdog() {
+        watchdog?.cancel()
+        let interval = recoveryInterval
+        watchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled, let manager = self else { return }
+                manager.checkQueueHealth()
+            }
+        }
+    }
+    /// Event-driven scheduling is primary. This bounded check only acts when an eligible
+    /// job is waiting: it schedules a missed opportunity, and when every slot is held by
+    /// reservations that made no progress since the previous check it refreshes the
+    /// URLSession inventory (repairing vanished or stalled reservations).
+    func checkQueueHealth() {
+        guard foreground, !halted, !reconciling else { return }
+        let waiting = jobs.filter { $0.state.pending && workers[$0.id] == nil }
+        let reserved = jobs.filter { $0.transferGeneration != nil && workers[$0.id] == nil }
+        defer { progressAtLastCheck = Dictionary(uniqueKeysWithValues: reserved.map { ($0.id, $0.received ?? 0) }) }
+        guard !waiting.isEmpty else { return }
+        let stale = reserved.filter { job in
+            progressAtLastCheck[job.id].map { $0 == (job.received ?? 0) } ?? false
+        }
+        for job in waiting {
+            let wait = queueWait(for: job)
+            logStall(job, wait: wait, stale: stale.count)
+        }
+        if waiting.contains(where: { queueWait(for: $0) == .eligible }) {
+            schedule() // A missed scheduling event: capacity exists now.
+        } else if !reserved.isEmpty, stale.count == reserved.count, waiting.contains(where: { if case .waitingForSlot = queueWait(for: $0) { return true } else { return false } }) {
+            reconcileSystem(repairStalled: true)
+        }
+    }
+    private func logStall(_ job: StoredDownloadJob, wait: QueueWait?, stale: Int) {
+        let reason = wait.map { String(describing: $0) } ?? "worker active"
+        guard lastStallLog[job.id] != reason else { return }
+        lastStallLog[job.id] = reason
+        let limit = resourcePolicy.downloadLimit(preferences.simultaneous)
+        schedulerLog.notice("queuedWithoutProgress job=\(job.id, privacy: .public) position=\(job.position ?? -1) foreground=\(self.foreground) connected=\(self.connected) wifiOnly=\(self.preferences.wifiOnly) wifi=\(self.wifi) effectiveLimit=\(limit) workers=\(self.workers.count) backgroundTasks=\(self.backgroundTransfers) staleReservations=\(stale) lowPower=\(self.resourcePolicy.lowPower) resourceLimited=\(self.resourcePolicy.conservesResources) reason=\(reason, privacy: .public)")
     }
     private func policyChanged(strict: Bool) {
         guard strict else { return }
@@ -128,15 +247,26 @@ extension StoredDownloadState {
     func job(for videoID: String) -> StoredDownloadJob? { jobs.first { $0.sourceIdentifier == videoID } }
     private func failStorage() { storageFailed = true; issue = "Download storage is unavailable. Reopen the app to retry." }
     @discardableResult private func update(_ id: String, _ change: (inout StoredDownloadJob) -> Void) -> Bool {
-        guard !storageFailed, let index = jobs.firstIndex(where: { $0.id == id }), let storage else { return false }
+        guard !halted, let index = jobs.firstIndex(where: { $0.id == id }), let storage else { return false }
         var job = jobs[index]
         change(&job)
         job.dateModified = Date()
         do { try storage.downloads.save(job); jobs[index] = job; return true }
         catch { failStorage(); return false }
     }
+    /// Playlist acquisition entry point (Phase 10.5). Unlike `enqueue`, an existing job is
+    /// returned unchanged: a completed download is never restarted here. The caller
+    /// validates the completed job's track and requests a repair only when the managed
+    /// audio is genuinely missing or invalid. Main-actor isolation plus the unique
+    /// per-video index make concurrent calls for one recording yield one job.
+    func acquisitionJob(for video: YouTubeVideo, quality: AudioQuality) -> (job: StoredDownloadJob, created: Bool)? {
+        guard !halted, storage != nil, YouTubeURLValidator.isValidID(video.id) else { return nil }
+        if let existing = job(for: video.id) { return (existing, false) }
+        enqueue(video, quality: quality)
+        return job(for: video.id).map { ($0, true) }
+    }
     func enqueue(_ video: YouTubeVideo, quality: AudioQuality) {
-        guard !storageFailed, let storage, YouTubeURLValidator.isValidID(video.id) else { return }
+        guard !halted, let storage, YouTubeURLValidator.isValidID(video.id) else { return }
         if let existing = job(for: video.id) {
             if existing.state == .completed { retry(existing.id, repair: true) }
             return
@@ -148,21 +278,54 @@ extension StoredDownloadState {
                                     quality: quality.rawValue, dateAdded: Date(), dateModified: Date())
         do { try storage.downloads.save(job); jobs.append(job); schedule() } catch { failStorage() }
     }
+    /// Transfer slots in use: app workers preparing or transferring (not verifying staged
+    /// audio) plus system transfers that no app worker is tracking. Each job counts once.
+    var transferSlotsInUse: Int {
+        workers.keys.filter { !verifying.contains($0) }.count + backgroundTransfers
+    }
+    private var backgroundTransfers: Int { jobs.filter { $0.transferGeneration != nil && workers[$0.id] == nil }.count }
     private func schedule() {
-        guard !storageFailed, foreground, !reconciling, !resourcePolicy.defersNewWork else { return }
+        let limit = resourcePolicy.downloadLimit(preferences.simultaneous)
+        guard !halted, foreground || opportunity != nil, !reconciling, !resourcePolicy.defersNewWork else {
+            let reason = halted ? "halted" : !(foreground || opportunity != nil) ? "suspended, waiting for iOS execution"
+                : reconciling ? "reconciling background transfers" : "resource policy defers new work"
+            logDecision(limit: limit, blocked: reason)
+            return
+        }
         let waiting = preferences.wifiOnly && !wifi
+        var blocked: [String] = []
+        // Position order is the user's queue order: interrupted and recovered jobs keep
+        // their earlier positions and are considered before newer jobs.
         for job in jobs where job.state.pending {
             let staged = UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
             let desired: StoredDownloadState = waiting && !staged ? .waitingForWiFi : .queued
             if job.state != desired { update(job.id) { $0.state = desired } }
-            let slots = workers.count + jobs.filter { $0.transferGeneration != nil && workers[$0.id] == nil }.count
-            guard staged || (!waiting && connected), slots < resourcePolicy.downloadLimit(preferences.simultaneous), workers[job.id] == nil else { continue }
-            guard update(job.id, { $0.state = staged ? .verifying : .resolving }) else { return }
+            guard workers[job.id] == nil else { continue }
+            if staged {
+                guard verifying.count < Self.verificationLimit else { blocked.append("verification capacity"); continue }
+                guard update(job.id, { $0.state = .verifying }) else { return }
+                verifying.insert(job.id)
+                workers[job.id] = Task { await run(job) }
+                continue
+            }
+            guard !waiting else { blocked.append("waiting for Wi-Fi"); continue }
+            guard connected else { blocked.append("no network"); continue }
+            guard transferSlotsInUse < limit else { blocked.append("no free transfer slot"); continue }
+            guard update(job.id, { $0.state = .resolving }) else { return }
             workers[job.id] = Task { await run(job) }
         }
+        logDecision(limit: limit, blocked: blocked.first.map { "\(blocked.count) not started: \($0)" } ?? "none")
+    }
+    /// One line per distinct scheduler decision (no per-progress spam).
+    private func logDecision(limit: Int, blocked: String) {
+        let eligible = jobs.filter { $0.state.pending }.count
+        let line = "configured=\(preferences.simultaneous) effectiveLimit=\(limit) lowPower=\(resourcePolicy.lowPower) resourceLimited=\(resourcePolicy.conservesResources) appTransferWorkers=\(workers.count - verifying.count) verifying=\(verifying.count) backgroundTransfers=\(backgroundTransfers) eligiblePending=\(eligible) blocked=\(blocked)"
+        guard line != lastDecision else { return }
+        lastDecision = line
+        schedulerLog.info("\(line, privacy: .public)")
     }
     private func run(_ job: StoredDownloadJob) async {
-        defer { workers[job.id] = nil; rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; schedule() }
+        defer { workers[job.id] = nil; verifying.remove(job.id); rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; schedule(); endOpportunityIfIdle() }
         guard let storage, let staging, let videoID = job.sourceIdentifier, UUID(uuidString: job.id) != nil else { return }
         let file = staging.appendingPathComponent(job.id + ".m4a")
         do {
@@ -193,6 +356,7 @@ extension StoredDownloadState {
                             $0.transferGeneration = generation; $0.title = video.title; $0.channel = video.channel
                             $0.thumbnail = YouTubeImageURL.valid(video.thumbnailURL)?.absoluteString
                         }) else { task.cancel(); return }
+                        if foreground { createdInBackground.remove(job.id) } else { createdInBackground.insert(job.id) }
                         task.resumeIfSuspended()
                         return
                     }
@@ -244,7 +408,7 @@ extension StoredDownloadState {
         if update(id, { $0.trackID = trackID; $0.finishedAt = Date(); $0.state = .completed; $0.progress = 1 }) { try? FileManager.default.removeItem(at: file) }
     }
     private func progress(_ id: String, attempt: UUID, bytes: Int64, total: Int64, now: TimeInterval) {
-        guard attempts[id] == attempt, jobs.first(where: { $0.id == id })?.state == .downloading else { return }
+        guard !halted, attempts[id] == attempt, jobs.first(where: { $0.id == id })?.state == .downloading else { return }
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         guard samples[id, default: TransferRate()].record(bytes: bytes, at: now) else { return }
         rates[id] = samples[id]?.bytesPerSecond
@@ -314,8 +478,13 @@ extension DownloadManager {
     private func discardIncoming(_ job: StoredDownloadJob) {
         if let file = incoming(job) { try? FileManager.default.removeItem(at: file) }
     }
-    private func reconcileSystem() {
-        guard let system, !reconciling, !storageFailed else { return }
+    /// `repairStalled` (foreground only): a surviving task that has delivered no bytes and
+    /// was either created while the app was not in the foreground (discretionary, may be
+    /// deferred by iOS indefinitely) or has been waiting longer than `stallThreshold` is
+    /// cancelled and requeued at its position, so it is recreated as a foreground task.
+    /// At most once per job per activation.
+    private func reconcileSystem(repairStalled: Bool = false) {
+        guard let system, !reconciling, !halted else { return }
         reconciling = true
         let before = jobs.filter { $0.transferGeneration != nil }
         Task {
@@ -325,6 +494,16 @@ extension DownloadManager {
                 guard let job = jobs.first(where: task.belongs),
                       !preferences.wifiOnly || task.session == BackgroundTransfers.wifi else {
                     task.cancel()
+                    continue
+                }
+                let age = job.startedAt.map { Date().timeIntervalSince($0) } ?? .infinity
+                if repairStalled, foreground, task.received == 0, (job.received ?? 0) == 0, !repairedThisActivation.contains(job.id),
+                   createdInBackground.contains(job.id) || age >= stallThreshold {
+                    repairedThisActivation.insert(job.id)
+                    createdInBackground.remove(job.id)
+                    task.cancel()
+                    update(job.id) { $0.clearSystemTask(); $0.state = .queued }
+                    schedulerLog.notice("recreatedStalledTransfer job=\(job.id, privacy: .public) position=\(job.position ?? -1) ageSeconds=\(Int(min(age, 1e9)))")
                     continue
                 }
                 surviving.insert(job.id)
@@ -337,10 +516,12 @@ extension DownloadManager {
                 if let file = incoming(job), FileManager.default.fileExists(atPath: file.path) {
                     finishStaging(job)
                 } else {
+                    // The task vanished without a callback: release its reservation.
                     update(job.id) { $0.clearSystemTask(); $0.state = .queued }
                 }
             }
             reconciling = false
+            schedulingRevision += 1
             schedule()
         }
     }
@@ -367,7 +548,10 @@ extension DownloadManager {
             discardIncoming(job)
             update(job.id) {
                 $0.clearSystemTask()
-                if failure == .rejected && $0.refreshedGeneration != true {
+                if failure == .terminated {
+                    // Requeued at its original position, ahead of newer jobs.
+                    $0.state = .queued; $0.errorMessage = nil
+                } else if failure == .rejected && $0.refreshedGeneration != true {
                     $0.refreshedGeneration = true; $0.attempts = ($0.attempts ?? 0) + 1; $0.state = .queued
                 } else {
                     $0.state = failure == .connection ? .interrupted : .failed
@@ -376,7 +560,33 @@ extension DownloadManager {
             }
         } else { finishStaging(job) }
         rates[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; attempts[job.id] = nil
+        // iOS woke the app for this event: verify staged audio and fill freed slots now
+        // instead of waiting for the next foreground launch.
+        if !foreground { beginOpportunity() } else { schedule() }
+    }
+    /// Lets the caller fill free slots while iOS is already executing the suspended app
+    /// (for example after a playlist decision was committed in the background).
+    func continueInBackgroundIfPossible() {
+        if foreground { schedule() } else { beginOpportunity() }
+    }
+    private func beginOpportunity() {
+        if opportunity == nil, let execution {
+            opportunity = execution.begin("Muzik Belesh downloads") { [weak self] in
+                // Expiry stops new work only. Running app workers resume with the app.
+                self?.opportunity = nil
+            }
+        }
         schedule()
+        endOpportunityIfIdle()
+    }
+    private func endOpportunityIfIdle() {
+        guard !foreground, workers.isEmpty else { return }
+        endOpportunity()
+    }
+    private func endOpportunity() {
+        guard let token = opportunity else { return }
+        opportunity = nil
+        execution?.end(token)
     }
     private func finishStaging(_ job: StoredDownloadJob) {
         guard let incoming = incoming(job), let staging, UUID(uuidString: job.id) != nil else { return }

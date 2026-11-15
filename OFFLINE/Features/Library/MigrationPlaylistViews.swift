@@ -36,6 +36,7 @@ struct MigrationPlaylistPlaybackHeader: View {
 
 struct MigrationPlaylistOccurrenceRow: View {
     @EnvironmentObject private var library: MusicLibraryService
+    @EnvironmentObject private var container: AppContainer
     let row: MigrationPlaylistRow
     let playlistID: String
     var body: some View {
@@ -43,7 +44,10 @@ struct MigrationPlaylistOccurrenceRow: View {
             NavigationLink {
                 MigrationOccurrenceDetailView(playlistID: playlistID, occurrenceID: row.id)
             } label: {
-                MigrationOccurrenceLabel(row: row).equatable()
+                MigrationOccurrenceLabel(row: row) {
+                    if let acquisition = container.playlistAcquisition { AcquisitionOccurrenceStatus(acquisition: acquisition, row: row) }
+                    else { MigrationOccurrenceStatusText(row: row, text: row.effectiveStatus.displayName, attention: false).equatable() }
+                }
             }.accessibilityIdentifier("migration-occurrence-" + row.id.uuidString)
             if row.playableTrack != nil {
                 Button { Task { await library.playMigration(playlistID: playlistID, occurrenceID: row.id.uuidString) } } label: {
@@ -56,8 +60,9 @@ struct MigrationPlaylistOccurrenceRow: View {
     }
 }
 
-private struct MigrationOccurrenceLabel: View, Equatable {
+private struct MigrationOccurrenceLabel<Status: View>: View {
     let row: MigrationPlaylistRow
+    @ViewBuilder let status: () -> Status
     var body: some View {
         HStack(spacing: AppSpacing.md) {
             if let track = row.playableTrack { StoredArtworkView(track: track, size: 44) }
@@ -69,8 +74,7 @@ private struct MigrationOccurrenceLabel: View, Equatable {
             }
             VStack(alignment: .leading, spacing: 4) {
                 MigrationSourceMetadataView(source: row.entry.source)
-                Text(row.effectiveStatus.displayName).font(.caption).foregroundStyle(AppColors.textSecondary)
-                    .accessibilityIdentifier("migration-entry-status-" + row.id.uuidString)
+                status()
             }
         }.padding(.vertical, 4)
     }
@@ -114,6 +118,9 @@ struct MigrationPlaylistDashboard: View {
                     PlaylistMatchingControls(model: model, session: value.session, repository: repository,
                                              playlistID: playlistID, lookup: container.youtubeManualLookup)
                     MigrationResolutionSummaryLink(playlistID: playlistID, session: value.session, repository: repository)
+                }
+                if let acquisition = container.playlistAcquisition {
+                    PlaylistAcquisitionControls(acquisition: acquisition, presentation: value, playlistID: playlistID)
                 }
                 if expanded {
                     Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
@@ -186,6 +193,9 @@ struct MigrationOccurrenceDetailView: View {
                        [.needsReview, .unavailable, .failed].contains(row.entry.status) {
                         MigrationRetrySongButton(model: model, entry: row.entry)
                     }
+                }
+                if let acquisition = container.playlistAcquisition {
+                    AcquisitionOccurrenceSection(acquisition: acquisition, row: row)
                 }
                 if let repository = library.storage?.playlistMigrations {
                     MigrationCandidateInspection(entry: row.entry, repository: repository, lookup: container.youtubeManualLookup)

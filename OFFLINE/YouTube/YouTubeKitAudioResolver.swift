@@ -55,55 +55,38 @@ struct YouTubeStreamReadiness: Sendable {
 }
 
 // One shared instance serializes access to YouTubeKit's process-wide JS cache.
-// Waiting callers are cancellable and never execute extraction on MainActor.
+// Only the YouTubeKit calls are serialized: the anonymous authorization check before
+// them and the bounded HEAD readiness probe after them are independent per recording,
+// so several downloads can prepare concurrently. Waiting callers are cancellable and
+// never execute extraction on MainActor.
 actor YouTubeKitAudioResolver: YouTubeAudioResolver {
     static var extractionMethods: [YouTube.ExtractionMethod] { [.local] }
     private let metadata: any YouTubeMetadataProvider
     private let readiness: YouTubeStreamReadiness
-    private var pending: Task<ResolvedAudioStream, Error>?
+    private var pending: Task<Extraction, Error>?
     private var pendingID: UUID?
     init(metadata: any YouTubeMetadataProvider, transport: any YouTubeTransport) {
         self.metadata = metadata; self.readiness = YouTubeStreamReadiness(transport: transport)
     }
-    func resolve(video: YouTubeVideo, quality: AudioQuality) async throws -> ResolvedAudioStream {
-        let previous = pending, id = UUID(), metadata = metadata, readiness = readiness
-        let task = Task {
-            if let previous { _ = await previous.result }
-            try Task.checkCancellation()
-            return try await Self.extract(videoID: video.id, quality: quality, metadata: metadata, readiness: readiness)
-        }
-        pending = task; pendingID = id
-        defer { if pendingID == id { pending = nil; pendingID = nil } }
-        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    private struct Extraction: Sendable {
+        let options: [AudioStreamOption]
+        let selected: AudioStreamOption
+        let url: URL
+        let title: String?
+        let thumbnail: URL?
     }
-    private nonisolated static func extract(videoID: String, quality: AudioQuality, metadata: any YouTubeMetadataProvider, readiness: YouTubeStreamReadiness) async throws -> ResolvedAudioStream {
+    func resolve(video: YouTubeVideo, quality: AudioQuality) async throws -> ResolvedAudioStream {
+        let metadata = metadata, readiness = readiness, videoID = video.id
         do {
-            return try await withThrowingTaskGroup(of: ResolvedAudioStream.self) { group in
-                group.addTask {
-                    // Check the ordinary anonymous watch response before calling the extractor.
-                    let authorized = try await metadata.metadata(videoID: videoID)
-                    guard authorized.availability == .available else { throw YouTubeError.streamNotReady }
-                    let youtube = YouTube(videoID: videoID, methods: extractionMethods)
-                    let ageRestricted = try await youtube.ageRestricted
-                    guard !ageRestricted else { throw YouTubeError.accessRestricted }
-                    try Task.checkCancellation()
-                    let streams = try await youtube.streams
-                    try Task.checkCancellation()
-                    let options = streams.enumerated().map { option($0.element, id: $0.offset) }
-                    let selected = try AudioStreamSelector.select(options, quality: quality)
-                    guard streams.indices.contains(selected.id) else { throw YouTubeError.extractionFailed }
-                    let stream = streams[selected.id]
-                    // 0.4.10 has no waitUntilAvailable API: bounded HEAD only, no media bytes.
-                    let expiry = try await readiness.verify(stream.url)
-                    let extracted = try await youtube.metadata
-                    try Task.checkCancellation()
-                    return ResolvedAudioStream(video: authorized.merging(title: extracted?.title, thumbnail: extracted?.thumbnail?.url), options: options.filter(\.isAudioOnly), selected: selected, url: stream.url, resolvedAt: Date(), expiresAt: expiry)
-                }
-                group.addTask { try await Task.sleep(for: .seconds(45)); throw YouTubeError.requestTimeout }
-                defer { group.cancelAll() }
-                guard let result = try await group.next() else { throw YouTubeError.extractionFailed }
-                return result
-            }
+            // Check the ordinary anonymous watch response before calling the extractor.
+            let authorized = try await Self.bounded { try await metadata.metadata(videoID: videoID) }
+            guard authorized.availability == .available else { throw YouTubeError.streamNotReady }
+            let extracted = try await serializedExtraction(videoID: videoID, quality: quality)
+            // 0.4.10 has no waitUntilAvailable API: bounded HEAD only, no media bytes.
+            let url = extracted.url
+            let expiry = try await Self.bounded { try await readiness.verify(url) }
+            return ResolvedAudioStream(video: authorized.merging(title: extracted.title, thumbnail: extracted.thumbnail), options: extracted.options,
+                                       selected: extracted.selected, url: extracted.url, resolvedAt: Date(), expiresAt: expiry)
         } catch let error as YouTubeKitError {
             switch error {
             case .videoPrivate, .videoUnavailable, .recordingUnavailable: throw YouTubeError.videoUnavailable
@@ -113,6 +96,43 @@ actor YouTubeKitAudioResolver: YouTubeAudioResolver {
             default: throw YouTubeError.extractionFailed
             }
         } catch { throw YouTubeError.map(error, fallback: .extractionFailed) }
+    }
+    /// The only serialized section. Each extraction keeps its own 45-second bound, which
+    /// starts when it runs, not while it waits behind another recording.
+    private func serializedExtraction(videoID: String, quality: AudioQuality) async throws -> Extraction {
+        let previous = pending, id = UUID()
+        let task = Task {
+            if let previous { _ = await previous.result }
+            try Task.checkCancellation()
+            return try await Self.bounded { try await Self.extract(videoID: videoID, quality: quality) }
+        }
+        pending = task; pendingID = id
+        defer { if pendingID == id { pending = nil; pendingID = nil } }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+    private nonisolated static func extract(videoID: String, quality: AudioQuality) async throws -> Extraction {
+        let youtube = YouTube(videoID: videoID, methods: extractionMethods)
+        let ageRestricted = try await youtube.ageRestricted
+        guard !ageRestricted else { throw YouTubeError.accessRestricted }
+        try Task.checkCancellation()
+        let streams = try await youtube.streams
+        try Task.checkCancellation()
+        let options = streams.enumerated().map { option($0.element, id: $0.offset) }
+        let selected = try AudioStreamSelector.select(options, quality: quality)
+        guard streams.indices.contains(selected.id) else { throw YouTubeError.extractionFailed }
+        let extracted = try await youtube.metadata
+        try Task.checkCancellation()
+        return Extraction(options: options.filter(\.isAudioOnly), selected: selected, url: streams[selected.id].url,
+                          title: extracted?.title, thumbnail: extracted?.thumbnail?.url)
+    }
+    private nonisolated static func bounded<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await work() }
+            group.addTask { try await Task.sleep(for: .seconds(45)); throw YouTubeError.requestTimeout }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else { throw YouTubeError.extractionFailed }
+            return result
+        }
     }
     nonisolated static func option(_ stream: YouTubeKit.Stream, id: Int) -> AudioStreamOption {
         let codec: String?

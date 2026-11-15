@@ -19,7 +19,9 @@ import Foundation
                     let fixtures = YouTubeUITestFixtures()
                     guard let defaults = UserDefaults(suiteName: "YouTubeUITests-\(identifier)") else { fatalError("Isolated preferences unavailable") }
                     if process.arguments.contains("--reset-ui-library") { defaults.removePersistentDomain(forName: "YouTubeUITests-\(identifier)") }
-                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults, resourceMonitor: ResourceMonitor(observeSystem: false))
+                    // Automatic acquisition is opt-in for UI tests so historical suites keep
+                    // their exact (download-free) behavior; deterministic unit tests cover it.
+                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults, resourceMonitor: ResourceMonitor(observeSystem: false), automaticAcquisition: process.arguments.contains("--automatic-acquisition"))
                     container.downloads.setPath(connected: true, wifi: !process.arguments.contains("--download-cellular"))
                     if process.arguments.contains("--download-queue-fixtures") {
                         for index in 1...3 {
@@ -33,7 +35,8 @@ import Foundation
             } catch { fatalError("Could not create the isolated UI test library") }
         }
         #endif
-        return AppContainer(backgroundTransfers: BackgroundTransfers.shared)
+        return AppContainer(backgroundTransfers: BackgroundTransfers.shared, automaticAcquisition: true,
+                            acquisitionNotifier: UserNotificationAcquisitionNotifier(), backgroundExecution: UIKitBackgroundExecution())
     }
     #if DEBUG
     private static func seedMigrations(_ storage: StorageCoordinator) throws {
