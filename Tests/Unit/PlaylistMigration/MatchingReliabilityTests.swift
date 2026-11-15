@@ -27,17 +27,18 @@ final class MatchingReliabilityTests: XCTestCase {
             let input = MatchingCorrectionTests.source(200)
             let session = try await repo.createPlaylist(from: input, operationID: "provider-stop")
             let provider = MidwayDiscovery(partial: partial)
-            let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
+            let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider], restriction: .noWait)
             try await worker.run(migrationID: session.id) { _ in }
             let stopped = try await repo.matchingSummary(migrationID: session.id)
-            XCTAssertEqual(stopped.processed, 200); XCTAssertEqual(stopped.externalDeferred, 99); XCTAssertEqual(stopped.deferred, 0)
+            XCTAssertEqual(stopped.processed, 200); XCTAssertEqual(stopped.externalDeferred, 0); XCTAssertEqual(stopped.deferred, 0)
             XCTAssertEqual(stopped.discoveryFailed, 1); XCTAssertEqual(stopped.noMatch, 0)
-            XCTAssertTrue(stopped.discoveryPaused)
+            XCTAssertFalse(stopped.discoveryPaused)
+            // A one-off 429 at song 100 is followed by a fresh search for song 101 after the cooldown.
             let firstCalls = await provider.calls
-            XCTAssertEqual(firstCalls, Array(0...100))
+            XCTAssertEqual(firstCalls, Array(0..<200))
             let entries = try await repo.entries(migrationID: session.id)
             XCTAssertEqual(entries[100].status, partial ? .needsReview : .failed)
-            XCTAssertEqual(entries[101].status, .failed) // Deferred and retryable, never a genuine no-match.
+            XCTAssertEqual(entries[101].status, .needsReview)
             let originalCandidates = try await repo.candidates(entryID: entries[0].id)
             // Restart storage before retry; the UI can still inspect title/channel/artwork/link.
             let database = try DatabaseManager(url: f.paths.database)
@@ -52,7 +53,7 @@ final class MatchingReliabilityTests: XCTestCase {
             XCTAssertEqual(MatchingCandidateArtwork.watchURL(candidate)?.absoluteString, "https://www.youtube.com/watch?v=00000000000")
             try await PlaylistMigrationMatchingService(repository: reopened, providers: [provider]).run(migrationID: session.id) { _ in }
             let calls = await provider.calls, finished = try await reopened.matchingSummary(migrationID: session.id)
-            XCTAssertEqual(calls, Array(0...100) + Array(100..<200))
+            XCTAssertEqual(calls, Array(0..<200) + [100])
             XCTAssertEqual(finished.candidates, 200); XCTAssertEqual(finished.discoveryFailed, 0)
             XCTAssertEqual(finished.deferred, 0); XCTAssertEqual(finished.externalDeferred, 0); XCTAssertEqual(finished.noMatch, 0)
             let retained = try await reopened.candidates(entryID: entries[0].id)
@@ -73,7 +74,8 @@ final class MatchingReliabilityTests: XCTestCase {
             let result = try await YouTubeSearchProviderAdapter(search: search).discover(MatchingCorrectionTests.source(1).entries[0])
             let calls = await search.calls
             XCTAssertEqual(calls.count, 1); XCTAssertEqual(result.failure, error)
-            XCTAssertTrue(result.pauseDiscovery); XCTAssertTrue(result.recordings.isEmpty)
+            // Only 429/verification is provider-wide; a 403 is a song-specific failure.
+            XCTAssertEqual(result.pauseDiscovery, error == .rateLimited); XCTAssertTrue(result.recordings.isEmpty)
         }
     }
     func testTransientSearchFailureGetsOneBoundedRetry() async throws {

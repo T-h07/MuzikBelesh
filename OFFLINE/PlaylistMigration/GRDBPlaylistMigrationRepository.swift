@@ -512,6 +512,8 @@ extension GRDBPlaylistMigrationRepository {
                 if discoveryFailed { result.discoveryFailed += 1 }
                 if deferred { result.externalDeferred += 1 }
                 if let outcome, ["recommended", "review", "noMatch", "discoveryFailed"].contains(outcome) { result.externalAttempted += 1 }
+                if let outcome, ["recommended", "review", "noMatch"].contains(outcome) { result.externalSucceeded += 1 }
+                if outcome == "discoveryFailed" { result.discoveryFailedRequests += 1 }
                 if entry.status == .ready {
                     if localIDs.contains(entry.id) { result.localMatches += 1 } else { result.alreadyLocal += 1 }
                 } else if entry.status == .needsReview {

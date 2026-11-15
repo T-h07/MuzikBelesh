@@ -145,8 +145,9 @@ struct PlaylistMatchingControls: View {
             Text("Processed entries: \(progress.processed) • Saved candidates: \(progress.candidates)")
             Text("Recommended external: \(progress.recommended) • Review: \(progress.review)")
             Text("Genuine no match: \(progress.noMatch) • Entry errors: \(progress.failed)")
-            Text("Visited: \(progress.processed)/\(progress.total) • External searches attempted: \(progress.externalAttempted)")
-            Text("Discovery failed: \(progress.discoveryFailed) • External discovery deferred: \(progress.externalDeferred) • Awaiting discovery: \(progress.deferred)")
+            Text("Spotify entries: \(progress.total) • Entries visited: \(progress.processed)")
+            Text("YouTube searches attempted: \(progress.externalAttempted) • Successful: \(progress.externalSucceeded) • Failed: \(progress.discoveryFailedRequests)")
+            Text("External discovery deferred: \(progress.externalDeferred) • Awaiting discovery: \(progress.deferred)")
             Text("Resolved \(progress.resolved)/\(progress.total) — \(progress.recommended + progress.review) Need Review — \(progress.unresolved) Unresolved").bold()
             Text("Selected YouTube videos: \(progress.selected) (not downloaded) • Offline ready: \(progress.alreadyLocal + progress.localMatches)")
             if active {
@@ -160,7 +161,7 @@ struct PlaylistMatchingControls: View {
             }
             if let message = progress.message { Text(message).foregroundStyle(AppColors.error) }
             if progress.discoveryPaused {
-                Text("YouTube search was suspended after a verification or rate-limit response. Every song was still checked against your local library; songs that could not be searched are marked External Discovery Deferred. Retry Unfinished Discovery later resumes only those songs. You can also select a saved candidate, paste a YouTube link, or choose a local recording.")
+                Text("YouTube kept requiring verification or limiting requests after repeated waits, so searching stopped for this attempt. Songs that were not searched are marked External Discovery Deferred and were not counted as searched. Every song was still checked against your local library. Retry Unfinished Discovery later resumes from the first unfinished song. You can also select a saved candidate, paste a YouTube link, or choose a local recording.")
             }
             if let readError { Text(readError).foregroundStyle(AppColors.error) }
             MatchingDeveloperDiagnosticsView()

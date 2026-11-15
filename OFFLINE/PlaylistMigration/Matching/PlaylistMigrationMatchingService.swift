@@ -14,11 +14,15 @@ struct SongMatchingProgress: Sendable {
     var deferred = 0
     /// Explicitly confirmed YouTube selections. Matched only: not downloaded or playable.
     var selected = 0
-    /// Occurrences that called at least one external provider in this attempt.
+    /// Occurrences for which an external search was actually performed.
     var externalAttempted = 0
+    /// Searches that returned a response (including zero relevant candidates).
+    var externalSucceeded = 0
     /// Local matching completed, but external discovery was skipped because the
     /// provider was suspended (verification, 429, provider-wide restriction).
     var externalDeferred = 0
+    /// Actual search requests that failed (song-specific or restricted).
+    var discoveryFailedRequests = 0
     var resolved: Int { alreadyLocal + localMatches + selected }
     var unresolved: Int { max(0, total - resolved - recommended - review) }
     var discoveryPaused = false
@@ -32,10 +36,11 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
     let providers: [any ExternalCandidateDiscovery]
     let scoring: CandidateScoringEngine
     let policy: MatchDecisionPolicy
+    let restriction: ProviderRestrictionPolicy
     private var running = false
     init(repository: GRDBPlaylistMigrationRepository, providers: [any ExternalCandidateDiscovery],
-         configuration: SongMatchingConfiguration = .standard) {
-        self.repository = repository; self.providers = Array(providers.prefix(3))
+         configuration: SongMatchingConfiguration = .standard, restriction: ProviderRestrictionPolicy = .standard) {
+        self.repository = repository; self.providers = Array(providers.prefix(3)); self.restriction = restriction
         scoring = CandidateScoringEngine(configuration: configuration)
         policy = MatchDecisionPolicy(configuration: configuration)
     }
@@ -74,12 +79,9 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             var report = SongMatchingProgress(total: entries.count)
             report.candidates = try await repository.matchingSummary(migrationID: migrationID).candidates
             report.deferred = entries.filter { [.pending, .matching].contains($0.status) }.count
-            var failures = MatchingDiscoveryFailurePolicy()
             let runProviders = providers.map { $0.forRun() }
-            // Provider-level circuit breaker. A suspended provider receives no further
-            // requests this run; remaining occurrences still get local matching and
-            // are checkpointed as deferred (retryable), never as a genuine no-match.
-            var suspended: [Int: String] = [:]
+            // Per-provider restriction state. Individual failures never touch it.
+            var restrictions = Array(repeating: (probes: 0, suspended: false, reason: ""), count: runProviders.count)
             await progress(report)
             for entry in entries {
                 try Task.checkCancellation()
@@ -118,14 +120,19 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                         var attempted = false
                         for (number, provider) in runProviders.enumerated() {
                             try Task.checkCancellation()
-                            if suspended[number] != nil { continue }
+                            if restrictions[number].suspended { continue }
+                            if restrictions[number].probes > 0 {
+                                // Respect the restriction: wait, then make one fresh search for THIS occurrence.
+                                report.message = "YouTube requested verification or limited requests. Waiting before the next independent search."
+                                await progress(report)
+                                try await restriction.sleep(restriction.cooldowns[min(restrictions[number].probes, restriction.cooldowns.count) - 1])
+                            }
                             attempted = true
                             do {
                                 let found = try await provider.discover(entry.source)
                                 try Task.checkCancellation()
-                                let shouldPause = failures.observe(provider: number, entry: entry.id,
-                                    searchFailed: found.searchFailed,
-                                    restricted: found.pauseDiscovery && MatchingDiscoveryFailurePolicy.immediate(found.failure))
+                                let providerWide = found.pauseDiscovery && MatchingDiscoveryFailurePolicy.immediate(found.failure)
+                                if found.searchFailed { report.discoveryFailedRequests += 1 } else { report.externalSucceeded += 1 }
                                 truncated = truncated || found.truncated
                                 for recording in found.recordings.prefix(20) {
                                     let identity = recording.provider + ":" + recording.identity
@@ -142,26 +149,36 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                     if let failure = found.failure {
                                         MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: "youtube")
                                     }
-                                    if shouldPause { suspended[number] = reason; report.discoveryPaused = true }
                                 }
+                                if providerWide {
+                                    restrictions[number].probes += 1; restrictions[number].reason = issue ?? ""
+                                    if restrictions[number].probes > restriction.cooldowns.count {
+                                        restrictions[number].suspended = true; report.discoveryPaused = true
+                                    }
+                                } else if !found.searchFailed { restrictions[number] = (0, false, "") }
                             } catch {
                                 if Task.isCancelled || error is CancellationError { throw CancellationError() }
                                 MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: "provider-" + String(number))
                                 discoveryFailed = true
-                                let tripped = failures.observe(provider: number, entry: entry.id,
-                                    searchFailed: true, restricted: MatchingDiscoveryFailurePolicy.immediate(error as? YouTubeError))
+                                report.discoveryFailedRequests += 1
+                                let tripped = MatchingDiscoveryFailurePolicy.immediate(error as? YouTubeError)
                                 let reason = (error as? YouTubeError) == .accessRestricted
                                     ? "YouTube search requires access or verification."
                                     : (error as? YouTubeError)?.localizedDescription ?? "YouTube discovery is unavailable."
                                 issue = reason + " Discovery incomplete; saved candidates are preserved. Retry later."
                                 report.message = issue
-                                if tripped { suspended[number] = reason; report.discoveryPaused = true }
+                                if tripped {
+                                    restrictions[number].probes += 1; restrictions[number].reason = reason
+                                    if restrictions[number].probes > restriction.cooldowns.count {
+                                        restrictions[number].suspended = true; report.discoveryPaused = true
+                                    }
+                                }
                             }
                         }
                         if attempted { report.externalAttempted += 1 }
                         if !runProviders.isEmpty && !attempted {
                             deferred = true; discoveryFailed = true
-                            issue = "External discovery deferred. " + (suspended.values.first ?? "Discovery is unavailable.")
+                            issue = "External discovery deferred. " + (restrictions.first { $0.suspended }?.reason ?? "Discovery is unavailable.")
                                 + " Local matching completed; retry unfinished discovery later."
                         }
                         decision = policy.decide(scores, truncated: truncated)

@@ -90,8 +90,10 @@ private actor MatchingYouTubeResponseCache: YouTubeSearchProvider, YouTubeMetada
 /// searches reset the streak; individual watch failures do not trip the breaker.
 struct MatchingDiscoveryFailurePolicy {
     private var streaks: [Int: Set<UUID>] = [:]
+    /// Provider-wide only: a consent/sign-in/verification redirect or HTTP 429.
+    /// 401/403 and unsupported redirects are treated as song-specific failures.
     static func immediate(_ error: YouTubeError?) -> Bool {
-        error == .rateLimited || error == .accessRestricted || error == .providerRestricted || error == .redirectUnavailable
+        error == .rateLimited || error == .providerRestricted
     }
     mutating func observe(provider: Int, entry: UUID, searchFailed: Bool, restricted: Bool) -> Bool {
         if restricted { return true }
@@ -99,6 +101,18 @@ struct MatchingDiscoveryFailurePolicy {
         else { streaks[provider] = [] }
         return (streaks[provider]?.count ?? 0) >= 3
     }
+}
+
+/// Provider-wide restriction handling. Song-specific failures never suspend a
+/// provider. After a verification/consent/sign-in redirect or HTTP 429, the next
+/// occurrence waits a cooldown and then makes one fresh, independent search. Only
+/// when every probe is also restricted is the provider suspended for the rest of
+/// the run; remaining occurrences are then queued as deferred, never counted as searched.
+struct ProviderRestrictionPolicy: Sendable {
+    var cooldowns: [Duration]
+    var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    static let standard = ProviderRestrictionPolicy(cooldowns: [.seconds(30), .seconds(120), .seconds(300)])
+    static let noWait = ProviderRestrictionPolicy(cooldowns: [.zero, .zero], sleep: { _ in try Task.checkCancellation() })
 }
 
 /// One shared monotonic request budget for matching, including retries and watch reads.
@@ -252,7 +266,7 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                     result.recordings[index].available = false
                     let error = YouTubeError.map(error, fallback: .metadataUnavailable)
                     result.failures.append(error.localizedDescription); result.failure = error
-                    if [.rateLimited, .providerRestricted, .redirectUnavailable].contains(error) {
+                    if MatchingDiscoveryFailurePolicy.immediate(error) {
                         result.pauseDiscovery = true
                         break
                     }

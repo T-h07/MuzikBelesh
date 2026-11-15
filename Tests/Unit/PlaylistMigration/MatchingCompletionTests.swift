@@ -7,12 +7,16 @@ private actor CompletionDiscovery: ExternalCandidateDiscovery {
     var calls: [Int] = []
     var failAt: Set<Int>
     var verifyAt: Int?
-    init(failAt: Set<Int> = [], verifyAt: Int? = nil) { self.failAt = failAt; self.verifyAt = verifyAt }
-    func heal() { verifyAt = nil; failAt = [] }
+    /// Provider-wide block: every search at or after this position is restricted until healed.
+    var blockedFrom: Int?
+    init(failAt: Set<Int> = [], verifyAt: Int? = nil, blockedFrom: Int? = nil) {
+        self.failAt = failAt; self.verifyAt = verifyAt; self.blockedFrom = blockedFrom
+    }
+    func heal() { verifyAt = nil; failAt = []; blockedFrom = nil }
     static func id(_ position: Int, _ suffix: String) -> String { String(format: "%010d", position) + suffix }
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult {
         calls.append(source.position)
-        if source.position == verifyAt { throw YouTubeError.providerRestricted }
+        if source.position == verifyAt || blockedFrom.map({ source.position >= $0 }) == true { throw YouTubeError.providerRestricted }
         if failAt.contains(source.position) {
             return .init(failures: [YouTubeError.searchUnavailable.localizedDescription], failure: .searchUnavailable, searchFailed: true)
         }
@@ -32,7 +36,8 @@ final class MatchingCompletionTests: XCTestCase {
         })
     }
     private func run(_ repo: GRDBPlaylistMigrationRepository, _ id: UUID, _ provider: CompletionDiscovery, only: Set<UUID>? = nil) async throws {
-        try await PlaylistMigrationMatchingService(repository: repo, providers: [provider]).run(migrationID: id, only: only) { _ in }
+        try await PlaylistMigrationMatchingService(repository: repo, providers: [provider], restriction: .noWait)
+            .run(migrationID: id, only: only) { _ in }
     }
 
     func testIndividualFailureAtSongTenDoesNotStopSongsElevenThroughTwoHundred() async throws {
@@ -50,19 +55,22 @@ final class MatchingCompletionTests: XCTestCase {
         XCTAssertEqual(overview.count(.needsReview), 199)
     }
 
-    func testVerificationAtEntryThirtyEightSuspendsProviderButVisitsAllAndResumesWithoutDuplicates() async throws {
+    func testPersistentVerificationFromEntryThirtyEightProbesThenDefersHonestlyAndResumes() async throws {
         let f = try LibraryFixture(count: 2), repo = f.storage.playlistMigrations, input = source(200)
         let tracksBefore = try await f.storage.database.dbQueue.read { try StoredTrack.fetchCount($0) }
         let session = try await repo.createPlaylist(from: input, operationID: "verify-38")
-        let provider = CompletionDiscovery(verifyAt: 38)
+        let provider = CompletionDiscovery(blockedFrom: 38)
         try await run(repo, session.id, provider)
 
+        // 38 is restricted; 39 and 40 each get one fresh probe after a cooldown; then
+        // the provider is suspended and nothing further is requested.
         let firstCalls = await provider.calls
-        XCTAssertEqual(firstCalls, Array(0...38), "No requests to a suspended provider")
+        XCTAssertEqual(firstCalls, Array(0...40))
         let summary = try await repo.matchingSummary(migrationID: session.id)
         XCTAssertEqual(summary.processed, 200); XCTAssertEqual(summary.deferred, 0)
-        XCTAssertEqual(summary.externalAttempted, 39); XCTAssertEqual(summary.externalDeferred, 161)
-        XCTAssertEqual(summary.discoveryFailed, 1); XCTAssertEqual(summary.noMatch, 0); XCTAssertTrue(summary.discoveryPaused)
+        XCTAssertEqual(summary.externalAttempted, 41); XCTAssertEqual(summary.externalSucceeded, 38)
+        XCTAssertEqual(summary.discoveryFailedRequests, 3); XCTAssertEqual(summary.externalDeferred, 159)
+        XCTAssertEqual(summary.discoveryFailed, 3); XCTAssertEqual(summary.noMatch, 0); XCTAssertTrue(summary.discoveryPaused)
 
         // Local matching still ran after suspension.
         var entries = try await repo.entries(migrationID: session.id)
@@ -72,8 +80,8 @@ final class MatchingCompletionTests: XCTestCase {
         // Every deferred occurrence is individually identifiable and retryable.
         let overview = try await repo.resolutionOverview(migrationID: session.id)
         let deferred = overview.items.filter { $0.category == .discoveryDeferred }
-        XCTAssertEqual(deferred.map(\.entry.position), Array(39..<200))
-        XCTAssertEqual(Set(deferred.map(\.id)).count, 161)
+        XCTAssertEqual(deferred.map(\.entry.position), Array(41..<200))
+        XCTAssertEqual(Set(deferred.map(\.id)).count, 159)
         XCTAssertTrue(deferred.allSatisfy { $0.reason?.hasPrefix("External discovery deferred.") == true })
 
         // Saved candidates survive restart; resume searches only unfinished entries.
@@ -85,7 +93,7 @@ final class MatchingCompletionTests: XCTestCase {
         await provider.heal()
         try await run(reopened, session.id, provider)
         let calls = await provider.calls
-        XCTAssertEqual(calls, Array(0...38) + Array(38..<200), "Completed searches are never repeated")
+        XCTAssertEqual(calls, Array(0...40) + Array(38..<200), "Resume starts at the earliest unfinished entry; completed searches are not repeated")
         let finished = try await reopened.matchingSummary(migrationID: session.id)
         XCTAssertEqual(finished.externalDeferred, 0); XCTAssertEqual(finished.discoveryFailed, 0)
         let kept = try await reopened.candidates(entryID: entries[5].id)

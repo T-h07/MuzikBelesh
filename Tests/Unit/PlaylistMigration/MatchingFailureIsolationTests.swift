@@ -22,14 +22,16 @@ final class MatchingFailureIsolationTests: XCTestCase {
         let source = MatchingCorrectionTests.source(200)
         let session = try await repo.createPlaylist(from: source, operationID: "consecutive-recovery")
         let provider = IsolatedDiscovery([0, 1, 2])
-        let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
+        let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider], restriction: .noWait)
         try await worker.run(migrationID: session.id) { _ in }
-        let paused = try await repo.matchingSummary(migrationID: session.id)
-        XCTAssertTrue(paused.discoveryPaused); XCTAssertEqual(paused.externalDeferred, 197); XCTAssertEqual(paused.deferred, 0)
+        let first = try await repo.matchingSummary(migrationID: session.id)
+        // Consecutive song-specific failures never suspend discovery.
+        XCTAssertFalse(first.discoveryPaused); XCTAssertEqual(first.externalDeferred, 0)
+        XCTAssertEqual(first.discoveryFailed, 3); XCTAssertEqual(first.externalAttempted, 200)
         try await worker.run(migrationID: session.id) { _ in }
         let calls = await provider.calls, entries = try await repo.entries(migrationID: session.id)
         let finished = try await repo.matchingSummary(migrationID: session.id)
-        XCTAssertEqual(calls, [0, 1, 2] + Array(0..<200))
+        XCTAssertEqual(calls, Array(0..<200) + [0, 1, 2])
         XCTAssertEqual(entries.map(\.source), source.entries)
         XCTAssertEqual(Set(entries.map(\.id)).count, 200)
         XCTAssertEqual(finished.candidates, 200); XCTAssertEqual(finished.discoveryFailed, 0)
@@ -52,17 +54,18 @@ final class MatchingFailureIsolationTests: XCTestCase {
         let retried = await provider.calls, retained = try await repo.candidates(entryID: entries[0].id)
         XCTAssertEqual(retried, Array(0..<200) + [6]); XCTAssertEqual(retained, saved)
     }
-    func testRepeatedFailuresPauseAfterThreeEntriesBut429PausesImmediately() async throws {
+    func testRepeatedSongFailuresNeverSuspendButPersistent429IsRespected() async throws {
         for rateLimited in [false, true] {
             let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
             let session = try await repo.createPlaylist(from: MatchingCorrectionTests.source(10), operationID: "threshold")
             let provider = IsolatedDiscovery(Set(0..<10), failure: rateLimited ? .rateLimited : .searchUnavailable)
-            try await PlaylistMigrationMatchingService(repository: repo, providers: [provider]).run(migrationID: session.id) { _ in }
+            try await PlaylistMigrationMatchingService(repository: repo, providers: [provider], restriction: .noWait).run(migrationID: session.id) { _ in }
             let calls = await provider.calls, summary = try await repo.matchingSummary(migrationID: session.id)
-            let expected = rateLimited ? 1 : 3
-            XCTAssertEqual(calls.count, expected); XCTAssertEqual(summary.discoveryFailed, expected)
+            // 429: the limited request plus one probe per cooldown, then suspension.
+            let expected = rateLimited ? 3 : 10
+            XCTAssertEqual(calls, Array(0..<expected)); XCTAssertEqual(summary.discoveryFailed, expected)
             XCTAssertEqual(summary.externalDeferred, 10 - expected); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.noMatch, 0)
-            XCTAssertTrue(summary.discoveryPaused)
+            XCTAssertEqual(summary.discoveryPaused, rateLimited)
         }
     }
     func testSuccessResetsStreakAndSameEntryRetriesAreNotIndependent() {

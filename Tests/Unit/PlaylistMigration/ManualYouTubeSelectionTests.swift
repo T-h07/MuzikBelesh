@@ -48,22 +48,25 @@ final class ManualYouTubeSelectionTests: XCTestCase {
         let tracksBefore = try await f.storage.database.dbQueue.read { try StoredTrack.fetchCount($0) }
         let session = try await repo.createPlaylist(from: input, operationID: "200-restricted")
         let provider = RestrictingDiscovery(restrictAt: 10)
-        let service = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
+        let service = PlaylistMigrationMatchingService(repository: repo, providers: [provider], restriction: .noWait)
         try await service.run(migrationID: session.id) { _ in }
+        // One restricted song does not stop the run: song 11 gets a fresh search after the cooldown.
+        var calls = await provider.calls
+        XCTAssertEqual(calls, Array(0..<200))
         var summary = try await repo.matchingSummary(migrationID: session.id)
         XCTAssertEqual(summary.processed, 200); XCTAssertEqual(summary.discoveryFailed, 1)
-        XCTAssertEqual(summary.externalDeferred, 189); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.noMatch, 0)
-        XCTAssertTrue(summary.discoveryPaused)
+        XCTAssertEqual(summary.externalDeferred, 0); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.noMatch, 0)
+        XCTAssertFalse(summary.discoveryPaused)
         let savedCandidates = summary.candidates
 
-        // Manual resolution while discovery is paused.
+        // Manual resolution of an already-searched entry.
         var entries = try await repo.entries(migrationID: session.id)
         try await repo.confirmYouTubeCandidate(for: entries[150], video: video(), metadataVerified: true)
 
         await provider.heal()
         try await service.run(migrationID: session.id) { _ in }
-        let calls = await provider.calls
-        XCTAssertEqual(calls, Array(0...10) + [10] + Array(11..<200).filter { $0 != 150 })
+        calls = await provider.calls
+        XCTAssertEqual(calls, Array(0..<200) + [10], "Only the failed song is searched again")
         entries = try await repo.entries(migrationID: session.id)
         XCTAssertEqual(entries.map(\.source), input.entries)
         XCTAssertEqual(entries[150].status, .matched); XCTAssertNil(entries[150].localTrackID)

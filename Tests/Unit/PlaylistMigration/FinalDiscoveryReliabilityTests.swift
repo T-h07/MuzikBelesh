@@ -110,7 +110,7 @@ final class FinalDiscoveryReliabilityTests: XCTestCase {
         XCTAssertTrue(event.developerSummary.contains("Redirect: consent"))
         XCTAssertFalse(event.developerSummary.contains("private")); XCTAssertFalse(event.developerSummary.contains("https"))
     }
-    func testBlockedRedirectAnd429PauseImmediatelyWithoutRetryOrFalseNoMatch() async throws {
+    func testBlockedRedirectAnd429RespectRestrictionWithoutRetryOrFalseNoMatch() async throws {
         for (status, category, expected) in [(302, YouTubeRedirectCategory.consent, YouTubeError.providerRestricted),
                                             (302, .verification, .providerRestricted), (302, .external, .redirectUnavailable),
                                             (429, .youtube, .rateLimited)] {
@@ -118,15 +118,24 @@ final class FinalDiscoveryReliabilityTests: XCTestCase {
             let source = MatchingCorrectionTests.source(200)
             let session = try await repo.createPlaylist(from: source, operationID: "blocked")
             var response = YTTransportStub.response(status: status); response.redirect = category
-            let transport = YTTransportStub([response])
+            let transport = YTTransportStub(Array(repeating: response, count: 250)) // YouTube keeps answering the same way.
             let adapter = YouTubeSearchProviderAdapter(search: YouTubeWebProvider(transport: transport), pacer: .init(interval: .zero))
-            try await PlaylistMigrationMatchingService(repository: repo, providers: [adapter]).run(migrationID: session.id) { _ in }
+            try await PlaylistMigrationMatchingService(repository: repo, providers: [adapter], restriction: .noWait).run(migrationID: session.id) { _ in }
             let summary = try await repo.matchingSummary(migrationID: session.id), requests = await transport.requests
             let entries = try await repo.entries(migrationID: session.id)
-            XCTAssertEqual(requests.count, 1); XCTAssertTrue(summary.discoveryPaused)
-            XCTAssertEqual(summary.discoveryFailed, 1); XCTAssertEqual(summary.noMatch, 0)
-            // The provider is suspended, but every remaining occurrence is still visited locally.
-            XCTAssertEqual(summary.externalDeferred, 199); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.processed, 200)
+            XCTAssertEqual(summary.noMatch, 0); XCTAssertEqual(summary.deferred, 0); XCTAssertEqual(summary.processed, 200)
+            XCTAssertEqual(summary.externalAttempted, summary.externalSucceeded + summary.discoveryFailedRequests)
+            XCTAssertEqual(requests.count, summary.externalAttempted, "Every counted search is a real request and vice versa")
+            if expected == .redirectUnavailable {
+                // Song-specific: never suspends; every later song is searched independently.
+                XCTAssertFalse(summary.discoveryPaused); XCTAssertEqual(summary.externalDeferred, 0)
+                XCTAssertEqual(summary.externalAttempted, 200)
+            } else {
+                // Provider-wide: the restricted request plus two cooldown probes (the stub
+                // has no further responses), then honest deferral without more requests.
+                XCTAssertTrue(summary.discoveryPaused); XCTAssertEqual(summary.externalAttempted, 3)
+                XCTAssertEqual(summary.externalDeferred, 197)
+            }
             XCTAssertEqual(entries.map(\.source), source.entries)
             XCTAssertThrowsError(try YouTubeHTTP.successful(response, fallback: .searchUnavailable)) { XCTAssertEqual($0 as? YouTubeError, expected) }
         }
@@ -181,11 +190,12 @@ final class FinalDiscoveryReliabilityTests: XCTestCase {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
         let session = try await repo.createPlaylist(from: MatchingCorrectionTests.source(3), operationID: "empty-resume")
         let provider = FinalEmptyRecovery()
-        let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
+        let worker = PlaylistMigrationMatchingService(repository: repo, providers: [provider], restriction: .noWait)
         try await worker.run(migrationID: session.id) { _ in }
         try await worker.run(migrationID: session.id) { _ in }
         let calls = await provider.calls, summary = try await repo.matchingSummary(migrationID: session.id)
-        XCTAssertEqual(calls, [0, 1, 1, 2]); XCTAssertEqual(summary.noMatch, 1)
+        // Song 2 is searched after the restriction on song 1; the resume retries only song 1.
+        XCTAssertEqual(calls, [0, 1, 2, 1]); XCTAssertEqual(summary.noMatch, 1)
         XCTAssertEqual(summary.discoveryFailed, 0); XCTAssertEqual(summary.deferred, 0)
     }
     func testRunCacheDoesNotRememberFailuresAndBrowserFallbackPreservesQuery() async throws {
