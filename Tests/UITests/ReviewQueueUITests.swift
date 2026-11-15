@@ -34,9 +34,38 @@ final class ReviewQueueUITests: XCTestCase {
         XCTAssertTrue(review.waitForExistence(timeout: 5)); review.tap()
         XCTAssertTrue(app.navigationBars["Review 1 of 4"].waitForExistence(timeout: 5))
     }
-    private func reveal(_ element: XCUIElement) {
-        for _ in 0..<10 where !(element.exists && element.isHittable) { app.scrollViews.firstMatch.swipeUp(velocity: .slow) }
-        XCTAssertTrue(element.isHittable, "\(element.identifier) must be tappable")
+    /// The review queue's own scroll container.
+    private var queueScroll: XCUIElement {
+        let scoped = app.scrollViews.containing(.any, identifier: "review-song-header").firstMatch
+        return scoped.exists ? scoped : app.scrollViews.firstMatch
+    }
+    private func visible(_ element: XCUIElement) -> Bool { element.exists && element.isHittable }
+    /// Candidate rows render lazily: an off-screen row may not be in the accessibility tree
+    /// yet (below) or any more (above). Scroll down, then back up, until it is tappable.
+    private func reveal(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        for _ in 0..<10 where !visible(element) { queueScroll.swipeUp(velocity: .slow) }
+        for _ in 0..<14 where !visible(element) { queueScroll.swipeDown(velocity: .slow) }
+        XCTAssertTrue(visible(element), "\(element.identifier) must be tappable", file: file, line: line)
+    }
+    private func scrollToTop() {
+        let header = app.otherElements["review-song-header"]
+        for _ in 0..<14 where !visible(header) { queueScroll.swipeDown(velocity: .fast) }
+        XCTAssertTrue(visible(header))
+    }
+    private func useButton(song: Int, candidate: Int) -> XCUIElement {
+        app.buttons.matching(identifier: "review-use-" + candidateID(song: song, candidate: candidate)).firstMatch
+    }
+    /// Every saved candidate (five per fixture song) can be reached and has exactly one control.
+    private func assertAllCandidatesReachable(song: Int) {
+        for index in 0..<5 {
+            let button = useButton(song: song, candidate: index)
+            reveal(button)
+            XCTAssertEqual(app.buttons.matching(identifier: button.identifier).count, 1, "Candidate \(index + 1) has one control")
+        }
+        XCTAssertEqual(app.buttons.matching(identifier: "review-use-" + candidateID(song: song, candidate: 5)).count, 0,
+                       "Only the five saved candidates are offered")
+        XCTAssertFalse(app.sheets.firstMatch.exists, "Scrolling never opens a confirmation")
+        scrollToTop()
     }
     private func tapDialog(_ label: String) {
         let sheetButton = app.sheets.buttons[label]
@@ -45,8 +74,7 @@ final class ReviewQueueUITests: XCTestCase {
         XCTAssertFalse(matches.isEmpty, "Confirmation \(label) missing"); matches.last?.tap()
     }
     private func use(song: Int, candidate: Int) {
-        let button = app.buttons["review-use-" + candidateID(song: song, candidate: candidate)]
-        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        let button = useButton(song: song, candidate: candidate)
         reveal(button); button.tap()
         // The dialog names the exact tapped candidate.
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Candidate \(candidate + 1) for song \(song + 1)")).firstMatch
@@ -55,15 +83,20 @@ final class ReviewQueueUITests: XCTestCase {
     }
     private func assertTopOfSong(_ number: Int, of total: Int) {
         XCTAssertTrue(app.navigationBars["Review \(number) of \(total)"].waitForExistence(timeout: 5))
-        let title = app.staticTexts["review-song-title"]
-        XCTAssertTrue(title.waitForExistence(timeout: 3))
-        XCTAssertEqual(title.label, "Review song \(number)")
+        // Scoped to the queue header: exactly one song title is shown.
+        let header = app.otherElements["review-song-header"]
+        XCTAssertTrue(header.waitForExistence(timeout: 3))
+        let titles = header.staticTexts.matching(identifier: "review-song-title")
+        XCTAssertEqual(titles.count, 1, "One song is shown at a time")
+        let title = titles.firstMatch
+        let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Review song \(number)"), object: title)
+        XCTAssertEqual(XCTWaiter().wait(for: [expected], timeout: 3), .completed, "Expected Review song \(number)")
         XCTAssertTrue(title.isHittable, "A newly opened song starts at the top")
     }
 
     func testFirstMiddleAndLastCandidatesSelectAndManualLinkDismissesKeyboard() {
         openQueue()
-        XCTAssertTrue(app.buttons["review-use-" + candidateID(song: 0, candidate: 4)].exists, "All five candidates are available, not only three")
+        assertAllCandidatesReachable(song: 0) // All five, not only three; rows render lazily.
         use(song: 0, candidate: 2)          // middle
         assertTopOfSong(2, of: 4)
         use(song: 1, candidate: 4)          // last (requires scrolling)
@@ -92,13 +125,13 @@ final class ReviewQueueUITests: XCTestCase {
 
     func testNavigationResetsScrollAndSwipesOrScrollsNeverSelect() {
         openQueue()
-        // Scroll deep into song 1's candidates; scrolling alone never opens a confirmation.
-        for _ in 0..<3 { app.scrollViews.firstMatch.swipeUp(velocity: .slow) }
+        // Scroll down to song 1's last candidate; scrolling alone never opens a confirmation.
+        reveal(useButton(song: 0, candidate: 4))
         XCTAssertFalse(app.sheets.firstMatch.exists)
         app.buttons["review-next"].tap()
         assertTopOfSong(2, of: 4)
         // Horizontal swipe on the song header navigates only.
-        app.staticTexts["review-song-title"].swipeLeft()
+        app.otherElements["review-song-header"].swipeLeft()
         assertTopOfSong(3, of: 4)
         XCTAssertFalse(app.sheets.firstMatch.exists, "Swiping never confirms")
         app.buttons["review-previous"].tap()
@@ -108,6 +141,9 @@ final class ReviewQueueUITests: XCTestCase {
         // Nothing was selected by navigation: song 1 still offers its first candidate.
         app.buttons["review-previous"].tap(); app.buttons["review-previous"].tap()
         assertTopOfSong(1, of: 4)
-        XCTAssertTrue(app.buttons["review-use-" + candidateID(song: 0, candidate: 0)].waitForExistence(timeout: 3))
+        XCTAssertTrue(useButton(song: 0, candidate: 0).waitForExistence(timeout: 3))
+        assertAllCandidatesReachable(song: 0) // Still all five: navigation rejected nothing.
+        app.buttons["review-next"].tap(); assertTopOfSong(2, of: 4)
+        assertAllCandidatesReachable(song: 1)
     }
 }

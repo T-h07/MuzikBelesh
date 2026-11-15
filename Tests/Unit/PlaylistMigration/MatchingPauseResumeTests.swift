@@ -263,7 +263,8 @@ private actor ScriptedDiscovery: ExternalCandidateDiscovery {
 
     func testManualLinkConfirmationStaysInAppAdvancesAndRemainsPendingAcquisition() async throws {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
-        let session = try await repo.createPlaylist(from: playlist(3), operationID: "manual-queue")
+        let source = playlist(3) // Captured once: playlist(_:) generates fresh track UUIDs per call.
+        let session = try await repo.createPlaylist(from: source, operationID: "manual-queue")
         try await PlaylistMigrationMatchingService(repository: repo, providers: [ScriptedDiscovery(empty: [0])], restriction: .noWait)
             .run(migrationID: session.id) { _ in }
         let queue = MigrationReviewQueueModel(repository: repo, migrationID: session.id)
@@ -283,7 +284,7 @@ private actor ScriptedDiscovery: ExternalCandidateDiscovery {
         XCTAssertEqual(queue.current?.entry.position, 1, "The next review item appears")
         let entry = try await repo.entry(id: queue.items[0].id)
         XCTAssertEqual(entry.status, .matched); XCTAssertNil(entry.localTrackID)
-        XCTAssertEqual(entry.source, playlist(3).entries[0], "Spotify metadata is unchanged")
+        XCTAssertEqual(entry.source, source.entries[0], "Spotify identity and metadata are unchanged")
         let accepted = try await repo.candidates(entryID: entry.id).filter { $0.decision == .accepted }
         XCTAssertEqual(accepted.map(\.providerTrackID), ["dQw4w9WgXcQ"])
         let handoff = try await repo.acquisitionHandoff(migrationID: session.id)

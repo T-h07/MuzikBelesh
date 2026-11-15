@@ -3,7 +3,39 @@ import XCTest
 final class PlaylistFileImportUITests: XCTestCase {
     private var app: XCUIApplication!
     override func setUpWithError() throws { continueAfterFailure = false }
-    override func tearDownWithError() throws { app?.terminate() }
+    override func tearDownWithError() throws {
+        if let app, (testRun?.failureCount ?? 0) > 0 {
+            let evidence = XCTAttachment(screenshot: app.screenshot()); evidence.lifetime = .keepAlways; add(evidence)
+            let tree = XCTAttachment(string: app.debugDescription); tree.lifetime = .keepAlways; add(tree)
+        }
+        app?.terminate()
+    }
+    /// The Files picker's dismiss control. It is presented asynchronously by a remote
+    /// view service, and iOS 26 sheets label it "Cancel" or "Close"; accept either, but
+    /// only once it is actually on screen (never this screen's own Close button).
+    private func pickerDismissButton(timeout: TimeInterval) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            for label in ["Cancel", "Close"] {
+                let button = app.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label))
+                    .allElementsBoundByIndex.first { $0.exists && $0.isHittable && $0.identifier != "playlist-import-close" }
+                if let button { return button }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        } while Date() < deadline
+        return nil
+    }
+    /// A List-row Toggle's accessibility frame spans the whole row, so tapping its centre
+    /// hits the label, which does not flip the switch on iOS 26. Tap the switch itself and
+    /// wait for the value to change.
+    private func toggle(_ row: XCUIElement) {
+        let before = row.value as? String ?? ""
+        let inner = row.switches.firstMatch
+        if inner.exists && inner.isHittable { inner.tap() }
+        else { row.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap() }
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before), object: row)
+        XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: 3), .completed, "Toggle \(row.identifier) did not change from \(before)")
+    }
     private func launch(fixture: Bool, extra: [String] = []) {
         app = XCUIApplication()
         app.launchEnvironment["MB_UI_TEST_ID"] = UUID().uuidString
@@ -15,13 +47,15 @@ final class PlaylistFileImportUITests: XCTestCase {
         let entry = app.buttons["import-spotify-playlist"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5)); entry.tap()
     }
-    func testFilesPickerPresentsAndCancelsWithoutImport() {
+    func testFilesPickerPresentsAndCancelsWithoutImport() throws {
         launch(fixture: false)
         let choose = app.buttons["playlist-import-choose-file"]
         XCTAssertTrue(choose.waitForExistence(timeout: 5)); choose.tap()
-        let cancel = app.buttons["Cancel"].firstMatch
-        XCTAssertTrue(cancel.waitForExistence(timeout: 5)); cancel.tap()
+        let cancel = try XCTUnwrap(pickerDismissButton(timeout: 15), "Files picker was not presented")
+        cancel.tap()
         XCTAssertTrue(choose.waitForExistence(timeout: 5))
+        let back = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: choose)
+        XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 5), .completed, "Picker dismissed back to the import screen")
         XCTAssertFalse(app.staticTexts["playlist-import-success"].exists)
     }
     func testReviewCommitAndFiveHundredPlaceholders() {
@@ -34,7 +68,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let open = app.buttons["playlist-import-open"]
         XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
         let count = app.staticTexts["migration-playlist-count"]
-        XCTAssertTrue(count.waitForExistence(timeout: 5)); XCTAssertEqual(count.label, "500 songs • 0 available offline")
+        XCTAssertTrue(count.waitForExistence(timeout: 5)); XCTAssertEqual(count.label, "500 imported • 0 manually added • 500 total • 0 available offline")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
     }
 
@@ -50,8 +84,9 @@ final class PlaylistFileImportUITests: XCTestCase {
         let selectAll = app.buttons["playlist-import-select-all"]
         scrollTo(selectAll, down: true); selectAll.tap()
         let firstSwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
-        scrollTo(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1"); firstSwitch.tap()
-        XCTAssertEqual(firstSwitch.value as? String, "0"); firstSwitch.tap()
+        scrollTo(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
+        toggle(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "0")
+        toggle(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
         let name = app.textFields["playlist-import-destination-name"].firstMatch
         scrollTo(name); name.tap()
         let old = name.value as? String ?? ""
@@ -77,7 +112,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let open = app.buttons["playlist-import-open"].firstMatch
         XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1000 songs • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 imported • 0 manually added • 1,000 total • 0 available offline")
         let toggle = app.buttons["migration-dashboard-toggle"]
         scrollTo(toggle); toggle.tap()
         let pending = app.descendants(matching: .any)["migration-breakdown-pending"].firstMatch
@@ -104,7 +139,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let playlist = app.staticTexts["Synthetic Import"]
         XCTAssertTrue(playlist.waitForExistence(timeout: 10)); playlist.tap()
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1000 songs • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 imported • 0 manually added • 1,000 total • 0 available offline")
         // Import metadata now lives in Migration Details; matching is the primary progress.
         let details = app.buttons["migration-dashboard-toggle"]
         scrollTo(details); details.tap()

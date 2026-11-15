@@ -16,7 +16,18 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
     }
 }
 
+private struct MissingCandidate: Error {}
+
 @MainActor final class MatchingReviewQueueTests: XCTestCase {
+    /// LibraryFixture deletes its database directory on deinit. Tests discarded it
+    /// (`let (_, repo, id)`), so the SQLite file was unlinked while the repository was
+    /// still in use ("vnode unlinked while in use" / "disk I/O error"). Keep every
+    /// fixture alive until the test, including awaited background work, has finished.
+    private var fixtures: [LibraryFixture] = []
+    override func tearDown() async throws {
+        fixtures.removeAll()
+        try await super.tearDown()
+    }
     private func playlist(_ count: Int) -> PlaylistMigrationSourcePlaylist {
         .init(source: .exportify, name: "Queue", entries: (0..<count).map {
             .init(position: $0, title: "Track \($0)", primaryArtist: "Artist", album: "Album", durationMs: 180_000)
@@ -24,12 +35,27 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
     }
     private func prepared(_ count: Int, only: Int? = nil) async throws -> (LibraryFixture, GRDBPlaylistMigrationRepository, UUID) {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
+        fixtures.append(f)
         let session = try await repo.createPlaylist(from: playlist(count), operationID: "queue-\(count)")
         let entries = try await repo.entries(migrationID: session.id)
         let subset = only.map { Set(entries.prefix($0).map(\.id)) }
         try await PlaylistMigrationMatchingService(repository: repo, providers: [FiveCandidates()], restriction: .noWait)
             .run(migrationID: session.id, only: subset) { _ in }
+        // Deterministic discovery: every searched song has exactly five saved candidates.
+        for entry in entries.filter({ subset?.contains($0.id) ?? true }) {
+            let saved = try await repo.candidates(entryID: entry.id)
+            XCTAssertEqual(saved.count, 5, "Song \(entry.position) persisted all discovered candidates")
+            XCTAssertEqual(Set(saved.map(\.id)).count, 5, "Candidate IDs are distinct")
+        }
         return (f, repo, session.id)
+    }
+    /// Bounds-checked candidate access, so a failed precondition reports instead of crashing.
+    private func candidate(_ queue: MigrationReviewQueueModel, _ index: Int, file: StaticString = #filePath, line: UInt = #line) throws -> PlaylistMigrationCandidate {
+        guard queue.pendingCandidates.indices.contains(index) else {
+            XCTFail("Expected candidate \(index), found \(queue.pendingCandidates.count)", file: file, line: line)
+            throw MissingCandidate()
+        }
+        return queue.pendingCandidates[index]
     }
     private func accepted(_ repo: GRDBPlaylistMigrationRepository, _ entry: UUID) async throws -> [UUID] {
         try await repo.candidates(entryID: entry).filter { $0.decision == .accepted }.map(\.id)
@@ -43,7 +69,7 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
         var expected: [UUID: UUID] = [:]
         for pick in [0, 2, 4] { // first, middle, last
             let item = try XCTUnwrap(queue.current)
-            let chosen = queue.pendingCandidates[pick]
+            let chosen = try candidate(queue, pick)
             expected[item.id] = chosen.id
             await queue.select(chosen)
             XCTAssertNil(queue.error)
@@ -60,7 +86,7 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
         let queue = MigrationReviewQueueModel(repository: repo, migrationID: id)
         await queue.load()
         let entry = try XCTUnwrap(queue.current).id
-        let first = queue.pendingCandidates[0], second = queue.pendingCandidates[3]
+        let first = try candidate(queue, 0), second = try candidate(queue, 3)
         async let a: Void = queue.select(first)
         async let b: Void = queue.select(second)
         _ = await (a, b)
@@ -73,7 +99,7 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
         let (_, repo, id) = try await prepared(2)
         let queue = MigrationReviewQueueModel(repository: repo, migrationID: id)
         await queue.load()
-        let item = try XCTUnwrap(queue.current), chosen = queue.pendingCandidates[1]
+        let item = try XCTUnwrap(queue.current), chosen = try candidate(queue, 1)
         try await repo.updateEntryStatus(entryID: item.id, to: .skipped) // Changed elsewhere meanwhile.
         await queue.select(chosen)
         XCTAssertEqual(queue.position, 1, "Stays on the same song"); XCTAssertNotNil(queue.error); XCTAssertFalse(queue.saving)
@@ -90,7 +116,7 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
         await queue.load()
         XCTAssertEqual(queue.items.map(\.entry.position), [0, 1, 2])
         for pick in [4, 0] {
-            let entry = try XCTUnwrap(queue.current).id, chosen = queue.pendingCandidates[pick]
+            let entry = try XCTUnwrap(queue.current).id, chosen = try candidate(queue, pick)
             await queue.select(chosen)
             XCTAssertNil(queue.error, "Selection works while matching updates other songs")
             let ids = try await accepted(repo, entry)
@@ -120,7 +146,8 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
         XCTAssertEqual(queue.position, 1, "The view dismisses the keyboard before advancing")
         await queue.advanceAfterResolve()
         XCTAssertEqual(queue.position, 2); XCTAssertEqual(opened, 0)
-        let ids = try await accepted(repo, queue.items[0].id)
+        let first = try XCTUnwrap(queue.items.first)
+        let ids = try await accepted(repo, first.id)
         XCTAssertEqual(ids.count, 1)
     }
 }

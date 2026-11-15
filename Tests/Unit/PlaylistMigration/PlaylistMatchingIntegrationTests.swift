@@ -155,8 +155,18 @@ final class PlaylistMatchingIntegrationTests: XCTestCase {
         do { try await task.value; XCTFail("Expected cancellation") } catch { XCTAssertTrue(error is CancellationError) }
         let entries = try await repo.entries(migrationID: session.id)
         let state = try await repo.session(id: session.id)
-        XCTAssertEqual(entries[0].status, .ready); XCTAssertEqual(entries[1].status, .needsReview)
+        // The committed local match survives; the interrupted in-flight song had no saved
+        // candidates, so it returns to pending (not needsReview) and stays resumable.
+        XCTAssertEqual(entries[0].status, .ready); XCTAssertNotNil(entries[0].localTrackID)
+        XCTAssertEqual(entries[1].status, .pending); XCTAssertNil(entries[1].localTrackID)
+        let saved = try await repo.candidates(entryID: entries[1].id)
+        XCTAssertTrue(saved.isEmpty)
         XCTAssertEqual(state?.status, .paused)
+        let owner = try await repo.beginMatching(migrationID: session.id)
+        let resumed = try await repo.claimMatchingEntry(entries[1], session: owner, retryFailed: false)
+        XCTAssertNotNil(resumed, "An ordinary resume searches the unfinished song again")
+        let committed = try await repo.claimMatchingEntry(entries[0], session: owner, retryFailed: false)
+        XCTAssertNil(committed, "The committed local match is not searched again")
     }
     func testCandidateRejectionAndNewLibraryCompetitorInvalidateAttempt() async throws {
         let fixture = try localFixture(), repo = fixture.storage.playlistMigrations

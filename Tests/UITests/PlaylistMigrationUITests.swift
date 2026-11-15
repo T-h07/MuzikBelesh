@@ -26,7 +26,7 @@ final class PlaylistMigrationUITests: XCTestCase {
     }
     func testFiveHundredPlaceholdersRemainVisibleAcrossRelaunch() {
         open("Imported placeholders")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 songs • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 imported • 0 manually added • 500 total • 0 available offline")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
         XCTAssertFalse(app.buttons["playlist-add-songs"].exists); XCTAssertFalse(app.buttons["playlist-reorder"].exists)
         app.swipeUp()
@@ -34,12 +34,12 @@ final class PlaylistMigrationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Original artist"].firstMatch.exists)
         app.terminate(); app.launchArguments = ["--ui-testing", "--migration-fixtures"]; app.launch()
         open("Imported placeholders")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 songs • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 imported • 0 manually added • 500 total • 0 available offline")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
     }
     func testMixedOccurrencesShowSourceCountAndDistinctRows() {
         open("Imported mixed")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 songs • 3 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 imported • 0 manually added • 5 total • 3 available offline")
         XCTAssertTrue(app.buttons["collection-play"].isEnabled)
         app.swipeUp()
         let first = app.staticTexts["Original song 0"], second = app.staticTexts["Original song 1"]

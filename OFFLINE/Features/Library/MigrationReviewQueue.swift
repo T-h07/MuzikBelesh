@@ -203,7 +203,8 @@ struct MigrationReviewQueueView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-song-header")
         // Horizontal swipe on the song header only: navigates, never confirms or rejects,
         // and leaves vertical scrolling and candidate taps untouched.
         .gesture(DragGesture(minimumDistance: 30).onEnded { value in
