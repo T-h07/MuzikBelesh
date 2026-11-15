@@ -52,9 +52,15 @@ protocol ExternalCandidateDiscovery: Sendable {
     /// Providers must honor cancellation and return bounded metadata only.
     func discover(_ source: PlaylistMigrationSourceTrack) async throws -> MatchingDiscoveryResult
     func forRun() -> any ExternalCandidateDiscovery
+    /// Stable label for metrics and candidate evidence.
+    var discoveryName: String { get }
+    /// A disabled source is never called and never counted as searched.
+    var isEnabled: Bool { get }
 }
 extension ExternalCandidateDiscovery {
     func forRun() -> any ExternalCandidateDiscovery { self }
+    var discoveryName: String { "provider" }
+    var isEnabled: Bool { true }
 }
 
 /// Successful responses only, bounded and discarded after each run. Duplicate
@@ -111,8 +117,11 @@ struct MatchingDiscoveryFailurePolicy {
 struct ProviderRestrictionPolicy: Sendable {
     var cooldowns: [Duration]
     var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// With more than one source, a source with three consecutive failures is skipped
+    /// (not waited on) for this long while the others continue.
+    var healthCooldown: Duration = .seconds(60)
     static let standard = ProviderRestrictionPolicy(cooldowns: [.seconds(30), .seconds(120), .seconds(300)])
-    static let noWait = ProviderRestrictionPolicy(cooldowns: [.zero, .zero], sleep: { _ in try Task.checkCancellation() })
+    static let noWait = ProviderRestrictionPolicy(cooldowns: [.zero, .zero], sleep: { _ in try Task.checkCancellation() }, healthCooldown: .zero)
 }
 
 /// One shared monotonic request budget for matching, including retries and watch reads.
@@ -138,12 +147,14 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
     /// Bounded exponential backoff with jitter for transient failures only.
     var maxAttempts = 3
     var retryDelay: @Sendable (Int) -> Duration = { YouTubeSearchProviderAdapter.backoff($0) }
+    var name = "youtube"
+    var discoveryName: String { name }
     static func backoff(_ attempt: Int) -> Duration {
         .milliseconds(500 * (1 << min(attempt, 4)) + Int.random(in: 0...250))
     }
     func forRun() -> any ExternalCandidateDiscovery {
         let cache = MatchingYouTubeResponseCache(search: search, metadata: metadata)
-        return Self(search: cache, metadata: metadata == nil ? nil : cache, pacer: pacer, maxAttempts: maxAttempts, retryDelay: retryDelay)
+        return Self(search: cache, metadata: metadata == nil ? nil : cache, pacer: pacer, maxAttempts: maxAttempts, retryDelay: retryDelay, name: name)
     }
     static func browserSearchURL(_ source: PlaylistMigrationSourceTrack) -> URL? {
         guard let query = queries(source).first else { return nil }
@@ -203,7 +214,8 @@ struct YouTubeSearchProviderAdapter: ExternalCandidateDiscovery {
                                                   durationMs: duration, performerEstablished: hasCredit,
                                                   available: video.availability == .available,
                                                   fullTitle: video.title, channel: video.channel,
-                                                  thumbnailURL: MatchingCandidateArtwork.safe(video.thumbnailURL))
+                                                  thumbnailURL: MatchingCandidateArtwork.safe(video.thumbnailURL),
+                                                  discoverySource: video.discoverySource ?? name)
                     // Obviously unrelated titles have no review value.
                     let sourceWords = Set(SongMetadataNormalizer.cleanTitle(source.title).split(separator: " "))
                     let candidateWords = Set(SongMetadataNormalizer.cleanTitle(title).split(separator: " "))

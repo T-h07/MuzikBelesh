@@ -411,6 +411,7 @@ extension GRDBPlaylistMigrationRepository {
                 evidence["currentAttempt"] = "true"
                 evidence["acceptance"] = index == 0 && verifiedTrack != nil ? "Automatic verified local association" : "Pending review"
                 if let channel = item.channel { evidence["channel"] = channel }
+                if let source = item.discoverySource, item.provider == "youtube" { evidence["discoveryProvider"] = String(source.prefix(60)) }
                 if let thumbnail = MatchingCandidateArtwork.safe(item.thumbnailURL) { evidence["thumbnailURL"] = thumbnail.absoluteString }
                 let candidate = PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: lease.entry.id, provider: item.provider,
                     providerTrackID: item.identity, title: item.fullTitle ?? item.title, artist: item.artist, durationMs: item.durationMs,

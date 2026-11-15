@@ -23,6 +23,8 @@ final class AppContainer: ObservableObject {
     let youtubePreparer: any YouTubeDownloadPreparing
     let youtubeLibrary: any YouTubeLibraryChecking
     let youtubeManualLookup: YouTubeManualLookup
+    let discoverySources: DiscoverySourceSettings
+    let searxTransport = SearXNGURLSessionTransport()
     let youtubePreferences: YouTubePreferences
     let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
@@ -37,6 +39,7 @@ final class AppContainer: ObservableObject {
         self.youtubeSearch = YouTubeSearchService(provider: youtubeSearchProvider ?? web)
         self.youtubeMetadata = metadata
         self.youtubeManualLookup = YouTubeManualLookup(metadata: metadata, transport: transport)
+        self.discoverySources = DiscoverySourceSettings(defaults: youtubeDefaults)
         self.youtubeResolver = resolver
         self.youtubePreparer = YouTubeDownloadPreparer(resolver: resolver)
         self.youtubeLibrary = YouTubeLibraryLookup(database: self.storage?.database.dbQueue, paths: self.storage?.paths)
@@ -48,7 +51,11 @@ final class AppContainer: ObservableObject {
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
         if let storage = self.storage {
             self.playlistMatching = PlaylistMatchingViewModel(service: PlaylistMigrationMatchingService(
-                repository: storage.playlistMigrations, providers: [YouTubeSearchProviderAdapter(search: self.youtubeSearch, metadata: self.youtubeMetadata)]), repository: storage.playlistMigrations)
+                repository: storage.playlistMigrations, providers: [
+                    ConfiguredSearXNGDiscovery(settings: discoverySources, transport: searxTransport),
+                    GatedDiscovery(base: YouTubeSearchProviderAdapter(search: self.youtubeSearch, metadata: self.youtubeMetadata),
+                                   enabled: { [discoverySources] in discoverySources.directYouTubeEnabled })
+                ]), repository: storage.playlistMigrations)
         } else { self.playlistMatching = nil }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }

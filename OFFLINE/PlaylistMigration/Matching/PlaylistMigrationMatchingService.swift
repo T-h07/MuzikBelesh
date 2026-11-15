@@ -23,10 +23,37 @@ struct SongMatchingProgress: Sendable {
     var externalDeferred = 0
     /// Actual search requests that failed (song-specific or restricted).
     var discoveryFailedRequests = 0
+    /// Live per-source metrics for this attempt (not persisted).
+    var providerStats: [String: DiscoveryProviderStats] = [:]
     var resolved: Int { alreadyLocal + localMatches + selected }
     var unresolved: Int { max(0, total - resolved - recommended - review) }
     var discoveryPaused = false
     var message: String? = nil
+}
+
+struct DiscoveryProviderStats: Sendable, Equatable {
+    var attempts = 0, succeeded = 0, failed = 0, cooldownSkips = 0
+    var totalSeconds = 0.0
+    var averageSeconds: Double { attempts == 0 ? 0 : totalSeconds / Double(attempts) }
+}
+
+extension SongMatchingProgress {
+    mutating func record(_ provider: String, seconds duration: Duration, failed: Bool) {
+        var stats = providerStats[provider, default: .init()]
+        stats.attempts += 1
+        if failed { stats.failed += 1 } else { stats.succeeded += 1 }
+        stats.totalSeconds += Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+        providerStats[provider] = stats
+    }
+    mutating func recordSkip(_ provider: String) { providerStats[provider, default: .init()].cooldownSkips += 1 }
+}
+
+private struct ProviderHealth {
+    var probes = 0
+    var suspended = false
+    var reason = ""
+    var retryAt: ContinuousClock.Instant?
+    var failStreak = 0
 }
 
 /// One app-owned worker, one in-flight provider call, incremental atomic commits.
@@ -79,9 +106,11 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
             var report = SongMatchingProgress(total: entries.count)
             report.candidates = try await repository.matchingSummary(migrationID: migrationID).candidates
             report.deferred = entries.filter { [.pending, .matching].contains($0.status) }.count
-            let runProviders = providers.map { $0.forRun() }
-            // Per-provider restriction state. Individual failures never touch it.
-            var restrictions = Array(repeating: (probes: 0, suspended: false, reason: ""), count: runProviders.count)
+            // Enabled sources only, in preference order (e.g. SearXNG, then direct YouTube).
+            let runProviders = providers.map { $0.forRun() }.filter(\.isEnabled)
+            // Independent health per source: restriction cooldowns/probes and failure streaks.
+            var restrictions = Array(repeating: ProviderHealth(), count: runProviders.count)
+            let clock = ContinuousClock()
             await progress(report)
             for entry in entries {
                 try Task.checkCancellation()
@@ -117,20 +146,29 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                     } else {
                         var truncated = local.truncated
                         var seen = Set(scores.map { $0.recording.provider + ":" + $0.recording.identity })
-                        var attempted = false
-                        for (number, provider) in runProviders.enumerated() {
-                            try Task.checkCancellation()
-                            if restrictions[number].suspended { continue }
-                            if restrictions[number].probes > 0 {
-                                // Respect the restriction: wait, then make one fresh search for THIS occurrence.
-                                report.message = "YouTube requested verification or limited requests. Waiting before the next independent search."
-                                await progress(report)
-                                try await restriction.sleep(restriction.cooldowns[min(restrictions[number].probes, restriction.cooldowns.count) - 1])
+                        var attempted = false, foundCandidates = false, failedAny = false
+                        var attemptedProviders = Set<Int>(), skipped = Set<Int>()
+                        func escalate(_ number: Int, _ reason: String) {
+                            restrictions[number].probes += 1; restrictions[number].reason = reason; restrictions[number].failStreak = 0
+                            if restrictions[number].probes > restriction.cooldowns.count { restrictions[number].suspended = true }
+                            else { restrictions[number].retryAt = clock.now.advanced(by: restriction.cooldowns[restrictions[number].probes - 1]) }
+                        }
+                        func songFailure(_ number: Int) {
+                            restrictions[number].failStreak += 1
+                            // Health cooldown only when another source can continue; a sole
+                            // provider keeps searching every song independently.
+                            if runProviders.count > 1 && restrictions[number].failStreak >= 3 {
+                                restrictions[number].failStreak = 0
+                                restrictions[number].retryAt = clock.now.advanced(by: restriction.healthCooldown)
                             }
-                            attempted = true
+                        }
+                        func attempt(_ number: Int) async throws {
+                            let name = runProviders[number].discoveryName, started = clock.now
+                            attempted = true; attemptedProviders.insert(number)
                             do {
-                                let found = try await provider.discover(entry.source)
+                                let found = try await runProviders[number].discover(entry.source)
                                 try Task.checkCancellation()
+                                report.record(name, seconds: started.duration(to: clock.now), failed: found.searchFailed)
                                 let providerWide = found.pauseDiscovery && MatchingDiscoveryFailurePolicy.immediate(found.failure)
                                 if found.searchFailed { report.discoveryFailedRequests += 1 } else { report.externalSucceeded += 1 }
                                 truncated = truncated || found.truncated
@@ -139,47 +177,65 @@ actor PlaylistMigrationMatchingService: PlaylistMigrationMatching {
                                     guard !rejected.contains(identity), seen.insert(identity).inserted else { continue }
                                     scores.append(scoring.score(source: entry.source, candidate: recording))
                                 }
-                                if !found.failures.isEmpty {
-                                    discoveryFailed = true
-                                    let reason = found.failure == .accessRestricted && found.pauseDiscovery
-                                        ? "YouTube search requires access or verification."
-                                        : found.failure?.localizedDescription ?? "YouTube discovery is unavailable."
-                                    issue = reason + " Discovery incomplete; saved candidates are preserved. Retry later."
-                                    report.message = issue
-                                    if let failure = found.failure {
-                                        MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: "youtube")
-                                    }
+                                if found.failures.isEmpty {
+                                    restrictions[number] = ProviderHealth()
+                                    if !found.recordings.isEmpty { foundCandidates = true }
+                                    return
                                 }
-                                if providerWide {
-                                    restrictions[number].probes += 1; restrictions[number].reason = issue ?? ""
-                                    if restrictions[number].probes > restriction.cooldowns.count {
-                                        restrictions[number].suspended = true; report.discoveryPaused = true
-                                    }
-                                } else if !found.searchFailed { restrictions[number] = (0, false, "") }
+                                failedAny = true
+                                let reason = found.failure == .accessRestricted && found.pauseDiscovery
+                                    ? "YouTube search requires access or verification."
+                                    : found.failure?.localizedDescription ?? "Discovery is unavailable."
+                                issue = (runProviders.count > 1 ? name + ": " : "") + reason + " Discovery incomplete; saved candidates are preserved. Retry later."
+                                report.message = issue
+                                if let failure = found.failure {
+                                    MatchingDiagnostics.record(failure, session: migrationID, entry: entry.id, stage: "discovery", provider: name)
+                                }
+                                if providerWide { escalate(number, reason) } else if found.searchFailed { songFailure(number) }
                             } catch {
                                 if Task.isCancelled || error is CancellationError { throw CancellationError() }
-                                MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: "provider-" + String(number))
-                                discoveryFailed = true
+                                MatchingDiagnostics.record(error, session: migrationID, entry: entry.id, stage: "discovery", provider: name)
+                                report.record(name, seconds: started.duration(to: clock.now), failed: true)
+                                failedAny = true
                                 report.discoveryFailedRequests += 1
-                                let tripped = MatchingDiscoveryFailurePolicy.immediate(error as? YouTubeError)
                                 let reason = (error as? YouTubeError) == .accessRestricted
                                     ? "YouTube search requires access or verification."
-                                    : (error as? YouTubeError)?.localizedDescription ?? "YouTube discovery is unavailable."
-                                issue = reason + " Discovery incomplete; saved candidates are preserved. Retry later."
+                                    : (error as? YouTubeError)?.localizedDescription ?? "Discovery is unavailable."
+                                issue = (runProviders.count > 1 ? name + ": " : "") + reason + " Discovery incomplete; saved candidates are preserved. Retry later."
                                 report.message = issue
-                                if tripped {
-                                    restrictions[number].probes += 1; restrictions[number].reason = reason
-                                    if restrictions[number].probes > restriction.cooldowns.count {
-                                        restrictions[number].suspended = true; report.discoveryPaused = true
-                                    }
-                                }
+                                if MatchingDiscoveryFailurePolicy.immediate(error as? YouTubeError) { escalate(number, reason) } else { songFailure(number) }
                             }
                         }
+                        // Pass 1: sources in preference order. A cooling source is skipped,
+                        // never waited on, while another source can serve this occurrence.
+                        for number in runProviders.indices {
+                            try Task.checkCancellation()
+                            if restrictions[number].suspended { continue }
+                            if let until = restrictions[number].retryAt, clock.now < until {
+                                skipped.insert(number); report.recordSkip(runProviders[number].discoveryName); continue
+                            }
+                            try await attempt(number)
+                            if foundCandidates { break }
+                        }
+                        // Pass 2: every usable source is cooling down. Respect the restriction:
+                        // wait for the earliest one, then make one fresh search for THIS occurrence.
+                        if !attempted, let number = skipped.min(by: { (restrictions[$0].retryAt ?? clock.now) < (restrictions[$1].retryAt ?? clock.now) }) {
+                            report.message = "Discovery sources requested verification or limited requests. Waiting before the next independent search."
+                            await progress(report)
+                            try await restriction.sleep(max(.zero, clock.now.duration(to: restrictions[number].retryAt ?? clock.now)))
+                            try await attempt(number)
+                        }
+                        report.discoveryPaused = !providers.isEmpty && runProviders.indices.allSatisfy { restrictions[$0].suspended }
                         if attempted { report.externalAttempted += 1 }
-                        if !runProviders.isEmpty && !attempted {
+                        if foundCandidates {
+                            issue = nil // An earlier source failed, but a later one completed discovery.
+                        } else if !providers.isEmpty && !attempted {
                             deferred = true; discoveryFailed = true
-                            issue = "External discovery deferred. " + (restrictions.first { $0.suspended }?.reason ?? "Discovery is unavailable.")
+                            issue = "External discovery deferred. " + (restrictions.first { $0.suspended }?.reason ?? "No discovery source is enabled.")
                                 + " Local matching completed; retry unfinished discovery later."
+                        } else if failedAny || !skipped.subtracting(attemptedProviders).isEmpty {
+                            discoveryFailed = true
+                            if issue == nil { issue = "A fallback discovery source was cooling down and was skipped. Retry later." }
                         }
                         decision = policy.decide(scores, truncated: truncated)
                         if discoveryFailed && !decision.ranked.isEmpty {

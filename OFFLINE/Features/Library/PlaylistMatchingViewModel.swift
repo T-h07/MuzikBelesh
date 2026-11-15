@@ -146,7 +146,12 @@ struct PlaylistMatchingControls: View {
             Text("Recommended external: \(progress.recommended) • Review: \(progress.review)")
             Text("Genuine no match: \(progress.noMatch) • Entry errors: \(progress.failed)")
             Text("Spotify entries: \(progress.total) • Entries visited: \(progress.processed)")
-            Text("YouTube searches attempted: \(progress.externalAttempted) • Successful: \(progress.externalSucceeded) • Failed: \(progress.discoveryFailedRequests)")
+            Text("Songs searched: \(progress.externalAttempted) • Successful searches: \(progress.externalSucceeded) • Failed: \(progress.discoveryFailedRequests)")
+            ForEach(progress.providerStats.keys.sorted(), id: \.self) { name in
+                let stats = progress.providerStats[name] ?? .init()
+                Text("\(name): \(stats.attempts) searches • \(stats.succeeded) ok • \(stats.failed) failed • \(stats.cooldownSkips) skipped (cooling down) • avg \(String(format: "%.2f", stats.averageSeconds)) s")
+                    .foregroundStyle(AppColors.textSecondary)
+            }
             Text("External discovery deferred: \(progress.externalDeferred) • Awaiting discovery: \(progress.deferred)")
             Text("Resolved \(progress.resolved)/\(progress.total) — \(progress.recommended + progress.review) Need Review — \(progress.unresolved) Unresolved").bold()
             Text("Selected YouTube videos: \(progress.selected) (not downloaded) • Offline ready: \(progress.alreadyLocal + progress.localMatches)")
@@ -233,7 +238,7 @@ struct MigrationCandidateInspection: View {
                         Text("Confidence: \(Int((confidence * 100).rounded())) / 100 • \(candidate.evidence["confidenceClassification"] ?? "Unknown")")
                     } else { Text(candidate.evidence["confidenceClassification"] ?? "Confidence not scored") }
                     if candidate.evidence["currentAttempt"] == "false" { Text("Earlier proposal — retained for review history") }
-                    ForEach(["selectionExplanation", "primaryArtistAgreement", "featuredArtistAgreement", "durationDifferenceMs", "sourceVersion", "candidateVersion", "versionCompatibility", "hardGateFailures", "acceptance", "matchingAlgorithmVersion"], id: \.self) { key in
+                    ForEach(["discoveryProvider", "selectionExplanation", "primaryArtistAgreement", "featuredArtistAgreement", "durationDifferenceMs", "sourceVersion", "candidateVersion", "versionCompatibility", "hardGateFailures", "acceptance", "matchingAlgorithmVersion"], id: \.self) { key in
                         if let value = candidate.evidence[key], !value.isEmpty { Text("\(label(key)): \(value)") }
                     }
                     if candidate.decision == .pending { Text("Pending review.") }
@@ -286,6 +291,7 @@ struct MigrationCandidateInspection: View {
         case "versionCompatibility": return "Version check"
         case "hardGateFailures": return "Automatic selection blocked"
         case "acceptance": return "Acceptance"
+        case "discoveryProvider": return "Found by"
         default: return "Algorithm"
         }
     }

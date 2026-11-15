@@ -10,6 +10,8 @@ struct YouTubeVideo: Identifiable, Hashable, Sendable {
     var duration: TimeInterval?
     var availability: Availability = .unknown
     var isShort: Bool = false
+    /// Which discovery source returned this video (e.g. "searxng:bing videos"); nil for direct YouTube.
+    var discoverySource: String? = nil
     var canonicalURL: URL? { URL(string: "https://www.youtube.com/watch?v=\(id)") }
     var durationLabel: String {
         guard let duration, duration.isFinite, duration >= 0, duration < 10_000_000 else { return availability == .live ? "Live" : "Duration unavailable" }

@@ -113,6 +113,7 @@ struct SongRecording: Sendable, Equatable {
     var fullTitle: String? = nil
     var channel: String? = nil
     var thumbnailURL: URL? = nil
+    var discoverySource: String? = nil
 }
 
 struct SongMatchScore: Sendable {
