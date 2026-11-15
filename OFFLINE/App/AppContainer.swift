@@ -17,6 +17,8 @@ final class AppContainer: ObservableObject {
     let library: MusicLibraryService
     let playlistImport: PlaylistImportViewModel?
     let playlistMatching: PlaylistMatchingViewModel?
+    /// Phase 10.5 automatic acquisition. Nil when storage is unavailable or disabled.
+    let playlistAcquisition: PlaylistAcquisitionCoordinator?
     let youtubeSearch: YouTubeSearchService
     let youtubeMetadata: any YouTubeMetadataProvider
     let youtubeResolver: any YouTubeAudioResolver
@@ -30,7 +32,7 @@ final class AppContainer: ObservableObject {
     let youtubePreferences: YouTubePreferences
     let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
-    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil) {
+    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil) {
         self.resources = resourceMonitor ?? ResourceMonitor()
         self.configuration = configuration
         if let storage { self.storage = storage } else { self.storage = try? StorageCoordinator(paths: AppStoragePaths()) }
@@ -47,7 +49,8 @@ final class AppContainer: ObservableObject {
         self.youtubePreparer = YouTubeDownloadPreparer(resolver: resolver)
         self.youtubeLibrary = YouTubeLibraryLookup(database: self.storage?.database.dbQueue, paths: self.storage?.paths)
         self.youtubePreferences = YouTubePreferences(defaults: youtubeDefaults)
-        self.downloads = DownloadManager(storage: self.storage, preferences: self.youtubePreferences, preparer: self.youtubePreparer, transfer: audioTransfer, artwork: youtubeArtwork, observeNetwork: observeDownloadNetwork, system: backgroundTransfers)
+        // Exactly one DownloadManager owns every job, ordinary and playlist-driven.
+        self.downloads = DownloadManager(storage: self.storage, preferences: self.youtubePreferences, preparer: self.youtubePreparer, transfer: audioTransfer, artwork: youtubeArtwork, observeNetwork: observeDownloadNetwork, system: backgroundTransfers, execution: backgroundExecution)
         self.youtubeProbe = youtubeProbe ?? YouTubeKitProbe(resolver: resolver)
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
@@ -66,6 +69,14 @@ final class AppContainer: ObservableObject {
             self.playlistMatching = PlaylistMatchingViewModel(service: PlaylistMigrationMatchingService(
                 repository: storage.playlistMigrations, providers: sources), repository: storage.playlistMigrations)
         } else { self.playlistMatching = nil }
+        // Startup order: storage/database, library snapshot, DownloadManager (which begins
+        // background-transfer reconciliation), then acquisition reconciliation.
+        if automaticAcquisition, let storage = self.storage {
+            let coordinator = PlaylistAcquisitionCoordinator(storage: storage, downloads: downloads, preferences: youtubePreferences,
+                notifier: acquisitionNotifier ?? SilentAcquisitionNotifier(), execution: backgroundExecution)
+            self.playlistAcquisition = coordinator
+            coordinator.start()
+        } else { self.playlistAcquisition = nil }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)

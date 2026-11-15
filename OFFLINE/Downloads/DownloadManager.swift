@@ -39,12 +39,16 @@ extension StoredDownloadState {
     @Published private(set) var resourcePolicy = ResourcePolicy()
     private var foreground = true
     private var storageFailed = false
+    /// Bounded execution granted while iOS has woken the suspended app (Phase 10.5).
+    private let execution: (any BackgroundExecutionGranting)?
+    private var opportunity: Int?
     private var staging: URL? { storage?.paths.applicationSupport.appendingPathComponent("DownloadStaging", isDirectory: true) }
 
     init(storage: StorageCoordinator?, preferences: YouTubePreferences, preparer: any YouTubeDownloadPreparing,
          transfer: any AudioTransferring, artwork: YouTubeArtworkLoader, observeNetwork: Bool = true,
-         system: (any SystemDownloading)? = nil) {
+         system: (any SystemDownloading)? = nil, execution: (any BackgroundExecutionGranting)? = nil) {
         self.system = system
+        self.execution = execution
         if system != nil { foreground = UIApplication.shared.applicationState != .background }
         self.storage = storage
         self.preferences = preferences
@@ -105,6 +109,7 @@ extension StoredDownloadState {
     func setForeground(_ active: Bool) {
         foreground = active
         if active {
+            endOpportunity()
             rates.removeAll(); samples.removeAll()
             reconcileSystem()
             for job in jobs where job.state == .interrupted { update(job.id) { $0.state = .queued; $0.errorMessage = nil } }
@@ -135,6 +140,17 @@ extension StoredDownloadState {
         do { try storage.downloads.save(job); jobs[index] = job; return true }
         catch { failStorage(); return false }
     }
+    /// Playlist acquisition entry point (Phase 10.5). Unlike `enqueue`, an existing job is
+    /// returned unchanged: a completed download is never restarted here. The caller
+    /// validates the completed job's track and requests a repair only when the managed
+    /// audio is genuinely missing or invalid. Main-actor isolation plus the unique
+    /// per-video index make concurrent calls for one recording yield one job.
+    func acquisitionJob(for video: YouTubeVideo, quality: AudioQuality) -> (job: StoredDownloadJob, created: Bool)? {
+        guard !storageFailed, storage != nil, YouTubeURLValidator.isValidID(video.id) else { return nil }
+        if let existing = job(for: video.id) { return (existing, false) }
+        enqueue(video, quality: quality)
+        return job(for: video.id).map { ($0, true) }
+    }
     func enqueue(_ video: YouTubeVideo, quality: AudioQuality) {
         guard !storageFailed, let storage, YouTubeURLValidator.isValidID(video.id) else { return }
         if let existing = job(for: video.id) {
@@ -149,7 +165,7 @@ extension StoredDownloadState {
         do { try storage.downloads.save(job); jobs.append(job); schedule() } catch { failStorage() }
     }
     private func schedule() {
-        guard !storageFailed, foreground, !reconciling, !resourcePolicy.defersNewWork else { return }
+        guard !storageFailed, foreground || opportunity != nil, !reconciling, !resourcePolicy.defersNewWork else { return }
         let waiting = preferences.wifiOnly && !wifi
         for job in jobs where job.state.pending {
             let staged = UUID(uuidString: job.id) != nil && staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(job.id + ".m4a").path) } == true
@@ -162,7 +178,7 @@ extension StoredDownloadState {
         }
     }
     private func run(_ job: StoredDownloadJob) async {
-        defer { workers[job.id] = nil; rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; schedule() }
+        defer { workers[job.id] = nil; rates[job.id] = nil; attempts[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; schedule(); endOpportunityIfIdle() }
         guard let storage, let staging, let videoID = job.sourceIdentifier, UUID(uuidString: job.id) != nil else { return }
         let file = staging.appendingPathComponent(job.id + ".m4a")
         do {
@@ -376,7 +392,33 @@ extension DownloadManager {
             }
         } else { finishStaging(job) }
         rates[job.id] = nil; samples[job.id] = nil; checkpoints[job.id] = nil; attempts[job.id] = nil
+        // iOS woke the app for this event: verify staged audio and fill freed slots now
+        // instead of waiting for the next foreground launch.
+        if !foreground { beginOpportunity() } else { schedule() }
+    }
+    /// Lets the caller fill free slots while iOS is already executing the suspended app
+    /// (for example after a playlist decision was committed in the background).
+    func continueInBackgroundIfPossible() {
+        if foreground { schedule() } else { beginOpportunity() }
+    }
+    private func beginOpportunity() {
+        if opportunity == nil, let execution {
+            opportunity = execution.begin("Muzik Belesh downloads") { [weak self] in
+                // Expiry stops new work only. Running app workers resume with the app.
+                self?.opportunity = nil
+            }
+        }
         schedule()
+        endOpportunityIfIdle()
+    }
+    private func endOpportunityIfIdle() {
+        guard !foreground, workers.isEmpty else { return }
+        endOpportunity()
+    }
+    private func endOpportunity() {
+        guard let token = opportunity else { return }
+        opportunity = nil
+        execution?.end(token)
     }
     private func finishStaging(_ job: StoredDownloadJob) {
         guard let incoming = incoming(job), let staging, UUID(uuidString: job.id) != nil else { return }

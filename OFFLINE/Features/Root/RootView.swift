@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 enum LibrarySearchField: Hashable { case search, library }
@@ -39,7 +40,7 @@ private struct RootTabsView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .inactive { container.playlistMatching?.setForeground(phase == .active) }
             if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
-            if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
+            if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile() }
             else { searchFocus = nil }
         }
         .preferredColorScheme(.dark)
@@ -63,6 +64,13 @@ private struct RootTabsView: View {
             catch SharedLinkInbox.Failure.unavailable { } // Manual import remains usable without a group.
             catch { shareReadFailed = true }
         }
+        .onReceive(container.playlistAcquisition.map { $0.$requestedPlaylistID.eraseToAnyPublisher() } ?? Empty<String?, Never>().eraseToAnyPublisher()) { id in
+            // A playlist-ready notification was opened.
+            guard let id, library.snapshot.playlists.contains(where: { $0.id == id }) else { return }
+            container.playlistAcquisition?.requestedPlaylistID = nil
+            coordinator.selectedTab = .library
+            coordinator.sheet = .playlist(id)
+        }
         .alert("Could not read the shared link inbox", isPresented: $shareReadFailed) {
             Button("Retry") { shareRevision += 1 }
             Button("Close", role: .cancel) { }
@@ -72,6 +80,7 @@ private struct RootTabsView: View {
             case .settings: SettingsView()
             case .importLink: ImportLinkView()
             case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)])
+            case .playlist(let id): NotificationPlaylistSheet(playlistID: id)
             case .sharedLink(let share):
                 ImportLinkView(initialURL: share.url).onAppear {
                     Task {
