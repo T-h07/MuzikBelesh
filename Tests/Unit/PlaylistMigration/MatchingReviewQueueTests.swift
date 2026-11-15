@@ -19,15 +19,6 @@ private actor FiveCandidates: ExternalCandidateDiscovery {
 private struct MissingCandidate: Error {}
 
 @MainActor final class MatchingReviewQueueTests: XCTestCase {
-    /// LibraryFixture deletes its database directory on deinit. Tests discarded it
-    /// (`let (_, repo, id)`), so the SQLite file was unlinked while the repository was
-    /// still in use ("vnode unlinked while in use" / "disk I/O error"). Keep every
-    /// fixture alive until the test, including awaited background work, has finished.
-    private var fixtures: [LibraryFixture] = []
-    override func tearDown() async throws {
-        fixtures.removeAll()
-        try await super.tearDown()
-    }
     private func playlist(_ count: Int) -> PlaylistMigrationSourcePlaylist {
         .init(source: .exportify, name: "Queue", entries: (0..<count).map {
             .init(position: $0, title: "Track \($0)", primaryArtist: "Artist", album: "Album", durationMs: 180_000)
@@ -35,7 +26,8 @@ private struct MissingCandidate: Error {}
     }
     private func prepared(_ count: Int, only: Int? = nil) async throws -> (LibraryFixture, GRDBPlaylistMigrationRepository, UUID) {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
-        fixtures.append(f)
+        // Tests destructure `(_, repo, id)`; without this the database was deleted mid-test.
+        retainUntilTeardown(f)
         let session = try await repo.createPlaylist(from: playlist(count), operationID: "queue-\(count)")
         let entries = try await repo.entries(migrationID: session.id)
         let subset = only.map { Set(entries.prefix($0).map(\.id)) }
@@ -112,6 +104,7 @@ private struct MissingCandidate: Error {}
         let slow = FiveCandidates(delay: .milliseconds(80))
         let worker = PlaylistMigrationMatchingService(repository: repo, providers: [slow], restriction: .noWait)
         let background = Task { try await worker.run(migrationID: id, retryFailed: false) { _ in } }
+        cancelAndAwaitAtTeardown(background) // A failed assertion below must not orphan it.
         let queue = MigrationReviewQueueModel(repository: repo, migrationID: id)
         await queue.load()
         XCTAssertEqual(queue.items.map(\.entry.position), [0, 1, 2])

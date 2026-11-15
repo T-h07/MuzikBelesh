@@ -76,10 +76,12 @@ final class YouTubeDiscoveryReliabilityTests: XCTestCase {
         try await pacer.wait()
         XCTAssertGreaterThanOrEqual(start.duration(to: clock.now), .milliseconds(20))
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
+        retainUntilTeardown(f)
         let session = try await repo.createPlaylist(from: MatchingCorrectionTests.source(3), operationID: "paced-resume")
         let slow = PacedDiscovery(interval: .seconds(30))
         let worker = PlaylistMigrationMatchingService(repository: repo, providers: [slow])
         let task = Task { try await worker.run(migrationID: session.id) { _ in } }
+        cancelAndAwaitAtTeardown(task)
         for _ in 0..<200 { let calls = await slow.calls; if calls.count == 2 { break }; try await Task.sleep(for: .milliseconds(10)) }
         let calls = await slow.calls; XCTAssertEqual(calls, [0, 1])
         task.cancel()

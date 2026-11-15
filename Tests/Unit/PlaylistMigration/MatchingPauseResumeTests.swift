@@ -207,10 +207,12 @@ private actor ScriptedDiscovery: ExternalCandidateDiscovery {
 
     func testStaleWorkerCannotOverwriteNewerResults() async throws {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
+        retainUntilTeardown(f)
         let session = try await repo.createPlaylist(from: playlist(5), operationID: "stale")
         let slow = ScriptedDiscovery(blockAt: 2, holdSeconds: 0.5), fast = ScriptedDiscovery(empty: [2])
         let old = PlaylistMigrationMatchingService(repository: repo, providers: [slow], restriction: .noWait)
         let task = Task { try await old.run(migrationID: session.id) { _ in } }
+        cancelAndAwaitAtTeardown(task)
         for _ in 0..<300 { if await slow.count() == 3 { break }; try await Task.sleep(for: .milliseconds(5)) }
         try await PlaylistMigrationMatchingService(repository: repo, providers: [fast], restriction: .noWait).run(migrationID: session.id) { _ in }
         _ = try? await task.value

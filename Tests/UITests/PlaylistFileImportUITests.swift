@@ -4,10 +4,7 @@ final class PlaylistFileImportUITests: XCTestCase {
     private var app: XCUIApplication!
     override func setUpWithError() throws { continueAfterFailure = false }
     override func tearDownWithError() throws {
-        if let app, (testRun?.failureCount ?? 0) > 0 {
-            let evidence = XCTAttachment(screenshot: app.screenshot()); evidence.lifetime = .keepAlways; add(evidence)
-            let tree = XCTAttachment(string: app.debugDescription); tree.lifetime = .keepAlways; add(tree)
-        }
+        attachFailureEvidence(app)
         app?.terminate()
     }
     /// The Files picker's dismiss control. It is presented asynchronously by a remote
@@ -25,16 +22,11 @@ final class PlaylistFileImportUITests: XCTestCase {
         } while Date() < deadline
         return nil
     }
-    /// A List-row Toggle's accessibility frame (and, on iOS 26, its nested switch's frame)
-    /// spans the whole row, so tapping the element's centre hits the label and does not
-    /// flip the switch (CI run 43735713704). The switch is trailing-aligned: tap 30 pt in
-    /// from the row's trailing edge, inside the control, and wait for the value to change.
-    private func toggle(_ row: XCUIElement) {
-        let before = row.value as? String ?? ""
-        let width = max(row.frame.width, 1)
-        row.coordinate(withNormalizedOffset: CGVector(dx: max(0.5, (width - 30) / width), dy: 0.5)).tap()
-        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before), object: row)
-        XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: 3), .completed, "Toggle \(row.identifier) did not change from \(before)")
+    /// The model's selection, as published in the Confirm Import section.
+    private func assertSelected(_ count: Int, file: StaticString = #filePath, line: UInt = #line) {
+        let summary = app.staticTexts["playlist-import-selection-summary"]
+        scrollTo(summary, file: file, line: line)
+        waitUntil(summary, "label BEGINSWITH %@", "\(count) selected •", timeout: 3, file: file, line: line)
     }
     private func launch(fixture: Bool, extra: [String] = []) {
         app = XCUIApplication()
@@ -54,8 +46,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let cancel = try XCTUnwrap(pickerDismissButton(timeout: 15), "Files picker was not presented")
         cancel.tap()
         XCTAssertTrue(choose.waitForExistence(timeout: 5))
-        let back = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: choose)
-        XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 5), .completed, "Picker dismissed back to the import screen")
+        waitUntil(choose, "hittable == true", timeout: 5, message: "Picker dismissed back to the import screen")
         XCTAssertFalse(app.staticTexts["playlist-import-success"].exists)
     }
     func testReviewCommitAndFiveHundredPlaceholders() {
@@ -63,8 +54,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let counts = app.staticTexts["playlist-import-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 10)); XCTAssertEqual(counts.label, "1 valid • 0 invalid playlists")
         let confirm = app.buttons["playlist-import-confirm"]
-        for _ in 0..<4 where !confirm.isHittable { app.swipeUp() }
-        XCTAssertTrue(confirm.isHittable); confirm.tap()
+        scrollTo(confirm); confirm.tap()
         let open = app.buttons["playlist-import-open"]
         XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
         let count = app.staticTexts["migration-playlist-count"]
@@ -81,12 +71,17 @@ final class PlaylistFileImportUITests: XCTestCase {
         scrollTo(deselect); deselect.tap()
         let confirm = app.buttons["playlist-import-confirm"]
         scrollTo(confirm); XCTAssertFalse(confirm.isEnabled)
+        assertSelected(0)
         let selectAll = app.buttons["playlist-import-select-all"]
         scrollTo(selectAll, down: true); selectAll.tap()
         let firstSwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
         scrollTo(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
-        toggle(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "0")
-        toggle(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
+        // Flip the switch itself and confirm the selection model changed, not only the control.
+        flipSwitch(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "0")
+        assertSelected(1)
+        scrollTo(firstSwitch, down: true)
+        flipSwitch(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
+        assertSelected(2)
         let name = app.textFields["playlist-import-destination-name"].firstMatch
         scrollTo(name); name.tap()
         let old = name.value as? String ?? ""
@@ -105,6 +100,8 @@ final class PlaylistFileImportUITests: XCTestCase {
     }
 
     func testThousandEntryScrollDashboardInspectionAndRestartSmoke() {
+        // Commit of 1,000 entries plus a relaunch: allowance raised for this test only (cap 120 s).
+        executionTimeAllowance = 120
         launch(fixture: true, extra: ["--playlist-import-thousand"])
         XCTAssertTrue(app.staticTexts["playlist-import-counts"].waitForExistence(timeout: 10))
         let confirm = app.buttons["playlist-import-confirm"]
@@ -147,10 +144,9 @@ final class PlaylistFileImportUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["migration-unresolved-count"].label, "Unresolved: 1000")
     }
 
-    private func scrollTo(_ element: XCUIElement, down: Bool = false) {
-        for _ in 0..<15 where !element.isHittable {
-            if down { app.swipeDown() } else { app.swipeUp() }
-        }
-        XCTAssertTrue(element.isHittable)
+    /// Bounded: stops at the first swipe that makes `element` tappable.
+    private func scrollTo(_ element: XCUIElement, down: Bool = false, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(scroll(app, toReveal: element, down ? .up : .down, maxSwipes: 15),
+                      "\(element.identifier) never became tappable", file: file, line: line)
     }
 }

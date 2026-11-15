@@ -1,6 +1,14 @@
 
 name: Playlist migration verification
 
+# Level B (feature verification) for the playlist migration / matching phase.
+#   matching_only=true  : matching, review queue and persistence unit contracts only.
+#   matching_only=false : (default, and every pull request) foundation persistence,
+#                         the same matching suites, and the migration UI tests.
+# Every xcodebuild step is followed by Scripts/check-test-results.py, which fails the job
+# when a required suite executed zero tests, any test was skipped, or a test never
+# reached a final result. See Docs/TESTING_RELIABILITY.md.
+
 on:
   workflow_call:
   workflow_dispatch:
@@ -22,17 +30,22 @@ concurrency:
 jobs:
   persistence:
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      MATCHING_ONLY: ${{ inputs.matching_only == true }}
+      GITHUB_SHA_TESTED: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Static test hygiene
+        run: python3 Scripts/check-test-hygiene.py
 
       - name: Portable foundation contracts
         run: bash Scripts/test-playlist-migration-foundation.sh
@@ -42,6 +55,7 @@ jobs:
           set -euo pipefail
           mkdir -p build
           git rev-parse HEAD | tee build/migration-source.txt
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA_TESTED"
           brew install xcodegen
           xcodegen generate
           ID=$(xcrun simctl create "Migration-$GITHUB_RUN_ID" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max com.apple.CoreSimulator.SimRuntime.iOS-26-2)
@@ -55,58 +69,51 @@ jobs:
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(PlaylistMigrationFoundationTests PlaylistMigrationPersistenceTests Phase2StorageTests Phase4LibraryMigrationTests
+                  PlaylistManagementTests LibraryDeletionTests FullLocalLibraryIntegrationTests Phase4PlaybackTests
+                  PlaybackPreviousPolicyTests PlaybackServiceAuditTests)
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
           xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUnits.xcresult \
-            -only-testing:OFFLINETests/PlaylistMigrationFoundationTests \
-            -only-testing:OFFLINETests/PlaylistMigrationPersistenceTests \
-            -only-testing:OFFLINETests/Phase2StorageTests \
-            -only-testing:OFFLINETests/Phase4LibraryMigrationTests \
-            -only-testing:OFFLINETests/PlaylistManagementTests \
-            -only-testing:OFFLINETests/LibraryDeletionTests \
-            -only-testing:OFFLINETests/FullLocalLibraryIntegrationTests \
-            -only-testing:OFFLINETests/Phase4PlaybackTests \
-            -only-testing:OFFLINETests/PlaybackPreviousPolicyTests \
-            -only-testing:OFFLINETests/PlaybackServiceAuditTests \
-            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-units.log
+            "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-units.log
+          python3 Scripts/check-test-results.py MigrationUnits build/MigrationUnits.xcresult "${REQUIRE[@]}"
 
-      - name: Focused song matching and persistence tests
-        if: inputs.matching_only == true
+      - name: Song matching, review queue and import unit tests
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(SongMatchingPolicyTests MatchingDiscoveryTests PlaylistMatchingIntegrationTests MatchingCorrectionTests
+                  MatchingReliabilityTests MatchingFailureIsolationTests YouTubeDiscoveryReliabilityTests FinalDiscoveryReliabilityTests
+                  ManualYouTubeSelectionTests MatchingCompletionTests MatchingIndependentSearchTests SearXNGDiscoveryTests
+                  InvidiousDiscoveryTests MatchingPauseResumeTests MatchingReviewQueueTests YouTubeProviderTests
+                  MatchingLifecycleTests MatchingArtworkTests HybridPlaylistTests MigrationPresentationTests
+                  PlaylistImportIntegrationTests PlaylistImportParserTests PlaylistImportPresentationTests PlaylistImportZIPTests)
+          # The full run already executes PlaylistMigrationPersistenceTests in the foundation step.
+          if [[ "$MATCHING_ONLY" == true ]]; then SUITES+=(PlaylistMigrationPersistenceTests); fi
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
           xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MatchingUnits.xcresult \
-            -only-testing:OFFLINETests/SongMatchingPolicyTests \
-            -only-testing:OFFLINETests/MatchingDiscoveryTests \
-            -only-testing:OFFLINETests/PlaylistMatchingIntegrationTests \
-            -only-testing:OFFLINETests/MatchingCorrectionTests \
-            -only-testing:OFFLINETests/MatchingReliabilityTests \
-            -only-testing:OFFLINETests/MatchingFailureIsolationTests \
-            -only-testing:OFFLINETests/YouTubeDiscoveryReliabilityTests \
-            -only-testing:OFFLINETests/FinalDiscoveryReliabilityTests \
-            -only-testing:OFFLINETests/ManualYouTubeSelectionTests \
-            -only-testing:OFFLINETests/MatchingCompletionTests \
-            -only-testing:OFFLINETests/MatchingIndependentSearchTests \
-            -only-testing:OFFLINETests/SearXNGDiscoveryTests \
-            -only-testing:OFFLINETests/InvidiousDiscoveryTests \
-            -only-testing:OFFLINETests/MatchingPauseResumeTests \
-            -only-testing:OFFLINETests/MatchingReviewQueueTests \
-            -only-testing:OFFLINETests/YouTubeProviderTests \
-            -only-testing:OFFLINETests/MatchingLifecycleTests \
-            -only-testing:OFFLINETests/MatchingArtworkTests \
-            -only-testing:OFFLINETests/HybridPlaylistTests \
-            -only-testing:OFFLINETests/PlaylistMigrationPersistenceTests \
-            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-matching.log
+            "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-matching.log
+          python3 Scripts/check-test-results.py MatchingUnits build/MatchingUnits.xcresult "${REQUIRE[@]}"
 
-      - name: Migration playlist UI
+      - name: Migration playlist, review queue and import UI
         if: inputs.matching_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(PlaylistMigrationUITests ReviewQueueUITests PlaylistFileImportUITests)
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINEUITests/$suite"); REQUIRE+=(--require "OFFLINEUITests/$suite"); done
           xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUI.xcresult \
-            -only-testing:OFFLINEUITests/PlaylistMigrationUITests \
-            -only-testing:OFFLINEUITests/ReviewQueueUITests \
+            "${ONLY[@]}" \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 60 \
             -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-ui.log
+          python3 Scripts/check-test-results.py MigrationUI build/MigrationUI.xcresult "${REQUIRE[@]}"
+
+      - name: Test counts for every result bundle
+        if: always()
+        run: python3 Scripts/check-test-results.py --report build/*.xcresult
 
       - uses: actions/upload-artifact@v4
         if: always()

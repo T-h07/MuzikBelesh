@@ -154,11 +154,13 @@ final class MatchingIndependentSearchTests: XCTestCase {
 
     func testCancellationDuringCooldownPreservesProgressAndResumes() async throws {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
+        retainUntilTeardown(f)
         let session = try await repo.createPlaylist(from: playlist(10), operationID: "cancel")
         let provider = SearchLog(restrictedOnce: [2])
         let waiting = ProviderRestrictionPolicy(cooldowns: [.seconds(60)], sleep: { try await Task.sleep(for: $0) })
         let worker = service(repo, provider, restriction: waiting)
         let task = Task { try await worker.run(migrationID: session.id) { _ in } }
+        cancelAndAwaitAtTeardown(task)
         for _ in 0..<300 { if await provider.calls.count == 3 { break }; try await Task.sleep(for: .milliseconds(10)) }
         try await Task.sleep(for: .milliseconds(50))
         task.cancel()

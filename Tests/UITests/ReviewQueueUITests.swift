@@ -2,148 +2,163 @@ import XCTest
 
 /// Real interaction tests for the review queue (fixture: `--review-queue-fixture`).
 /// Songs 1–3 have five saved candidates each, best first; song 4 has none.
+///
+/// Each test is independent (fresh isolated library) and small enough for the 60 s
+/// default allowance. Exact persisted candidate UUIDs, double submission and
+/// background matching are covered at model level in MatchingReviewQueueTests.
 final class ReviewQueueUITests: XCTestCase {
     private var app: XCUIApplication!
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment["MB_UI_TEST_ID"] = UUID().uuidString
-        // YouTube fixtures keep manual-link lookup and matching offline and deterministic.
-        app.launchArguments = ["--ui-testing", "--reset-ui-library", "--youtube-fixtures", "--review-queue-fixture"]
+        app.launchArguments = Self.arguments + ["--reset-ui-library"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Library"].waitForExistence(timeout: 10))
     }
     override func tearDownWithError() throws {
-        if (testRun?.failureCount ?? 0) > 0 {
-            let evidence = XCTAttachment(screenshot: app.screenshot()); evidence.lifetime = .keepAlways; add(evidence)
-            let tree = XCTAttachment(string: app.debugDescription); tree.lifetime = .keepAlways; add(tree)
-        }
+        attachFailureEvidence(app)
         app.terminate()
     }
+    /// YouTube fixtures keep manual-link lookup and matching offline and deterministic.
+    private static let arguments = ["--ui-testing", "--youtube-fixtures", "--review-queue-fixture"]
+
+    // MARK: Scoped elements
+
     /// Mirrors AppBootstrap.reviewFixtureCandidateID (song and candidate are 0-based).
     private func candidateID(song: Int, candidate: Int) -> String {
         String(format: "00000000-0000-0000-0000-%012d", song * 10 + candidate)
     }
-    private func openQueue() {
-        app.tabBars.buttons["Library"].tap()
-        let filter = app.buttons["library-filter-Playlists"]
-        XCTAssertTrue(filter.waitForExistence(timeout: 5)); filter.tap()
-        let playlist = app.staticTexts["Review queue"]; XCTAssertTrue(playlist.waitForExistence(timeout: 5)); playlist.tap()
-        let review = app.buttons["migration-review-songs"]
-        for _ in 0..<6 where !review.isHittable { app.swipeUp() }
-        XCTAssertTrue(review.waitForExistence(timeout: 5)); review.tap()
-        XCTAssertTrue(app.navigationBars["Review 1 of 4"].waitForExistence(timeout: 5))
-    }
-    /// The review queue's own scroll container.
-    private var queueScroll: XCUIElement {
-        let scoped = app.scrollViews.containing(.any, identifier: "review-song-header").firstMatch
-        return scoped.exists ? scoped : app.scrollViews.firstMatch
-    }
-    private func visible(_ element: XCUIElement) -> Bool { element.exists && element.isHittable }
-    /// Candidate rows render lazily: an off-screen row may not be in the accessibility tree
-    /// yet (below) or any more (above). Scroll down, then back up, until it is tappable.
-    private func reveal(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
-        for _ in 0..<10 where !visible(element) { queueScroll.swipeUp(velocity: .slow) }
-        for _ in 0..<14 where !visible(element) { queueScroll.swipeDown(velocity: .slow) }
-        XCTAssertTrue(visible(element), "\(element.identifier) must be tappable", file: file, line: line)
-    }
-    private func scrollToTop() {
-        let header = app.otherElements["review-song-header"]
-        for _ in 0..<14 where !visible(header) { queueScroll.swipeDown(velocity: .fast) }
-        XCTAssertTrue(visible(header))
-    }
     private func useButton(song: Int, candidate: Int) -> XCUIElement {
         app.buttons.matching(identifier: "review-use-" + candidateID(song: song, candidate: candidate)).firstMatch
     }
-    /// Every saved candidate (five per fixture song) can be reached and has exactly one control.
-    private func assertAllCandidatesReachable(song: Int) {
-        for index in 0..<5 {
-            let button = useButton(song: song, candidate: index)
-            reveal(button)
-            XCTAssertEqual(app.buttons.matching(identifier: button.identifier).count, 1, "Candidate \(index + 1) has one control")
-        }
-        XCTAssertEqual(app.buttons.matching(identifier: "review-use-" + candidateID(song: song, candidate: 5)).count, 0,
-                       "Only the five saved candidates are offered")
-        XCTAssertFalse(app.sheets.firstMatch.exists, "Scrolling never opens a confirmation")
-        scrollToTop()
+    private var header: XCUIElement { app.otherElements["review-song-header"] }
+    /// The review queue's own scroll view (the one containing the song header).
+    private var queueScroll: XCUIElement { app.scrollViews.containing(.other, identifier: "review-song-header").firstMatch }
+
+    // MARK: Steps
+
+    private func openQueue(expecting title: String = "Review 1 of 4") {
+        app.tabBars.buttons["Library"].tap()
+        let filter = app.buttons["library-filter-Playlists"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 5)); filter.tap()
+        let playlist = app.staticTexts["Review queue"]
+        XCTAssertTrue(playlist.waitForExistence(timeout: 5)); playlist.tap()
+        let review = app.buttons["migration-review-songs"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        XCTAssertTrue(scroll(app.collectionViews.firstMatch, toReveal: review, maxSwipes: 6), "Review Songs is reachable")
+        review.tap()
+        XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5))
     }
-    private func tapDialog(_ label: String) {
-        let sheetButton = app.sheets.buttons[label]
-        if sheetButton.waitForExistence(timeout: 3) { sheetButton.tap(); return }
-        let matches = app.buttons.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex.filter(\.isHittable)
-        XCTAssertFalse(matches.isEmpty, "Confirmation \(label) missing"); matches.last?.tap()
+    private func reveal(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        reveal(element, in: queueScroll, file: file, line: line)
     }
+    /// Taps the exact candidate's Use button and confirms the dialog that names it.
     private func use(song: Int, candidate: Int) {
         let button = useButton(song: song, candidate: candidate)
         reveal(button); button.tap()
-        // The dialog names the exact tapped candidate.
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Candidate \(candidate + 1) for song \(song + 1)")).firstMatch
-            .waitForExistence(timeout: 3))
-        tapDialog("Use This Recording")
+        let named = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Candidate \(candidate + 1) for song \(song + 1)")).firstMatch
+        XCTAssertTrue(named.waitForExistence(timeout: 3), "The dialog names the tapped candidate")
+        let confirm = app.buttons["review-confirm-use"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 3)); confirm.tap()
     }
-    private func assertTopOfSong(_ number: Int, of total: Int) {
-        XCTAssertTrue(app.navigationBars["Review \(number) of \(total)"].waitForExistence(timeout: 5))
-        // Scoped to the queue header: exactly one song title is shown.
-        let header = app.otherElements["review-song-header"]
-        XCTAssertTrue(header.waitForExistence(timeout: 3))
+    /// The queue shows exactly one song, it is the expected one, and it starts at the top.
+    /// `position` is the queue position in the title; `song` the fixture song (1-based).
+    private func assertShowing(_ position: Int, of total: Int, song: Int? = nil, file: StaticString = #filePath, line: UInt = #line) {
+        let number = song ?? position
+        XCTAssertTrue(app.navigationBars["Review \(position) of \(total)"].waitForExistence(timeout: 5), file: file, line: line)
+        XCTAssertTrue(header.waitForExistence(timeout: 3), file: file, line: line)
         let titles = header.staticTexts.matching(identifier: "review-song-title")
-        XCTAssertEqual(titles.count, 1, "One song is shown at a time")
-        let title = titles.firstMatch
-        let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Review song \(number)"), object: title)
-        XCTAssertEqual(XCTWaiter().wait(for: [expected], timeout: 3), .completed, "Expected Review song \(number)")
-        XCTAssertTrue(title.isHittable, "A newly opened song starts at the top")
+        XCTAssertEqual(titles.count, 1, "One song is shown at a time", file: file, line: line)
+        waitUntil(titles.firstMatch, "label == %@", "Review song \(number)", timeout: 3, file: file, line: line)
+        XCTAssertTrue(header.isHittable, "A newly opened song starts at the top", file: file, line: line)
+    }
+    private func assertNoConfirmation(_ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertFalse(app.buttons["review-confirm-use"].exists, message, file: file, line: line)
     }
 
-    func testFirstMiddleAndLastCandidatesSelectAndManualLinkDismissesKeyboard() {
-        openQueue()
-        assertAllCandidatesReachable(song: 0) // All five, not only three; rows render lazily.
-        use(song: 0, candidate: 2)          // middle
-        assertTopOfSong(2, of: 4)
-        use(song: 1, candidate: 4)          // last (requires scrolling)
-        assertTopOfSong(3, of: 4)
-        use(song: 2, candidate: 0)          // first
-        assertTopOfSong(4, of: 4)
+    // MARK: Tests
 
-        // Manual link for a song without candidates.
+    func testAllFiveCandidatesAreReachableIndividually() {
+        openQueue()
+        for index in 0..<5 {
+            let button = useButton(song: 0, candidate: index)
+            reveal(button)
+            XCTAssertEqual(app.buttons.matching(identifier: button.identifier).count, 1, "Candidate \(index + 1) has exactly one control")
+            XCTAssertTrue(button.isEnabled)
+        }
+        assertNoConfirmation("Scrolling to a candidate never opens a confirmation")
+    }
+
+    func testMiddleCandidateConfirmsAdvancesAndPersistsAcrossRelaunch() {
+        // Two launches plus navigation: allowance raised for this test only (workflow cap 120 s).
+        executionTimeAllowance = 120
+        openQueue()
+        use(song: 0, candidate: 2)
+        assertShowing(2, of: 4) // Automatic advance to the next Spotify song, at the top.
+        XCTAssertFalse(app.staticTexts["review-error"].exists)
+
+        app.terminate()
+        app.launchArguments = Self.arguments // Same isolated library, no reset.
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Library"].waitForExistence(timeout: 10))
+        openQueue(expecting: "Review 1 of 3")
+        // The confirmed song left the queue; the next song is first and still has all candidates.
+        assertShowing(1, of: 3, song: 2)
+        XCTAssertTrue(useButton(song: 1, candidate: 0).waitForExistence(timeout: 3))
+        XCTAssertFalse(useButton(song: 0, candidate: 2).exists, "Song 1's decision persisted")
+    }
+
+    func testLastAndFirstCandidatesConfirmAndAdvance() {
+        openQueue()
+        use(song: 0, candidate: 4) // last (requires scrolling)
+        assertShowing(2, of: 4)
+        use(song: 1, candidate: 0) // first
+        assertShowing(3, of: 4)
+        XCTAssertFalse(app.staticTexts["review-error"].exists)
+    }
+
+    func testManualLinkConfirmationStaysInAppAndDismissesKeyboard() {
+        openQueue()
+        for _ in 0..<3 { app.buttons["review-next"].tap() } // Navigation only; selects nothing.
+        assertShowing(4, of: 4)
         let field = app.textFields["migration-manual-link"]
         XCTAssertTrue(field.waitForExistence(timeout: 5)); reveal(field); field.tap()
         field.typeText("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        app.buttons["migration-manual-lookup"].tap()
+        let lookup = app.buttons["migration-manual-lookup"]
+        reveal(lookup); lookup.tap()
         let confirm = app.buttons["migration-manual-confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 10)); reveal(confirm); confirm.tap()
-        tapDialog("Use This Video")
-        XCTAssertTrue(app.otherElements["review-caught-up"].waitForExistence(timeout: 5) || app.staticTexts["You're all caught up."].waitForExistence(timeout: 2))
+        let use = app.buttons["migration-manual-dialog-confirm"]
+        XCTAssertTrue(use.waitForExistence(timeout: 3)); use.tap()
+        // Saved: the queue wraps to the first unresolved song, inside Muzik Belesh.
+        assertShowing(1, of: 4)
+        XCTAssertEqual(app.state, .runningForeground, "Use This Video never leaves the app")
         XCTAssertFalse(app.keyboards.firstMatch.exists, "The keyboard is dismissed after confirming")
         XCTAssertFalse(app.staticTexts["review-error"].exists)
-
-        app.buttons["review-back-to-playlist"].tap()
-        let summary = app.staticTexts["matching-summary"]
-        for _ in 0..<6 where !summary.exists { app.swipeUp() }
-        XCTAssertTrue(summary.waitForExistence(timeout: 5))
-        XCTAssertTrue(summary.label.contains("4 matched"), summary.label)
     }
 
-    func testNavigationResetsScrollAndSwipesOrScrollsNeverSelect() {
+    func testNavigationResetsScrollAndNeverSelects() {
         openQueue()
-        // Scroll down to song 1's last candidate; scrolling alone never opens a confirmation.
+        // Scroll to song 1's last candidate; scrolling alone never opens a confirmation.
         reveal(useButton(song: 0, candidate: 4))
-        XCTAssertFalse(app.sheets.firstMatch.exists)
+        assertNoConfirmation("Scrolling never confirms")
         app.buttons["review-next"].tap()
-        assertTopOfSong(2, of: 4)
-        // Horizontal swipe on the song header navigates only.
-        app.otherElements["review-song-header"].swipeLeft()
-        assertTopOfSong(3, of: 4)
-        XCTAssertFalse(app.sheets.firstMatch.exists, "Swiping never confirms")
+        assertShowing(2, of: 4)
+        header.swipeLeft() // Horizontal swipe on the song header navigates only.
+        assertShowing(3, of: 4)
+        assertNoConfirmation("Swiping never confirms")
         app.buttons["review-previous"].tap()
-        assertTopOfSong(2, of: 4)
+        assertShowing(2, of: 4)
         app.buttons["review-skip"].tap()
-        assertTopOfSong(3, of: 4)
-        // Nothing was selected by navigation: song 1 still offers its first candidate.
-        app.buttons["review-previous"].tap(); app.buttons["review-previous"].tap()
-        assertTopOfSong(1, of: 4)
+        assertShowing(3, of: 4)
+        header.swipeRight()
+        assertShowing(2, of: 4)
+        app.buttons["review-previous"].tap()
+        assertShowing(1, of: 4)
+        // Nothing was selected or rejected: song 1 still offers its first and last candidates.
         XCTAssertTrue(useButton(song: 0, candidate: 0).waitForExistence(timeout: 3))
-        assertAllCandidatesReachable(song: 0) // Still all five: navigation rejected nothing.
-        app.buttons["review-next"].tap(); assertTopOfSong(2, of: 4)
-        assertAllCandidatesReachable(song: 1)
+        reveal(useButton(song: 0, candidate: 4))
+        assertNoConfirmation("Navigation never confirms")
     }
 }

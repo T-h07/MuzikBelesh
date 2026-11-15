@@ -141,10 +141,12 @@ final class PlaylistMatchingIntegrationTests: XCTestCase {
     }
     func testCancellationKeepsCommittedLocalAndResetsActiveEntry() async throws {
         let fixture = try localFixture(), repo = fixture.storage.playlistMigrations
+        retainUntilTeardown(fixture)
         let session = try await create(source(["Song (Studio)", "Other"]), fixture)
         let provider = MatchingSuspendedProvider()
         let service = PlaylistMigrationMatchingService(repository: repo, providers: [provider])
         let task = Task { try await service.run(migrationID: session.id) { _ in } }
+        cancelAndAwaitAtTeardown(task)
         for _ in 0..<300 {
             let isStarted = await provider.started
             if isStarted { break }

@@ -467,7 +467,7 @@ struct ManualYouTubeSelectionView: View {
             if let message { Text(message).font(.caption).foregroundStyle(AppColors.error) }
         }.tint(AppColors.accentPrimary)
             .confirmationDialog("Use this video for this song?", isPresented: $confirming, titleVisibility: .visible) {
-                Button("Use This Video") { confirm() }
+                Button("Use This Video") { confirm() }.accessibilityIdentifier("migration-manual-dialog-confirm")
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text(preview?.metadataVerified == false

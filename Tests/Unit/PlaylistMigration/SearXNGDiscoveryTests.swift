@@ -211,10 +211,12 @@ final class SearXNGDiscoveryTests: XCTestCase {
 
     func testResumeAfterInterruptionAndConfirmedSelectionsAreUntouched() async throws {
         let f = try LibraryFixture(count: 0), repo = f.storage.playlistMigrations
+        retainUntilTeardown(f)
         let session = try await repo.createPlaylist(from: playlist(40), operationID: "searx-resume")
         let slow = SearXJSONTransport(delay: .milliseconds(20))
         let worker = PlaylistMigrationMatchingService(repository: repo, providers: [searx(settings(), slow)], restriction: .noWait)
         let task = Task { try await worker.run(migrationID: session.id) { _ in } }
+        cancelAndAwaitAtTeardown(task)
         for _ in 0..<500 { if await slow.queries.count >= 10 { break }; try await Task.sleep(for: .milliseconds(5)) }
         task.cancel()
         _ = try? await task.value
