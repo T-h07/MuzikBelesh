@@ -298,7 +298,15 @@ import OSLog
         let paused = pausedMigrations
         let open = current.values.filter { $0.state == .waiting || $0.state == .associating || $0.state == .failed }
         var createdAny = false
-        for (videoID, group) in Dictionary(grouping: open, by: \.providerIdentity) {
+        // Jobs are created in playlist source order, so queue positions (and therefore
+        // scheduling and recovery order) follow the playlist, not dictionary order.
+        let grouped = Dictionary(grouping: open, by: \.providerIdentity)
+        func firstPosition(_ group: [AcquisitionLinkRecord]) -> Int {
+            group.compactMap { demands[$0.entryID]?.position }.min() ?? Int.max
+        }
+        let orderedVideos = grouped.keys.sorted { (firstPosition(grouped[$0]!), $0) < (firstPosition(grouped[$1]!), $1) }
+        for videoID in orderedVideos {
+            let group = grouped[videoID]!
             let active = group.filter { !paused.contains($0.migrationID) }
             var job = downloads.job(for: videoID)
             var created = false
