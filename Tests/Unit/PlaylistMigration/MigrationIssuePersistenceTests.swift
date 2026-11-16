@@ -266,11 +266,16 @@ import XCTest
             PlaylistMigrationSourceTrack(position: $0, title: "Upgrade \($0)", primaryArtist: "Artist", durationMs: 2000)
         })
         let session = try legacy.createCommittedPlaylist(from: source, operationID: "upgrade-v018")
-        let entries = try await legacy.entries(migrationID: session.id)
+        // The v018 schema predates later occurrence columns: read identities with plain SQL.
+        let entryIDs = try await old.dbQueue.read { db in
+            try String.fetchAll(db, sql: "SELECT id FROM migration_entries WHERE migrationID = ? ORDER BY sourcePosition",
+                                arguments: [session.id.uuidString]).compactMap(UUID.init(uuidString:))
+        }
+        XCTAssertEqual(entryIDs.count, 3)
         var ids: [UUID] = []
-        for (index, entry) in entries.enumerated() {
+        for (index, entryID) in entryIDs.enumerated() {
             let id = UUID(); ids.append(id)
-            try await legacy.saveIssue(PlaylistMigrationIssue(id: id, migrationID: session.id, entryID: entry.id, code: "matching-attempt",
+            try await legacy.saveIssue(PlaylistMigrationIssue(id: id, migrationID: session.id, entryID: entryID, code: "matching-attempt",
                 message: "Legacy message \(index)", technicalDetails: nil, severity: .warning, resolution: .open, createdAt: Date(), resolvedAt: nil))
         }
         try await legacy.resolveIssue(id: ids[1], resolution: .resolved)

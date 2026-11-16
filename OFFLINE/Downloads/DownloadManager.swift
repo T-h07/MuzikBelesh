@@ -461,7 +461,14 @@ struct NetworkPathSnapshot: Equatable, Sendable {
     }
     func retry(_ id: String, repair: Bool = false) {
         guard let job = jobs.first(where: { $0.id == id }), [.paused, .cancelled, .failed, .interrupted].contains(job.state) || (repair && job.state == .completed) else { return }
-        update(id) { $0.state = .queued; $0.errorMessage = nil; $0.refreshedGeneration = nil; $0.attempts = ($0.attempts ?? 0) + 1 }
+        // If the library track was deleted since this job finished, SQLite already cleared
+        // the reference; never write the stale cached ID back (a dangling foreign key would
+        // fail the save and halt every download).
+        var trackID = job.trackID
+        if trackID != nil, let storage {
+            do { trackID = try storage.downloads.storedTrackID(jobID: id) } catch { failStorage(); return }
+        }
+        update(id) { $0.state = .queued; $0.errorMessage = nil; $0.refreshedGeneration = nil; $0.attempts = ($0.attempts ?? 0) + 1; $0.trackID = trackID }
         schedule()
     }
     func move(_ job: StoredDownloadJob, by offset: Int) {
