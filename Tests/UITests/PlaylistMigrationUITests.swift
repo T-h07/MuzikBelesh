@@ -67,6 +67,24 @@ final class PlaylistMigrationUITests: XCTestCase {
         waitUntil(play, "label == %@", "Pause", timeout: 10, message: "The verified recording plays")
     }
 
+    /// Playlist search filters what is shown; clearing restores the full playlist.
+    func testPlaylistSearchFiltersAndClearRestoresAllSongs() {
+        open("Imported mixed")
+        let field = app.textFields["playlist-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap()
+        field.typeText("song 3")
+        XCTAssertTrue(app.staticTexts["Original song 3"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Original song 0"].exists, "Non-matching songs are hidden")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 songs", "Search never changes the playlist")
+        field.typeText(" nothing matches this")
+        XCTAssertTrue(app.staticTexts["playlist-search-empty"].waitForExistence(timeout: 5))
+        let clear = app.buttons["playlist-search-clear"]
+        XCTAssertTrue(clear.exists); clear.tap()
+        XCTAssertTrue(app.staticTexts["Original song 0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Original song 3"].exists)
+        XCTAssertFalse(app.staticTexts["playlist-search-empty"].exists)
+    }
+
     /// Unresolved songs keep the matching inspector.
     func testUnresolvedImportedSongStillOpensMatching() {
         open("Imported mixed")

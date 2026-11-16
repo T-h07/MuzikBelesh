@@ -125,14 +125,18 @@ import SwiftUI
     }
     /// Imported occurrences (any playlist) that play this recording.
     func importedUses(of trackID: String) -> Int { snapshot.migrationEntries.filter { $0.localTrackID == trackID }.count }
-    func playMigration(playlistID: String, occurrenceID: String? = nil, shuffle: Bool = false) async {
+    /// Plays an imported/hybrid playlist. The queue is always the *full* playlist (never a
+    /// filtered or searched subset), and the selection is the exact occurrence ID, so
+    /// duplicates resolve to the tapped position. `shuffle == nil` (tapping a song) keeps
+    /// the user's shuffle setting; Play and Shuffle pass an explicit value.
+    func playMigration(playlistID: String, occurrenceID: String? = nil, shuffle: Bool? = nil) async {
         guard let storage, let player else { return }
         do {
             // Re-read immediately before playback, rather than trusting a rendered row.
             let occurrences = try storage.playlistMigrations.hybridPlaybackOccurrences(playlistID: playlistID)
             let selection: MigrationPlaybackOccurrence?
             if let occurrenceID { selection = occurrences.first { $0.id == occurrenceID } }
-            else { selection = shuffle ? occurrences.randomElement() : occurrences.first }
+            else { selection = shuffle == true ? occurrences.randomElement() : occurrences.first }
             guard let selected = selection else { return }
             try await player.playMigration(occurrences: occurrences, selected: selected.id, playlistID: playlistID, shuffle: shuffle)
         } catch { report(error) }

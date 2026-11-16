@@ -157,7 +157,7 @@ jobs:
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
           SUITES=(MigrationIssueClassifierTests MigrationIssuePersistenceTests MigrationIssueRecoveryTests
-                  MigrationCompletionSummaryTests MigrationIssueNotificationTests RecordingReplacementTests PlaylistOccurrenceRemovalTests PlaylistLinkDownloadTests)
+                  MigrationCompletionSummaryTests MigrationIssueNotificationTests RecordingReplacementTests PlaylistOccurrenceRemovalTests PlaylistLinkDownloadTests PlaylistSearchTests)
           # A focused run adds every suite whose code path Phase 10.7 touches or extends.
           if [[ "${{ inputs.issues_only == true }}" == true ]]; then
             SUITES+=(PlaylistMigrationCoordinatorTests PlaylistAcquisitionTests PlaylistAcquisitionNotificationTests

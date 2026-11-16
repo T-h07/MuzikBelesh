@@ -361,6 +361,24 @@ playlists and imported songs are affected before confirming.
   keep their reason with Retry (bounded automatic retries first). Removing a pending row
   pauses a job only it needed. Spotify source entries are never inflated by additions.
 
+## 19d. Playlist search (a filtered view, never a new queue)
+
+- Every playlist shows a search field below the header and playback controls. It filters
+  that playlist only (imported entries, songs added from the library, YouTube-link
+  entries), by title and artist, case-, accent- and width-insensitive, immediately while
+  typing, keeping the playlist's order and each row's occurrence identity. A clear button
+  restores everything; an empty state appears when nothing matches. It never calls global
+  search, YouTube or any remote service, and never changes membership or order (drag
+  reordering of manual playlists is off while a filter is active).
+- Playback is unchanged by search: a tapped result plays through the same full-playlist
+  path as before — imported/hybrid playlists by exact occurrence ID over all playable
+  occurrences, ordinary playlists with the full playlist as context — so playback continues
+  with the rest of the original playlist; shuffle draws from the full playlist.
+- Fixed while wiring this: selecting a song in an imported playlist used to switch shuffle
+  off (`playMigration(… shuffle: false)` was the default). Selecting a song now leaves the
+  shuffle setting alone (`shuffle: nil`); the Play and Shuffle buttons still set it.
+- Tests: `PlaylistSearchTests` (S01–S13) and a UI test for filtering, empty state and clear.
+
 ## 20. Changed-file manifest
 
 See section 2; `git diff --stat f2c448d..HEAD` on the feature branch is authoritative.

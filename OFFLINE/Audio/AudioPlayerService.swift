@@ -135,7 +135,9 @@ final class AudioPlayerService: ObservableObject {
         }
     }
 
-    func playMigration(occurrences: [MigrationPlaybackOccurrence], selected: String, playlistID: String, shuffle: Bool) async throws {
+    /// `shuffle == nil` keeps the user's current shuffle setting (selecting a song never
+    /// changes it); Play/Shuffle buttons pass an explicit value.
+    func playMigration(occurrences: [MigrationPlaybackOccurrence], selected: String, playlistID: String, shuffle: Bool?) async throws {
         guard let occurrence = occurrences.first(where: { $0.id == selected }) else { return }
         guard await beginCommand("select") else { throw AudioPlaybackError.playerFailed("Playback is busy. Try again.") }
         defer { endCommand() }
@@ -146,7 +148,7 @@ final class AudioPlayerService: ObservableObject {
         timerExpired = false; queue.cancelCandidate()
         activeContextTrackIDs = occurrences.map(\.trackID); activeContextKind = "migrationPlaylist"; activeContextSourceID = playlistID
         queue.setMigrationContext(occurrences, selected: selected)
-        if queue.shuffleEnabled != shuffle { queue.toggleShuffle() }
+        if let shuffle, queue.shuffleEnabled != shuffle { queue.toggleShuffle() }
         do { try await selectTrack(occurrence.trackID) }
         catch {
             (activeContextTrackIDs, activeContextKind, activeContextSourceID) = old

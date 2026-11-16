@@ -15,7 +15,7 @@ struct MigrationPlaylistPlaybackHeader: View {
             Text(total == 1 ? "1 song" : "\(total) songs")
                 .font(.caption).foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("migration-playlist-count")
             HStack {
-                Button { Task { await library.playMigration(playlistID: playlistID) } } label: {
+                Button { Task { await library.playMigration(playlistID: playlistID, shuffle: false) } } label: {
                     Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("collection-play")
                 Button { Task { await library.playMigration(playlistID: playlistID, shuffle: true) } } label: {

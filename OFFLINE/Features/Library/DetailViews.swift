@@ -16,6 +16,33 @@ struct PlaylistDetailView: View {
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
     private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
+    @EnvironmentObject private var container: AppContainer
+    @State private var query = ""
+
+    // MARK: Playlist search (a filtered view; never a new queue or order)
+
+    private var searching: Bool { !PlaylistSearch.terms(query).isEmpty }
+    private var visibleImported: [MigrationPlaylistRow] {
+        PlaylistSearch.filter(library.migrationRows(playlistID), query: query) { row -> [String?] in
+            var fields: [String?] = [row.entry.source.title, row.entry.source.primaryArtist]
+            fields += row.entry.source.additionalArtists.map { Optional($0) }
+            if let track = row.playableTrack { fields += [track.title, library.artistName(track.artistID)] }
+            return fields
+        }
+    }
+    private var visibleManual: [LocalPlaylistRow] {
+        PlaylistSearch.filter(library.manualRows(playlistID), query: query) { [$0.track.title, library.artistName($0.track.artistID)] }
+    }
+    private var visibleSongs: [StoredTrack] {
+        PlaylistSearch.filter(songs, query: query) { [$0.title, library.artistName($0.artistID)] }
+    }
+    private var visibleLinks: [PlaylistLinkDownloadRecord] {
+        PlaylistSearch.filter(library.pendingLinks(playlistID), query: query) { [container.downloads.job(for: $0.videoID)?.title] }
+    }
+    private var visibleCount: Int {
+        (migrationManaged ? visibleImported.count + visibleManual.count : visibleSongs.count) + visibleLinks.count
+    }
+
     var body: some View {
         List {
             if let playlist {
@@ -36,14 +63,25 @@ struct PlaylistDetailView: View {
                         }
                     }.padding(.vertical, AppSpacing.md)
                 }.listRowBackground(AppColors.backgroundPrimary)
-
+                Section {
+                    PlaylistSearchField(text: $query)
+                }.listRowBackground(AppColors.backgroundPrimary)
+                if searching && visibleCount == 0 {
+                    Section {
+                        Text("No songs in this playlist match “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”.")
+                            .foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("playlist-search-empty")
+                    }.listRowBackground(AppColors.backgroundPrimary)
+                }
+                // Search only filters what is shown. Every row still plays through the full
+                // playlist (exact occurrence, then the rest of the playlist), and order and
+                // membership never change.
                 Section {
                     if migrationManaged {
-                        ForEach(library.migrationRows(playlistID)) { row in
+                        ForEach(visibleImported) { row in
                             MigrationPlaylistOccurrenceRow(row: row, playlistID: playlistID)
                                 .listRowBackground(AppColors.backgroundPrimary)
                         }
-                        ForEach(library.manualRows(playlistID)) { row in
+                        ForEach(visibleManual) { row in
                             HStack {
                                 Button { Task { await library.playMigration(playlistID: playlistID, occurrenceID: row.occurrence.playbackID) } } label: {
                                     HStack {
@@ -65,7 +103,7 @@ struct PlaylistDetailView: View {
                         }
                     } else {
                     if songs.isEmpty && library.pendingLinks(playlistID).isEmpty { Text("This playlist is empty. Tap Add Songs to add music.").foregroundStyle(AppColors.textSecondary) }
-                    ForEach(songs) { track in
+                    ForEach(visibleSongs) { track in
                         Group {
                             if editMode == .active {
                                 HStack {
@@ -78,14 +116,11 @@ struct PlaylistDetailView: View {
                                     .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeFromOrdinaryPlaylist(track.id, playlistID: playlistID) } }
                             }
                         }.listRowBackground(AppColors.backgroundPrimary)
-                    }.onMove { source, destination in
-                        var order = songs.map(\.id); order.move(fromOffsets: source, toOffset: destination)
-                        library.perform { try library.reorder(order, playlistID: playlistID) }
-                    }
+                    }.onMove(perform: searching ? nil : reorderSongs) // Drag indices refer to the full list.
                     }
                     // Songs added by YouTube link that are still downloading (or failed):
                     // already playlist entries, shown in submitted order after the songs.
-                    ForEach(library.pendingLinks(playlistID)) { link in
+                    ForEach(visibleLinks) { link in
                         PlaylistLinkDownloadRow(link: link).listRowBackground(AppColors.backgroundPrimary)
                     }
                 }
@@ -102,7 +137,8 @@ struct PlaylistDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if !migrationManaged {
-                    Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }.accessibilityIdentifier("playlist-reorder")
+                    Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }
+                        .disabled(searching && editMode != .active).accessibilityIdentifier("playlist-reorder")
                 }
                 Menu {
                     if migrationManaged {
@@ -129,6 +165,10 @@ struct PlaylistDetailView: View {
             Button("Delete Playlist", role: .destructive) { Task { do { try await library.deletePlaylist(id: playlistID, confirmed: true); dismiss() } catch { library.report(error) } } }.accessibilityIdentifier("confirm-delete-playlist")
             Button("Cancel", role: .cancel) { }
         } message: { Text("This removes the playlist and its organization. Your music files, liked songs and other playlists are preserved.") }
+    }
+    private func reorderSongs(_ source: IndexSet, _ destination: Int) {
+        var order = songs.map(\.id); order.move(fromOffsets: source, toOffset: destination)
+        library.perform { try library.reorder(order, playlistID: playlistID) }
     }
     private func move(_ id: String, delta: Int) {
         var order = songs.map(\.id)
@@ -367,4 +407,33 @@ struct ArtworkDraftPicker: View {
 func formatDuration(_ tracks: [StoredTrack]) -> String {
     let seconds = tracks.compactMap(\.durationMs).reduce(Int64(0), +) / 1000
     return "\(seconds / 60) min \(seconds % 60) sec"
+}
+
+/// Search inside the open playlist only (title and artist). Purely local and immediate;
+/// it never reaches global search, YouTube or any remote service.
+struct PlaylistSearchField: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+    var body: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "magnifyingglass").foregroundStyle(AppColors.textSecondary).accessibilityHidden(true)
+            TextField("Search in playlist", text: $text)
+                .focused($focused)
+                .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
+                .onSubmit { focused = false }
+                .foregroundStyle(AppColors.textPrimary)
+                .accessibilityLabel("Search in this playlist")
+                .accessibilityIdentifier("playlist-search-field")
+            if !text.isEmpty {
+                Button { text = ""; focused = false } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.textSecondary)
+                }
+                .buttonStyle(.borderless).frame(minWidth: 32, minHeight: 32)
+                .accessibilityLabel("Clear search").accessibilityIdentifier("playlist-search-clear")
+            }
+        }
+        .padding(.horizontal, AppSpacing.md).frame(minHeight: 44)
+        .background(AppColors.backgroundSecondary, in: RoundedRectangle(cornerRadius: 10))
+        .tint(AppColors.accentPrimary)
+    }
 }
