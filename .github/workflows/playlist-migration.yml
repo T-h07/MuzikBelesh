@@ -50,7 +50,7 @@ concurrency:
 jobs:
   persistence:
     runs-on: macos-15
-    timeout-minutes: 40
+    timeout-minutes: 60 # Phase 10.7 added three unit suites and three UI tests to this job.
     defaults:
       run:
         shell: bash
