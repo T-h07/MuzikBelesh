@@ -293,6 +293,49 @@ Tests: `RecordingReplacementTests` (success with the original playable throughou
 failure + cancel rollback, verification failure + explicit retry, restart, duplicate and
 shared recordings, superseded/cancelled/stale completions).
 
+## 19b. Ready songs behave like library songs; Remove from Playlist
+
+Root cause: `MigrationPlaylistOccurrenceRow` wrapped every imported row in a
+`NavigationLink` to the migration inspector (`MigrationOccurrenceDetailView`), whose
+candidate section is always shown — regardless of whether the occurrence was already
+ready with verified audio. Playback was only reachable through a small separate button.
+
+Now the row's interaction follows the occurrence's real state (`row.playableTrack`, i.e.
+`ready` + present, verified managed audio):
+- Ready: tapping the row plays the occurrence; `•••` opens `SongOptionsView` (large
+  artwork, title, artist, album · duration, Play/Pause, Play Next, Add to Queue, Add to
+  Playlist, Change Video, Remove from Playlist, Delete Download, Delete from Library).
+  Candidates are never shown; Change Video opens the existing staged-replacement flow
+  (`RecordingReplacementControls`), so the original keeps playing until the new recording
+  is verified.
+- Unresolved / failed: tapping still opens the matching inspector (candidates, manual
+  link, retry, Files import, recovery). A failed song is never playable.
+- The same `SongOptionsView` is reachable from ordinary library rows ("Song Details") and
+  from songs added manually to imported playlists.
+
+Remove from Playlist always targets the occurrence:
+- Ordinary playlists (set semantics): the membership; Undo reinserts at the old index.
+- Songs added manually to imported playlists: that `playlist_local_occurrences` row;
+  Undo restores the same identity and position.
+- Imported occurrences (`v021_playlist_occurrence_removal`, additive columns on
+  `migration_entries`, no new table): the row is kept (source positions, import history
+  and diagnostics stay intact) but marked `removedAt`, its previous status/track are
+  remembered for Undo, it becomes `skipped` without a local track, its retry bookkeeping
+  and any staged replacement are dropped and its open issues are closed (`userAction`).
+  Because every matching, acquisition, association and replacement guard already refuses
+  `skipped` occurrences, retries, resumes, restarts and late callbacks cannot restore it;
+  `entries()` hides removed rows, so rows, playback order, counts, progress, coordinator
+  totals and issue summaries follow the new membership. Shared jobs keep running while
+  another playlist needs them.
+- No audio file, library track, other occurrence or other playlist is touched.
+
+Delete Download vs Delete from Library: both use the existing journaled track deletion.
+Delete Download is offered only for a downloaded (YouTube) recording that no ordinary
+playlist or manual occurrence uses, so no playlist entry disappears; imported occurrences
+stay as placeholders, reported as "Audio file missing" with **Download Again** (back to
+`matched`, re-acquired through the shared queue). Delete from Library states exactly which
+playlists and imported songs are affected before confirming.
+
 ## 20. Changed-file manifest
 
 See section 2; `git diff --stat f2c448d..HEAD` on the feature branch is authoritative.

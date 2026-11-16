@@ -222,8 +222,11 @@ final class MigrationIssueRepository: @unchecked Sendable {
             occurrences.append(MigrationOccurrenceReport(entry: entry, assessment: assessment, pendingCandidates: value.pendingCandidates,
                 issueID: current?.id, issueCreatedAt: current?.createdAt, resolvedIssues: history[entry.id] ?? 0))
         }
+        // Occurrences removed from the playlist are no longer part of the migration totals.
+        let expectedCount: Int = session["expectedEntryCount"]
+        let removedCount = try GRDBPlaylistMigrationRepository.removedCount(db, migrationID: id)
         let summary = MigrationCompletionSummary.make(migrationID: migrationID, playlistID: session["destinationPlaylistID"],
-            playlistName: session["sourcePlaylistName"], expected: session["expectedEntryCount"],
+            playlistName: session["sourcePlaylistName"], expected: expectedCount - removedCount,
             dispositions: occurrences.map(\.assessment.disposition), context: context)
         let links = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_acquisitions WHERE migrationID = ?", arguments: [id]) ?? 0
         return Built(report: MigrationIssueReport(summary: summary, occurrences: occurrences, context: context), open: open, control: control, links: links)
@@ -383,7 +386,8 @@ final class MigrationIssueRepository: @unchecked Sendable {
     /// decides which jobs other playlists still need.
     func skip(entryID: UUID, migrationID: UUID, now: Date) async throws {
         try await db.write { db in
-            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.migrationID == migrationID.uuidString else {
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.migrationID == migrationID.uuidString,
+                  try !GRDBPlaylistMigrationRepository.isRemoved(db, entryID: entry.id) else {
                 throw PlaylistMigrationStorageError.notFound
             }
             if entry.status == .skipped { return }
@@ -408,7 +412,8 @@ final class MigrationIssueRepository: @unchecked Sendable {
     /// otherwise to unfinished matching. Rejected candidates stay rejected.
     func restore(entryID: UUID, migrationID: UUID, now: Date) async throws {
         try await db.write { db in
-            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.migrationID == migrationID.uuidString else {
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.migrationID == migrationID.uuidString,
+                  try !GRDBPlaylistMigrationRepository.isRemoved(db, entryID: entry.id) else {
                 throw PlaylistMigrationStorageError.notFound
             }
             guard entry.status == .skipped else { throw SongMatchingError.staleAttempt }
@@ -427,25 +432,46 @@ final class MigrationIssueRepository: @unchecked Sendable {
     /// The old decision is kept as evidence, never deleted.
     func releaseMissingLocalAudio(entryID: UUID, migrationID: UUID, now: Date) async throws {
         try await db.write { [paths] db in
-            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.migrationID == migrationID.uuidString else {
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.migrationID == migrationID.uuidString,
+                  try !GRDBPlaylistMigrationRepository.isRemoved(db, entryID: entry.id) else {
                 throw PlaylistMigrationStorageError.notFound
             }
             if let trackID = entry.localTrackID,
                try StoredTrack.fetchOne(db, key: trackID).map({ MigrationLocalAudio.isAvailable($0, paths: paths) }) == true {
                 throw SongMatchingError.staleAttempt // Valid audio is never released.
             }
-            let acceptedLocal = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_candidates WHERE entryID = ? AND decision = 'accepted' AND provider = 'local'",
+            let acceptedLocal = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_candidates WHERE entryID = ? AND decision = 'accepted'",
                                                  arguments: [entry.id]) ?? 0
             guard entry.status == .ready || (entry.status == .unavailable && acceptedLocal > 0) else { return }
             try db.execute(sql: """
                 UPDATE migration_candidates SET decision = 'pending', updatedAt = ?,
                     evidence = json_set(evidence, '$.supersededBy', 'missing-audio', '$.currentAttempt', 'false')
-                WHERE entryID = ? AND decision = 'accepted' AND provider = 'local'
+                WHERE entryID = ? AND decision = 'accepted'
                 """, arguments: [now, entry.id])
             try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .needsReview)
             entry.status = .needsReview; entry.localTrackID = nil
             entry.updatedAt = max(now, entry.updatedAt.addingTimeInterval(0.01)); try entry.update(db)
             _ = try MatchingCheckpoint.deleteOne(db, key: entry.id)
+        }
+    }
+
+    /// Download Again: an occurrence whose confirmed YouTube recording lost its local audio
+    /// (for example after Delete Download) returns to `matched`, so the acquisition
+    /// coordinator re-acquires it through the shared queue. The decision is unchanged.
+    func downloadAgain(entryID: UUID, migrationID: UUID, now: Date) async throws {
+        try await db.write { db in
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.migrationID == migrationID.uuidString,
+                  try !GRDBPlaylistMigrationRepository.isRemoved(db, entryID: entry.id) else {
+                throw PlaylistMigrationStorageError.notFound
+            }
+            let accepted = try String.fetchAll(db, sql: "SELECT provider FROM migration_candidates WHERE entryID = ? AND decision = 'accepted'",
+                                               arguments: [entry.id])
+            guard entry.status == .unavailable, entry.localTrackID == nil, accepted == ["youtube"] else { throw SongMatchingError.staleAttempt }
+            try PlaylistMigrationValidation.requireEntryTransition(.unavailable, to: .matching)
+            try PlaylistMigrationValidation.requireEntryTransition(.matching, to: .matched)
+            entry.status = .matched; entry.updatedAt = max(now, entry.updatedAt.addingTimeInterval(0.01)); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false,
+                                   outcome: "selected", updatedAt: now).save(db)
         }
     }
 

@@ -75,7 +75,7 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
         }
     }
     static func entries(_ db: Database, migrationID: String? = nil) throws -> [PlaylistMigrationEntry] {
-        try MigrationEntryRecord.fetchAll(db, sql: "SELECT * FROM migration_entries WHERE (? IS NULL OR migrationID = ?) ORDER BY migrationID, sourcePosition", arguments: [migrationID, migrationID]).map { try $0.model() }
+        try MigrationEntryRecord.fetchAll(db, sql: "SELECT * FROM migration_entries WHERE (? IS NULL OR migrationID = ?) AND removedAt IS NULL ORDER BY migrationID, sourcePosition", arguments: [migrationID, migrationID]).map { try $0.model() }
     }
     static func sessions(_ db: Database) throws -> [PlaylistMigrationSession] {
         try MigrationSessionRecord.order(Column("createdAt"), Column("id")).fetchAll(db).map { try $0.model() }
@@ -110,6 +110,8 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
     func updateEntryStatus(entryID: UUID, to status: PlaylistMigrationEntryStatus) async throws {
         try await db.write { [self] db in
             var record = try Self.requiredEntry(entryID, db: db)
+            // An occurrence removed from its playlist only comes back through Undo.
+            guard try !Self.isRemoved(db, entryID: record.id) else { throw PlaylistMigrationStorageError.notFound }
             try PlaylistMigrationValidation.requireEntryTransition(record.status, to: status)
             // Only associateVerifiedTrack may establish ready, after audio inspection.
             if status == .ready {
@@ -202,7 +204,10 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
             let session = try Self.requiredSession(migrationID, db: db)
             try Self.verify(session, db: db)
             let rows = try Self.rows(db, playlistID: session.destinationPlaylistID, paths: paths)
-            return PlaylistMigrationProgress(expected: session.expectedEntryCount, states: rows.map(\.effectiveStatus), metadataCommitted: true)
+            // Occurrences the user removed from the playlist are no longer expected.
+            let removed = try Self.removedCount(db, migrationID: session.id)
+            let expected = session.expectedEntryCount - removed
+            return PlaylistMigrationProgress(expected: expected, states: rows.map(\.effectiveStatus), metadataCommitted: true)
         }
     }
 

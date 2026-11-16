@@ -38,7 +38,7 @@ final class MigrationCoordinatorRepository: ProviderCooldownPersisting, @uncheck
     static func overview(_ db: Database, algorithm: String, now: Date) throws -> [MigrationOverview] {
         let rows = try Row.fetchAll(db, sql: """
             SELECT m.id, m.status, m.createdAt, j.intent, COALESCE(ctl.userPaused, 0) AS downloadsPaused,
-              (SELECT COUNT(*) FROM migration_entries e WHERE e.migrationID = m.id) AS total,
+              (SELECT COUNT(*) FROM migration_entries e WHERE e.migrationID = m.id AND e.removedAt IS NULL) AS total,
               (SELECT COUNT(*) FROM migration_entries e WHERE e.migrationID = m.id AND e.status = 'ready' AND e.localTrackID IS NOT NULL) AS ready,
               (SELECT COUNT(*) FROM migration_entries e WHERE e.migrationID = m.id AND e.status IN ('pending','matching')) AS unmatched,
               (SELECT COUNT(*) FROM migration_entries e LEFT JOIN migration_matching_checkpoints c ON c.entryID = e.id

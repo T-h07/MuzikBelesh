@@ -67,6 +67,60 @@ import SwiftUI
     func removeManualOccurrence(_ id: String, playlistID: String) throws {
         try requiredRepository().removeManualOccurrence(id, playlistID: playlistID)
     }
+
+    // MARK: Remove from Playlist (occurrence-level, with Undo)
+
+    /// The last removal, offered as Undo by the playlist screen.
+    @Published var pendingUndo: PlaylistRemovalUndo?
+
+    /// An imported (Spotify) occurrence. Only this occurrence leaves the playlist; its
+    /// audio, other occurrences and other playlists are untouched.
+    func removeImportedOccurrence(_ entryID: UUID, title: String, playlistID: String) async {
+        guard let storage else { return }
+        do {
+            try await storage.playlistMigrations.removeOccurrence(entryID: entryID, playlistID: playlistID)
+            pendingUndo = PlaylistRemovalUndo(playlistID: playlistID, title: title, kind: .imported(entryID)); error = nil
+        } catch { report(error) }
+    }
+    /// A song added manually to an imported playlist (one occurrence; duplicates stay).
+    func removeManualRow(_ row: LocalPlaylistRow, playlistID: String) {
+        perform {
+            try removeManualOccurrence(row.id, playlistID: playlistID)
+            pendingUndo = PlaylistRemovalUndo(playlistID: playlistID, title: row.track.title, kind: .manual(row.occurrence))
+        }
+    }
+    /// A song in an ordinary playlist (set semantics: one membership per song).
+    func removeFromOrdinaryPlaylist(_ trackID: String, playlistID: String) {
+        let index = playlistTrackIDs[playlistID]?.firstIndex(of: trackID) ?? 0
+        let title = tracksByID[trackID]?.title ?? "Song"
+        perform {
+            try removeTrack(trackID, playlistID: playlistID)
+            pendingUndo = PlaylistRemovalUndo(playlistID: playlistID, title: title, kind: .ordinary(trackID: trackID, index: index))
+        }
+    }
+    func undoRemoval() async {
+        guard let undo = pendingUndo else { return }
+        pendingUndo = nil
+        do {
+            switch undo.kind {
+            case .imported(let entryID):
+                guard let storage else { return }
+                try await storage.playlistMigrations.restoreOccurrence(entryID: entryID, playlistID: undo.playlistID)
+            case .manual(let occurrence): try requiredRepository().restoreManualOccurrence(occurrence)
+            case .ordinary(let trackID, let index): try requiredRepository().insertTrack(trackID, at: index, playlistID: undo.playlistID)
+            }
+            error = nil
+        } catch { report(error) }
+    }
+
+    /// Playlists (ordinary memberships and manual occurrences in imported playlists) that
+    /// would lose this song if its audio were deleted from the library.
+    func playlistUses(of trackID: String) -> Int {
+        Set(snapshot.memberships.filter { $0.trackID == trackID }.map(\.playlistID))
+            .union(snapshot.localOccurrences.filter { $0.trackID == trackID }.map(\.playlistID)).count
+    }
+    /// Imported occurrences (any playlist) that play this recording.
+    func importedUses(of trackID: String) -> Int { snapshot.migrationEntries.filter { $0.localTrackID == trackID }.count }
     func playMigration(playlistID: String, occurrenceID: String? = nil, shuffle: Bool = false) async {
         guard let storage, let player else { return }
         do {

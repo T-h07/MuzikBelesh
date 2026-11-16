@@ -72,6 +72,12 @@ enum MigrationIssueClassifier {
         case .skipped:
             return .skipped
         case .unavailable:
+            if facts.acceptedProvider == "youtube" {
+                // The confirmed recording's download was deleted (or its file went missing):
+                // it can simply be downloaded again through the shared queue.
+                return failure(.missingLocalAudio, stage: .association, provenance: .playlistAssociation,
+                               actions: [.downloadAgain, .attachLocalRecording, .importLocalFile, .skip])
+            }
             if facts.acceptedProvider == "local" || facts.checkpointOutcome == nil || facts.checkpointOutcome == "local" {
                 return failure(.missingLocalAudio, stage: .association, provenance: .playlistAssociation,
                                actions: [.attachLocalRecording, .importLocalFile, .skip])

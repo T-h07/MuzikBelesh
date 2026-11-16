@@ -315,6 +315,19 @@ struct MigrationBulkRetryResult: Equatable, Sendable {
         return try await migrations.entry(id: occurrence.id)
     }
 
+    /// Download Again after the local audio of a confirmed recording was deleted.
+    func downloadAgain(_ occurrence: MigrationOccurrenceReport) async throws -> String {
+        guard occurrence.assessment.actions.contains(.downloadAgain) else { throw MigrationIssueCommandError.notApplicable }
+        let migrationID = occurrence.entry.migrationID
+        let message = try await command(occurrence.id) {
+            do { try await self.repository.downloadAgain(entryID: occurrence.id, migrationID: migrationID, now: self.now()) }
+            catch SongMatchingError.staleAttempt { throw MigrationIssueCommandError.changed }
+            return "Download queued."
+        }
+        afterUserTransition()
+        return message
+    }
+
     private func afterUserTransition() {
         acquisition?.requestReconcile(immediately: true)
         if let coordinator { Task { await coordinator.reconcileAll() } }

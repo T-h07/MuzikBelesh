@@ -145,6 +145,8 @@ enum MigrationIssueAction: String, Codable, CaseIterable, Sendable, Identifiable
     case importLocalFile
     case skip
     case restore
+    /// Re-download the confirmed recording after its local audio was deleted.
+    case downloadAgain
     var id: String { rawValue }
 
     var title: String {
@@ -157,6 +159,7 @@ enum MigrationIssueAction: String, Codable, CaseIterable, Sendable, Identifiable
         case .importLocalFile: "Import Local Audio"
         case .skip: "Skip Song"
         case .restore: "Restore Song"
+        case .downloadAgain: "Download Again"
         }
     }
 }
@@ -274,4 +277,6 @@ enum MigrationIssueCloseReason: String, Codable, Sendable {
     case skipped
     /// The occurrence is back in automatic processing (for example after a retry).
     case recovering
+    /// An explicit user action ended it (for example removing the song from its playlist).
+    case userAction
 }

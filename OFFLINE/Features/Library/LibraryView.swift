@@ -139,6 +139,7 @@ struct StoredTrackRow: View {
     var onInteraction: () -> Void = { }
     @State private var showingEditor = false
     @State private var showingPlaylists = false
+    @State private var showingDetails = false
     @State private var confirmingDeletion = false
     @State private var exporting = false
     @State private var exportDocument: PreparedAudioExport?
@@ -154,6 +155,7 @@ struct StoredTrackRow: View {
         .padding(.vertical, AppSpacing.xs).contextMenu { actions }
         .sheet(isPresented: $showingEditor) { TrackEditorView(trackID: track.id) }
         .sheet(isPresented: $showingPlaylists) { AddToPlaylistView(trackIDs: [track.id]) }
+        .sheet(isPresented: $showingDetails) { SongOptionsView(context: .library(trackID: track.id, playlistID: playlistID, contextIDs: ids, kind: contextKind)) }
         .onChange(of: showingEditor) { _, shown in if shown { onInteraction() } }
         .onChange(of: showingPlaylists) { _, shown in if shown { onInteraction() } }
         .onChange(of: confirmingDeletion) { _, shown in if shown { onInteraction() } }
@@ -181,11 +183,12 @@ struct StoredTrackRow: View {
         Button { play() } label: { Label("Play Now", systemImage: "play.fill") }.disabled(track.availability != .available)
         Button { container.audioPlayer.queue.playNext(trackID: track.id) } label: { Label("Play Next", systemImage: "text.insert") }.disabled(track.availability != .available)
         Button { container.audioPlayer.queue.addToQueue(trackID: track.id) } label: { Label("Add to Queue", systemImage: "text.badge.plus") }.disabled(track.availability != .available)
+        Button { showingDetails = true } label: { Label("Song Details", systemImage: "info.circle") }
         Button { showingPlaylists = true } label: { Label("Add to Playlist", systemImage: "rectangle.stack.badge.plus") }
         Button { library.perform { try library.setLiked(!library.snapshot.likedIDs.contains(track.id), trackID: track.id) } } label: { Label(library.snapshot.likedIDs.contains(track.id) ? "Unlike Song" : "Like Song", systemImage: "heart") }
         Button { showingEditor = true } label: { Label("Edit Metadata", systemImage: "pencil") }
         Button { export() } label: { Label("Export Audio", systemImage: "square.and.arrow.up") }.disabled(track.availability != .available)
-        if let playlistID { Button { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } label: { Label("Remove from Playlist", systemImage: "minus.circle") } }
+        if let playlistID { Button { library.removeFromOrdinaryPlaylist(track.id, playlistID: playlistID) } label: { Label("Remove from Playlist", systemImage: "minus.circle") } }
         if let albumID { Button { library.perform { try library.removeAlbumTrack(track.id, albumID: albumID) } } label: { Label("Remove from Album", systemImage: "minus.circle") } }
         Button(role: .destructive) { confirmingDeletion = true } label: { Label(track.availability == .missing ? "Remove Missing Entry" : "Delete Song", systemImage: "trash") }
     }

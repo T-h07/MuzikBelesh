@@ -39,24 +39,47 @@ struct MigrationPlaylistOccurrenceRow: View {
     @EnvironmentObject private var container: AppContainer
     let row: MigrationPlaylistRow
     let playlistID: String
+    @State private var options: SongOptionsContext?
     var body: some View {
         HStack(spacing: AppSpacing.sm) {
-            NavigationLink {
-                MigrationOccurrenceDetailView(playlistID: playlistID, occurrenceID: row.id)
-            } label: {
-                MigrationOccurrenceLabel(row: row) {
-                    if let acquisition = container.playlistAcquisition { AcquisitionOccurrenceStatus(acquisition: acquisition, row: row) }
-                    else { MigrationOccurrenceStatusText(row: row, text: row.effectiveStatus.displayName, attention: false).equatable() }
-                }
-            }.accessibilityIdentifier("migration-occurrence-" + row.id.uuidString)
+            // State decides the interaction: verified, present audio plays like any library
+            // song; anything else opens the matching / recovery inspector.
             if row.playableTrack != nil {
                 Button { Task { await library.playMigration(playlistID: playlistID, occurrenceID: row.id.uuidString) } } label: {
-                    Image(systemName: "play.circle.fill").frame(width: 44, height: 44)
-                }.buttonStyle(.borderless).tint(AppColors.accentPrimary)
-                    .accessibilityLabel("Play \(row.entry.source.title), source position \(row.entry.position + 1)")
-                    .accessibilityIdentifier("migration-occurrence-play-" + row.id.uuidString)
+                    MigrationOccurrenceLabel(row: row) { status }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play \(row.entry.source.title), position \(row.entry.position + 1)")
+                .accessibilityIdentifier("migration-occurrence-" + row.id.uuidString)
+                Button { options = .imported(entryID: row.id, playlistID: playlistID) } label: {
+                    Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 44, height: 44)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Options for \(row.entry.source.title)")
+                .accessibilityIdentifier("occurrence-options-" + row.id.uuidString)
+            } else {
+                NavigationLink {
+                    MigrationOccurrenceDetailView(playlistID: playlistID, occurrenceID: row.id)
+                } label: {
+                    MigrationOccurrenceLabel(row: row) { status }
+                }.accessibilityIdentifier("migration-occurrence-" + row.id.uuidString)
             }
         }
+        .swipeActions {
+            Button("Remove from Playlist", role: .destructive) {
+                Task { await library.removeImportedOccurrence(row.id, title: row.entry.source.title, playlistID: playlistID) }
+            }.accessibilityIdentifier("occurrence-remove-" + row.id.uuidString)
+        }
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await library.removeImportedOccurrence(row.id, title: row.entry.source.title, playlistID: playlistID) }
+            } label: { Label("Remove from Playlist", systemImage: "minus.circle") }
+        }
+        .sheet(item: $options) { SongOptionsView(context: $0) }
+    }
+    @ViewBuilder private var status: some View {
+        if let acquisition = container.playlistAcquisition { AcquisitionOccurrenceStatus(acquisition: acquisition, row: row) }
+        else { MigrationOccurrenceStatusText(row: row, text: row.effectiveStatus.displayName, attention: false).equatable() }
     }
 }
 

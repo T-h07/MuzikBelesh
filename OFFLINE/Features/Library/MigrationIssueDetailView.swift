@@ -89,6 +89,10 @@ struct MigrationIssueDetailView: View {
                     Button { retry(row) } label: { Label("Search Again", systemImage: "magnifyingglass") }
                         .buttonStyle(.matchingPrimaryWide).disabled(busy).accessibilityIdentifier("migration-issue-detail-retry-song")
                 }
+                if actions.contains(.downloadAgain) {
+                    Button { run { try await issues.downloadAgain(row) } } label: { Label("Download Again", systemImage: "arrow.down.circle") }
+                        .buttonStyle(.matchingPrimaryWide).disabled(busy).accessibilityIdentifier("migration-issue-detail-download-again")
+                }
                 if actions.contains(.chooseOtherRecording) {
                     Button { confirmingRelease = true } label: { Label("Choose Other Recording", systemImage: "rectangle.stack") }
                         .buttonStyle(.matchingSecondaryWide).disabled(busy).accessibilityIdentifier("migration-issue-detail-choose-other")

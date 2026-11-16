@@ -9,6 +9,7 @@ struct PlaylistDetailView: View {
     @State private var showingTracks = false
     @State private var confirmingDelete = false
     @State private var editMode: EditMode = .inactive
+    @State private var songOptions: SongOptionsContext?
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
     private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
@@ -39,19 +40,23 @@ struct PlaylistDetailView: View {
                         }
                         ForEach(library.manualRows(playlistID)) { row in
                             HStack {
-                                StoredArtworkView(track: row.track, size: 44)
-                                VStack(alignment: .leading) {
-                                    Text(row.track.title)
-                                    Text("Manually added • " + library.artistName(row.track.artistID)).font(.caption)
-                                }
-                                Spacer()
                                 Button { Task { await library.playMigration(playlistID: playlistID, occurrenceID: row.occurrence.playbackID) } } label: {
-                                    Image(systemName: "play.circle.fill").frame(width: 44, height: 44)
-                                }.buttonStyle(.borderless).disabled(!row.available).accessibilityLabel("Play " + row.track.title)
+                                    HStack {
+                                        StoredArtworkView(track: row.track, size: 44)
+                                        VStack(alignment: .leading) {
+                                            Text(row.track.title)
+                                            Text("Manually added • " + library.artistName(row.track.artistID)).font(.caption)
+                                        }
+                                        Spacer()
+                                    }.contentShape(Rectangle())
+                                }.buttonStyle(.plain).disabled(!row.available).accessibilityLabel("Play " + row.track.title)
+                                    .accessibilityIdentifier("manual-occurrence-" + row.id)
+                                Button { songOptions = .manual(row: row, playlistID: playlistID) } label: {
+                                    Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 44, height: 44)
+                                }.buttonStyle(.borderless).accessibilityLabel("Options for \(row.track.title)")
+                                    .accessibilityIdentifier("occurrence-options-" + row.id)
                             }.listRowBackground(AppColors.backgroundPrimary)
-                                .swipeActions { Button("Remove Added Song", role: .destructive) {
-                                    library.perform { try library.removeManualOccurrence(row.id, playlistID: playlistID) }
-                                } }
+                                .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeManualRow(row, playlistID: playlistID) } }
                         }
                     } else {
                     if songs.isEmpty { Text("This playlist is empty. Add songs from your Library.").foregroundStyle(AppColors.textSecondary) }
@@ -65,7 +70,7 @@ struct PlaylistDetailView: View {
                                 }
                             } else {
                                 StoredTrackRow(track: track, contextTrackIDs: songs.map(\.id), contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
-                                    .swipeActions { Button("Remove from Playlist", role: .destructive) { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } }
+                                    .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeFromOrdinaryPlaylist(track.id, playlistID: playlistID) } }
                             }
                         }.listRowBackground(AppColors.backgroundPrimary)
                     }.onMove { source, destination in
@@ -77,6 +82,12 @@ struct PlaylistDetailView: View {
             } else { Text("This playlist was removed.").foregroundStyle(AppColors.textSecondary) }
         }
         .environment(\.editMode, $editMode)
+        .sheet(item: $songOptions) { SongOptionsView(context: $0) }
+        .safeAreaInset(edge: .bottom) {
+            if let undo = library.pendingUndo, undo.playlistID == playlistID {
+                PlaylistRemovalUndoBanner(undo: undo)
+            }
+        }
         .scrollContentBackground(.hidden).screenBackground().navigationTitle("Playlist").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
