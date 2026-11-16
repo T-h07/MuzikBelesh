@@ -386,6 +386,9 @@ final class LibraryManagementUITests: XCTestCase {
         app.buttons["playlist-save"].tap()
         XCTAssertTrue(app.staticTexts["Road Renamed"].waitForExistence(timeout: 8))
         app.buttons["playlist-add-songs"].tap()
+        let fromLibrary = app.buttons["From Your Library"].firstMatch // The dialog exposes its button more than once.
+        XCTAssertTrue(fromLibrary.waitForExistence(timeout: 5)); fromLibrary.tap()
+        XCTAssertTrue(app.buttons["select-track-ui-track-a"].waitForExistence(timeout: 5))
         for id in ["ui-track-a", "ui-track-b", "ui-track-c"] { app.buttons["select-track-" + id].tap() }
         app.buttons["playlist-confirm-add"].tap()
         XCTAssertTrue(app.buttons["playlist-reorder"].waitForExistence(timeout: 8)); app.buttons["playlist-reorder"].tap()

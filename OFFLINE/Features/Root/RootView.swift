@@ -48,7 +48,10 @@ private struct RootTabsView: View {
                 } else { container.playlistMatching?.setForeground(phase == .active) }
             }
             if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
-            if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile() }
+            if phase == .active {
+                audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile()
+                container.migrationIssues?.applicationDidBecomeActive()
+            }
             else { searchFocus = nil }
         }
         .preferredColorScheme(.dark)
@@ -80,6 +83,12 @@ private struct RootTabsView: View {
             coordinator.selectedTab = .library
             coordinator.sheet = .playlist(id)
         }
+        .onReceive(container.migrationIssues.map { $0.$requestedIssuesPlaylistID.eraseToAnyPublisher() } ?? Empty<String?, Never>().eraseToAnyPublisher()) { id in
+            // A migration attention notification was opened. A deleted playlist is ignored.
+            guard let id else { return }
+            container.migrationIssues?.requestedIssuesPlaylistID = nil
+            openMigrationIssues(id)
+        }
         .alert("Could not read the shared link inbox", isPresented: $shareReadFailed) {
             Button("Retry") { shareRevision += 1 }
             Button("Close", role: .cancel) { }
@@ -90,6 +99,7 @@ private struct RootTabsView: View {
             case .importLink: ImportLinkView()
             case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)])
             case .playlist(let id): NotificationPlaylistSheet(playlistID: id)
+            case .migrationIssues(let id): NotificationMigrationIssuesSheet(playlistID: id)
             case .sharedLink(let share):
                 ImportLinkView(initialURL: share.url).onAppear {
                     Task {
@@ -100,6 +110,22 @@ private struct RootTabsView: View {
             }
         }
         .fullScreenCover(isPresented: $coordinator.showingNowPlaying) { NowPlayingView(coordinator: coordinator) }
+    }
+
+    /// On a cold launch the library snapshot may still be loading: wait a bounded time
+    /// for the playlist, then give up silently if it was deleted (no invalid destination).
+    private func openMigrationIssues(_ id: String) {
+        Task { @MainActor in
+            for _ in 0..<40 {
+                if library.snapshot.playlists.contains(where: { $0.id == id }) {
+                    guard library.isMigrationPlaylist(id) else { return }
+                    coordinator.selectedTab = .library
+                    coordinator.sheet = .migrationIssues(id)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
     }
 
     private static var hasModal: Bool {

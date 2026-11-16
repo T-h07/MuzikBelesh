@@ -21,6 +21,9 @@ final class AppContainer: ObservableObject {
     let playlistAcquisition: PlaylistAcquisitionCoordinator?
     /// Phase 10.6: the single owner of migration lifecycle decisions. Nil without storage.
     let migrationCoordinator: PlaylistMigrationCoordinator?
+    /// Phase 10.7: persistent issue reporting, completion summaries and aggregate
+    /// notifications. Observes the coordinators above; owns no scheduling.
+    let migrationIssues: MigrationIssueCoordinator?
     let youtubeSearch: YouTubeSearchService
     let youtubeMetadata: any YouTubeMetadataProvider
     let youtubeResolver: any YouTubeAudioResolver
@@ -93,6 +96,14 @@ final class AppContainer: ObservableObject {
             self.migrationCoordinator = migrationCoordinator
             Task { await migrationCoordinator.start() }
         } else { self.migrationCoordinator = nil }
+        if let storage = self.storage {
+            // The same notification delegate as acquisition; never a competing one.
+            let notifier: any MigrationIssueNotifying = (acquisitionNotifier as? MigrationIssueNotifying) ?? SilentAcquisitionNotifier()
+            let issues = MigrationIssueCoordinator(repository: MigrationIssueRepository(db: storage.database.dbQueue, paths: storage.paths),
+                migrations: storage.playlistMigrations, coordinator: migrationCoordinator, acquisition: playlistAcquisition, notifier: notifier)
+            self.migrationIssues = issues
+            Task { await issues.start() }
+        } else { self.migrationIssues = nil }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)

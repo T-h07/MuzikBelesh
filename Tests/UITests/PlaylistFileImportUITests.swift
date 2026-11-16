@@ -58,7 +58,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let open = app.buttons["playlist-import-open"]
         XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
         let count = app.staticTexts["migration-playlist-count"]
-        XCTAssertTrue(count.waitForExistence(timeout: 5)); XCTAssertEqual(count.label, "500 imported • 0 manually added • 500 total • 0 available offline")
+        XCTAssertTrue(count.waitForExistence(timeout: 5)); XCTAssertEqual(count.label, "500 songs")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
     }
 
@@ -109,12 +109,16 @@ final class PlaylistFileImportUITests: XCTestCase {
         let open = app.buttons["playlist-import-open"].firstMatch
         XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 imported • 0 manually added • 1,000 total • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 songs")
+        // Diagnostics are no longer on the playlist screen; they open on request.
+        XCTAssertFalse(app.buttons["migration-dashboard-toggle"].exists, "The playlist screen shows no migration diagnostics")
+        openMigrationDetails()
         let toggle = app.buttons["migration-dashboard-toggle"]
         scrollTo(toggle); toggle.tap()
         let pending = app.descendants(matching: .any)["migration-breakdown-pending"].firstMatch
         scrollTo(pending); XCTAssertTrue(pending.exists)
-        scrollTo(toggle, down: true); toggle.tap()
+        app.buttons["migration-details-done"].tap()
+        XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
         let start = Date()
         for _ in 0..<12 { app.swipeUp(velocity: .fast) }
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "migration-occurrence-"))
@@ -136,12 +140,20 @@ final class PlaylistFileImportUITests: XCTestCase {
         let playlist = app.staticTexts["Synthetic Import"]
         XCTAssertTrue(playlist.waitForExistence(timeout: 10)); playlist.tap()
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 imported • 0 manually added • 1,000 total • 0 available offline")
-        // Import metadata now lives in Migration Details; matching is the primary progress.
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 songs")
+        // Import metadata lives in Migration Details (playlist ••• menu).
+        openMigrationDetails()
         let details = app.buttons["migration-dashboard-toggle"]
         scrollTo(details); details.tap()
         scrollTo(app.staticTexts["migration-unresolved-count"])
         XCTAssertEqual(app.staticTexts["migration-unresolved-count"].label, "Unresolved: 1000")
+    }
+
+    private func openMigrationDetails(file: StaticString = #filePath, line: UInt = #line) {
+        app.buttons["playlist-actions"].tap()
+        let item = app.buttons["Migration Details"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), file: file, line: line); item.tap()
+        XCTAssertTrue(app.navigationBars["Migration Details"].waitForExistence(timeout: 5), file: file, line: line)
     }
 
     /// Bounded: stops at the first swipe that makes `element` tappable.

@@ -310,6 +310,27 @@ import GRDB
         scheduleRefresh()
     }
 
+    /// Phase 10.7 Retry All Eligible Failures: an explicit retry for exactly the listed
+    /// occurrences. Occurrences that changed meanwhile (confirmed, skipped, now holding a
+    /// decision) are left alone. Work runs through the normal bounded slices, so provider
+    /// cooldowns, user Pause and the single matching worker are respected. Returns the
+    /// number actually queued.
+    @discardableResult
+    func retryEntries(_ migrationID: UUID, entryIDs: [UUID]) async throws -> Int {
+        var queued: [UUID] = []
+        for id in entryIDs {
+            do { try await migrations.markRetryable(entryID: id); queued.append(id) }
+            catch SongMatchingError.staleAttempt { continue }
+        }
+        guard !queued.isEmpty else { return 0 }
+        try await prepareExplicitRetry(migrationID)
+        try await repository.scheduleExplicitRetry(queued, migrationID: migrationID, now: now())
+        CoordinatorDiagnostics.event("retryScheduled", migration: migrationID, ["explicit": String(queued.count), "scope": "issues"])
+        await ensureWorker()
+        scheduleRefresh()
+        return queued.count
+    }
+
     /// A `fatal` intent only changes through an explicit supported action.
     private func prepareExplicitRetry(_ migrationID: UUID) async throws {
         if try await migrations.matchingIntent(migrationID) == "fatal" {

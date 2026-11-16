@@ -13,10 +13,14 @@ import UserNotifications
     var onOpenPlaylist: ((String) -> Void)? { get set }
 }
 
-@MainActor final class UserNotificationAcquisitionNotifier: NSObject, PlaylistAcquisitionNotifying, UNUserNotificationCenterDelegate {
+@MainActor final class UserNotificationAcquisitionNotifier: NSObject, PlaylistAcquisitionNotifying, MigrationIssueNotifying, UNUserNotificationCenterDelegate {
     nonisolated static let playlistKey = "playlistID"
+    /// Phase 10.7: where a tap should land ("issues" opens Migration Issues).
+    nonisolated static let destinationKey = "destination"
+    nonisolated static let issuesDestination = "issues"
     private let center: UNUserNotificationCenter
     var onOpenPlaylist: ((String) -> Void)?
+    var onOpenIssues: ((String) -> Void)?
 
     init(center: UNUserNotificationCenter = .current()) {
         self.center = center
@@ -32,6 +36,19 @@ import UserNotifications
     }
 
     func deliver(identifier: String, title: String, body: String, playlistID: String) async -> AcquisitionNotificationDelivery {
+        await schedule(identifier: identifier, title: title, body: body, userInfo: [Self.playlistKey: playlistID])
+    }
+
+    /// Same delegate, permission handling and delivery contract as acquisition
+    /// notifications; only the tap destination differs.
+    func deliverMigrationReport(identifier: String, title: String, body: String, playlistID: String,
+                                opensIssues: Bool) async -> AcquisitionNotificationDelivery {
+        var info = [Self.playlistKey: playlistID]
+        if opensIssues { info[Self.destinationKey] = Self.issuesDestination }
+        return await schedule(identifier: identifier, title: title, body: body, userInfo: info)
+    }
+
+    private func schedule(identifier: String, title: String, body: String, userInfo: [String: String]) async -> AcquisitionNotificationDelivery {
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
         case .authorized, .provisional, .ephemeral: break
@@ -42,7 +59,7 @@ import UserNotifications
         content.title = title
         content.body = body
         content.sound = .default
-        content.userInfo = [Self.playlistKey: playlistID]
+        content.userInfo = userInfo
         do {
             try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
             return .delivered
@@ -56,21 +73,28 @@ import UserNotifications
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
-        let playlistID = response.notification.request.content.userInfo[Self.playlistKey] as? String
+        let info = response.notification.request.content.userInfo
+        let playlistID = info[Self.playlistKey] as? String
+        let issues = (info[Self.destinationKey] as? String) == Self.issuesDestination
         Task { @MainActor in
-            // The coordinator installs this handler during app initialization, before a
+            // The coordinators install these handlers during app initialization, before a
             // launch-causing tap is delivered.
-            if let playlistID { self.onOpenPlaylist?(playlistID) }
+            if let playlistID {
+                if issues, let open = self.onOpenIssues { open(playlistID) } else { self.onOpenPlaylist?(playlistID) }
+            }
             completionHandler()
         }
     }
 }
 
 /// Used where no notification delivery is wanted (unit and UI tests by default).
-@MainActor final class SilentAcquisitionNotifier: PlaylistAcquisitionNotifying {
+@MainActor final class SilentAcquisitionNotifier: PlaylistAcquisitionNotifying, MigrationIssueNotifying {
     var onOpenPlaylist: ((String) -> Void)?
+    var onOpenIssues: ((String) -> Void)?
     func requestAuthorizationIfUndetermined() async {}
     func deliver(identifier: String, title: String, body: String, playlistID: String) async -> AcquisitionNotificationDelivery { .notPermitted }
+    func deliverMigrationReport(identifier: String, title: String, body: String, playlistID: String,
+                                opensIssues: Bool) async -> AcquisitionNotificationDelivery { .notPermitted }
 }
 
 /// Short, bounded app execution while iOS has woken the app (for example after a

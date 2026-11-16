@@ -24,7 +24,7 @@ final class PlaylistMigrationUITests: XCTestCase {
     func testFiveHundredPlaceholdersRemainVisibleAcrossRelaunch() {
         executionTimeAllowance = 120 // Includes a relaunch (49 s of 60 in CI #23); capped at 120 s.
         open("Imported placeholders")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 imported • 0 manually added • 500 total • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 songs")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
         // Hybrid playlists (80bdeba): songs can be added manually to an imported playlist,
         // but its source order is preserved, so it is never reorderable.
@@ -34,12 +34,12 @@ final class PlaylistMigrationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Original artist"].firstMatch.exists)
         app.terminate(); app.launchArguments = ["--ui-testing", "--migration-fixtures"]; app.launch()
         open("Imported placeholders")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 imported • 0 manually added • 500 total • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 songs")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
     }
     func testMixedOccurrencesShowSourceCountAndDistinctRows() {
         open("Imported mixed")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 imported • 0 manually added • 5 total • 3 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 songs")
         XCTAssertTrue(app.buttons["collection-play"].isEnabled)
         app.swipeUp()
         let first = app.staticTexts["Original song 0"], second = app.staticTexts["Original song 1"]
@@ -48,21 +48,90 @@ final class PlaylistMigrationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Awaiting local audio"].firstMatch.exists)
         XCTAssertTrue(app.staticTexts["Available offline"].firstMatch.exists)
     }
+    /// A verified imported song behaves like a library song: its options show the song,
+    /// never matching candidates, and Play starts playback.
+    func testReadyImportedSongOpensSongOptionsNotCandidates() {
+        open("Imported mixed")
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "occurrence-options-")).firstMatch
+        if !options.isHittable { app.swipeUp() }
+        XCTAssertTrue(options.waitForExistence(timeout: 5)); options.tap()
+        let title = app.staticTexts["song-options-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.label, "Original song 0")
+        XCTAssertTrue(app.descendants(matching: .any)["song-options-artwork"].exists)
+        XCTAssertFalse(app.staticTexts["Suggested Recordings"].exists, "No candidate list for a ready song")
+        XCTAssertFalse(app.staticTexts["migration-inspector-status"].exists)
+        XCTAssertTrue(app.buttons["song-options-remove"].exists)
+        let play = app.buttons["song-options-play"]
+        XCTAssertTrue(play.isEnabled); play.tap()
+        waitUntil(play, "label == %@", "Pause", timeout: 10, message: "The verified recording plays")
+    }
+
+    /// Playlist search filters what is shown; clearing restores the full playlist.
+    func testPlaylistSearchFiltersAndClearRestoresAllSongs() {
+        open("Imported mixed")
+        let field = app.textFields["playlist-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap()
+        field.typeText("song 3")
+        XCTAssertTrue(app.staticTexts["Original song 3"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Original song 0"].exists, "Non-matching songs are hidden")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 songs", "Search never changes the playlist")
+        field.typeText(" nothing matches this")
+        XCTAssertTrue(app.staticTexts["playlist-search-empty"].waitForExistence(timeout: 5))
+        let clear = app.buttons["playlist-search-clear"]
+        XCTAssertTrue(clear.exists); clear.tap()
+        XCTAssertTrue(app.staticTexts["Original song 0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Original song 3"].exists)
+        XCTAssertFalse(app.staticTexts["playlist-search-empty"].exists)
+    }
+
+    /// Unresolved songs keep the matching inspector.
+    func testUnresolvedImportedSongStillOpensMatching() {
+        open("Imported mixed")
+        let unresolved = app.staticTexts["Original song 1"]
+        if !unresolved.isHittable { app.swipeUp() }
+        XCTAssertTrue(unresolved.waitForExistence(timeout: 5)); unresolved.tap()
+        let status = app.staticTexts["migration-inspector-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertEqual(status.label, "Awaiting local audio")
+    }
+
+    /// Remove from Playlist removes one occurrence (duplicates of the same audio stay)
+    /// and Undo restores it.
+    func testRemovingAnImportedOccurrenceUpdatesCountsAndUndoRestoresIt() {
+        open("Imported mixed")
+        let count = app.staticTexts["migration-playlist-count"]
+        XCTAssertEqual(count.label, "5 songs")
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "occurrence-options-")).firstMatch
+        if !options.isHittable { app.swipeUp() }
+        XCTAssertTrue(options.waitForExistence(timeout: 5)); options.tap()
+        let remove = app.buttons["song-options-remove"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5)); remove.tap()
+        let undo = app.buttons["playlist-removal-undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        waitUntil(count, "label == %@", "4 songs", timeout: 5,
+                  message: "Only the selected occurrence is removed; the other two using the same audio stay playable")
+        undo.tap()
+        waitUntil(count, "label == %@", "5 songs", timeout: 5, message: "Undo restores it")
+    }
+
     /// Product contract: imported playlists accept existing local songs as independent
     /// occurrences appended after the Spotify entries, without replacing placeholders.
     func testAddingLocalSongsAppendsOccurrencesAndPersistsAcrossRelaunch() {
         executionTimeAllowance = 120 // Includes a relaunch; capped at 120 s by the workflows.
         open("Imported mixed")
         let count = app.staticTexts["migration-playlist-count"]
-        XCTAssertEqual(count.label, "5 imported • 0 manually added • 5 total • 3 available offline")
+        XCTAssertEqual(count.label, "5 songs")
         app.buttons["playlist-add-songs"].tap()
+        let fromLibrary = app.buttons["From Your Library"].firstMatch // The dialog exposes its button more than once.
+        XCTAssertTrue(fromLibrary.waitForExistence(timeout: 5)); fromLibrary.tap()
         // ui-track-a already backs three imported occurrences; adding it again is a new occurrence.
         for id in ["ui-track-b", "ui-track-a"] {
             let row = app.buttons["select-track-" + id]
             XCTAssertTrue(row.waitForExistence(timeout: 5)); XCTAssertTrue(row.isEnabled, "\(id) is selectable"); row.tap()
         }
         app.buttons["playlist-confirm-add"].tap()
-        let expected = "5 imported • 2 manually added • 7 total • 5 available offline"
+        let expected = "7 songs"
         waitUntil(count, "label == %@", expected, timeout: 5, message: "Manual songs are appended and playable")
         XCTAssertTrue(app.buttons["collection-play"].isEnabled)
         XCTAssertFalse(app.buttons["playlist-reorder"].exists, "Source order stays fixed")

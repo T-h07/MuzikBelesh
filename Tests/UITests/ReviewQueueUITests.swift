@@ -44,9 +44,14 @@ final class ReviewQueueUITests: XCTestCase {
         XCTAssertTrue(filter.waitForExistence(timeout: 5)); filter.tap()
         let playlist = app.staticTexts["Review queue"]
         XCTAssertTrue(playlist.waitForExistence(timeout: 5)); playlist.tap()
+        // Migration review lives in Migration Details (playlist ••• menu).
+        let actions = app.buttons["playlist-actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 5)); actions.tap()
+        let details = app.buttons["Migration Details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5)); details.tap()
         let review = app.buttons["migration-review-songs"]
         XCTAssertTrue(review.waitForExistence(timeout: 5))
-        XCTAssertTrue(scroll(app.collectionViews.firstMatch, toReveal: review, maxSwipes: 6), "Review Songs is reachable")
+        XCTAssertTrue(scroll(app, toReveal: review, maxSwipes: 6), "Review Songs is reachable")
         review.tap()
         XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5))
     }
@@ -129,7 +134,7 @@ final class ReviewQueueUITests: XCTestCase {
         reveal(lookup); lookup.tap()
         let confirm = app.buttons["migration-manual-confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 10)); reveal(confirm); confirm.tap()
-        let use = app.buttons["migration-manual-dialog-confirm"]
+        let use = app.buttons["migration-manual-dialog-confirm"].firstMatch // The dialog exposes its button more than once.
         XCTAssertTrue(use.waitForExistence(timeout: 3)); use.tap()
         // Saved: the queue wraps to the first unresolved song, inside Muzik Belesh.
         assertShowing(1, of: 4)

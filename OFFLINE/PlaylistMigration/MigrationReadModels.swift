@@ -41,13 +41,18 @@ struct MigrationPlaylistPresentation: Equatable, Sendable {
     let rowsByID: [UUID: MigrationPlaylistRow]
     let issuesByEntry: [UUID: [PlaylistMigrationIssue]]
 
-    init(session: PlaylistMigrationSession, rows: [MigrationPlaylistRow], issues: [PlaylistMigrationIssue]) {
+    /// `removed`: occurrences the user removed from the playlist (hidden from `rows`).
+    init(session: PlaylistMigrationSession, rows: [MigrationPlaylistRow], issues: [PlaylistMigrationIssue], removed: Int = 0) {
         self.session = session; self.rows = rows; self.issues = issues
         let states = rows.map(\.effectiveStatus)
         // Atomic imports expose only complete source snapshots. Lifecycle status
-        // may subsequently be paused/failed/cancelled without losing metadata.
-        let committed = rows.count == session.expectedEntryCount && rows.enumerated().allSatisfy { $0.offset == $0.element.entry.position }
-        progress = PlaylistMigrationProgress(expected: session.expectedEntryCount, states: states, metadataCommitted: committed)
+        // may subsequently be paused/failed/cancelled without losing metadata. Removed
+        // occurrences leave gaps in source positions; the order is still strictly increasing.
+        let expected = session.expectedEntryCount - removed
+        let ordered = zip(rows, rows.dropFirst()).allSatisfy { $0.entry.position < $1.entry.position }
+            && rows.allSatisfy { $0.entry.position >= 0 && $0.entry.position < session.expectedEntryCount }
+        let committed = rows.count == expected && ordered
+        progress = PlaylistMigrationProgress(expected: expected, states: states, metadataCommitted: committed)
         statusCounts = Dictionary(grouping: states, by: { $0 }).mapValues(\.count)
         rowsByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
         issuesByEntry = Dictionary(grouping: issues.filter { $0.entryID != nil }, by: { $0.entryID! })

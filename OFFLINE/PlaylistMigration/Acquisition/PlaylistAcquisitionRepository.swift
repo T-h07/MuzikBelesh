@@ -57,6 +57,10 @@ final class PlaylistAcquisitionRepository: @unchecked Sendable {
                 thumbnail: evidence["thumbnailURL"].flatMap(URL.init(string:)).flatMap { MatchingCandidateArtwork.safe($0) },
                 position: first["sourcePosition"]))
         }
+        plan.replacements = try RecordingReplacementRecord.order(Column("createdAt"), Column("entryID")).fetchAll(db)
+        plan.linkDownloads = try PlaylistLinkDownloadRecord.fetchAll(db, sql: """
+            SELECT * FROM playlist_link_downloads WHERE state != 'added' ORDER BY createdAt, batchID, sequence
+            """)
         return plan
     }
 

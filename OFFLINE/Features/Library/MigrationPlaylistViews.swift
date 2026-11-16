@@ -8,11 +8,14 @@ struct MigrationPlaylistPlaybackHeader: View {
         let rows = library.migrationRows(playlistID)
         let manual = library.manualRows(playlistID)
         let ready = (library.snapshot.migrationPresentations[playlistID]?.progress.ready ?? 0) + manual.filter(\.available).count
+        let total = library.playlistEntryCount(playlistID)
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("\(rows.count) imported • \(manual.count) manually added • \(rows.count + manual.count) total • \(ready) available offline")
+            // A playlist is a playlist: one plain song count. Import provenance and offline
+            // statistics live in Migration Details.
+            Text(total == 1 ? "1 song" : "\(total) songs")
                 .font(.caption).foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("migration-playlist-count")
             HStack {
-                Button { Task { await library.playMigration(playlistID: playlistID) } } label: {
+                Button { Task { await library.playMigration(playlistID: playlistID, shuffle: false) } } label: {
                     Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("collection-play")
                 Button { Task { await library.playMigration(playlistID: playlistID, shuffle: true) } } label: {
@@ -20,7 +23,7 @@ struct MigrationPlaylistPlaybackHeader: View {
                 }.buttonStyle(.bordered).tint(AppColors.accentPrimary).accessibilityIdentifier("collection-shuffle")
             }.disabled(ready == 0)
             if ready == 0 {
-                Text(rows.isEmpty ? "This source playlist is empty." : "Source songs are saved. No local audio is available yet.")
+                Text(total == 0 ? "This playlist is empty." : "No songs are available offline yet.")
                     .font(.caption).foregroundStyle(AppColors.textSecondary)
             }
         }.task { await recover() }
@@ -39,24 +42,47 @@ struct MigrationPlaylistOccurrenceRow: View {
     @EnvironmentObject private var container: AppContainer
     let row: MigrationPlaylistRow
     let playlistID: String
+    @State private var options: SongOptionsContext?
     var body: some View {
         HStack(spacing: AppSpacing.sm) {
-            NavigationLink {
-                MigrationOccurrenceDetailView(playlistID: playlistID, occurrenceID: row.id)
-            } label: {
-                MigrationOccurrenceLabel(row: row) {
-                    if let acquisition = container.playlistAcquisition { AcquisitionOccurrenceStatus(acquisition: acquisition, row: row) }
-                    else { MigrationOccurrenceStatusText(row: row, text: row.effectiveStatus.displayName, attention: false).equatable() }
-                }
-            }.accessibilityIdentifier("migration-occurrence-" + row.id.uuidString)
+            // State decides the interaction: verified, present audio plays like any library
+            // song; anything else opens the matching / recovery inspector.
             if row.playableTrack != nil {
                 Button { Task { await library.playMigration(playlistID: playlistID, occurrenceID: row.id.uuidString) } } label: {
-                    Image(systemName: "play.circle.fill").frame(width: 44, height: 44)
-                }.buttonStyle(.borderless).tint(AppColors.accentPrimary)
-                    .accessibilityLabel("Play \(row.entry.source.title), source position \(row.entry.position + 1)")
-                    .accessibilityIdentifier("migration-occurrence-play-" + row.id.uuidString)
+                    MigrationOccurrenceLabel(row: row) { status }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play \(row.entry.source.title), position \(row.entry.position + 1)")
+                .accessibilityIdentifier("migration-occurrence-" + row.id.uuidString)
+                Button { options = .imported(entryID: row.id, playlistID: playlistID) } label: {
+                    Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 44, height: 44)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Options for \(row.entry.source.title)")
+                .accessibilityIdentifier("occurrence-options-" + row.id.uuidString)
+            } else {
+                NavigationLink {
+                    MigrationOccurrenceDetailView(playlistID: playlistID, occurrenceID: row.id)
+                } label: {
+                    MigrationOccurrenceLabel(row: row) { status }
+                }.accessibilityIdentifier("migration-occurrence-" + row.id.uuidString)
             }
         }
+        .swipeActions {
+            Button("Remove from Playlist", role: .destructive) {
+                Task { await library.removeImportedOccurrence(row.id, title: row.entry.source.title, playlistID: playlistID) }
+            }.accessibilityIdentifier("occurrence-remove-" + row.id.uuidString)
+        }
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await library.removeImportedOccurrence(row.id, title: row.entry.source.title, playlistID: playlistID) }
+            } label: { Label("Remove from Playlist", systemImage: "minus.circle") }
+        }
+        .sheet(item: $options) { SongOptionsView(context: $0) }
+    }
+    @ViewBuilder private var status: some View {
+        if let acquisition = container.playlistAcquisition { AcquisitionOccurrenceStatus(acquisition: acquisition, row: row) }
+        else { MigrationOccurrenceStatusText(row: row, text: row.effectiveStatus.displayName, attention: false).equatable() }
     }
 }
 
@@ -114,6 +140,10 @@ struct MigrationPlaylistDashboard: View {
                         .frame(minHeight: 44)
                 }.accessibilityIdentifier("migration-dashboard-toggle")
                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                // Phase 10.7: completion summary and the one place to fix problem songs.
+                if let issues = container.migrationIssues {
+                    MigrationIssuesEntry(issues: issues, playlistID: playlistID)
+                }
                 if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
                     PlaylistMatchingControls(model: model, session: value.session, repository: repository,
                                              playlistID: playlistID, lookup: container.youtubeManualLookup,
@@ -144,8 +174,9 @@ struct MigrationPlaylistDashboard: View {
                     }
                     Text("Issues").font(.headline)
                     if let failure = value.session.failureInformation { Text(failure).foregroundStyle(AppColors.error) }
-                    if value.issues.isEmpty { Text("No recorded migration issues.").foregroundStyle(AppColors.textSecondary) }
-                    ForEach(value.issues) { issue in
+                    let legacy = value.issues.filter { $0.isLegacyMigrationIssue }
+                    if legacy.isEmpty { Text("No recorded migration issues.").foregroundStyle(AppColors.textSecondary) }
+                    ForEach(legacy) { issue in
                         MigrationIssueView(issue: issue, position: issue.entryID.flatMap { value.rowsByID[$0]?.entry.position })
                     }
                 }
@@ -206,7 +237,7 @@ struct MigrationOccurrenceDetailView: View {
                 }
                 // Matching reasons are shown in plain language under the suggestions;
                 // only import-level issues remain listed here.
-                let issues = (value.issuesByEntry[occurrenceID] ?? []).filter { $0.code != "matching-attempt" }
+                let issues = (value.issuesByEntry[occurrenceID] ?? []).filter { $0.code != "matching-attempt" && $0.isLegacyMigrationIssue }
                 if !issues.isEmpty {
                     Section("Issues") { ForEach(issues) { MigrationIssueView(issue: $0, position: row.entry.position) } }
                 }
@@ -275,4 +306,10 @@ extension PlaylistMigrationStatus {
         case .failed: return "Failed"
         }
     }
+}
+
+extension PlaylistMigrationIssue {
+    /// Phase 10.7 report records (`report.*`) and user-action audit records (`user.*`)
+    /// are presented by Migration Issues; the legacy lists keep their original content.
+    var isLegacyMigrationIssue: Bool { !code.hasPrefix("report.") && !code.hasPrefix("user.") }
 }

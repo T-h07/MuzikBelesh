@@ -25,7 +25,8 @@ struct LocalPlaylistRow: Identifiable, Equatable, Sendable {
 extension LibraryRepository {
     static func appendManualOccurrences(_ ids: [String], playlistID: String, db: Database) throws {
         guard try MigrationSessionRecord.filter(Column("destinationPlaylistID") == playlistID).fetchOne(db) != nil else { throw LibraryError.notFound }
-        var position = (try Int.fetchOne(db, sql: "SELECT MAX(position) FROM playlist_local_occurrences WHERE playlistID = ?", arguments: [playlistID]) ?? -1) + 1
+        // Positions reserved by pending YouTube link entries are never reused.
+        var position = try nextManualPosition(db, playlistID: playlistID)
         for id in ids {
             guard let track = try StoredTrack.fetchOne(db, key: id), track.availability == .available,
                   try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM library_file_operations WHERE kind = 'delete-track' AND ownerID = ?", arguments: [id]) == 0 else { throw LibraryError.notFound }

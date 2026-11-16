@@ -30,6 +30,9 @@ final class LibraryRepository {
         result.migrationSessions = try GRDBPlaylistMigrationRepository.sessions(db)
         result.migrationEntries = try GRDBPlaylistMigrationRepository.entries(db)
         result.migrationIssues = try GRDBPlaylistMigrationRepository.issues(db)
+        result.pendingLinks = Dictionary(grouping: try PlaylistLinkDownloadRecord.fetchAll(db, sql: """
+            SELECT * FROM playlist_link_downloads WHERE state != 'added' ORDER BY playlistID, createdAt, batchID, sequence
+            """), by: \.playlistID)
         result.likedIDs = Set(try String.fetchAll(db, sql: "SELECT trackID FROM liked_tracks"))
         result.recentIDs = try String.fetchAll(db, sql: "SELECT trackID FROM playback_history GROUP BY trackID ORDER BY MAX(startedAt) DESC, trackID LIMIT 20")
         return result
@@ -48,12 +51,18 @@ final class LibraryRepository {
         }, by: { $0.occurrence.playlistID })
         let entries = Dictionary(grouping: value.migrationEntries, by: \.migrationID)
         let issues = Dictionary(grouping: value.migrationIssues, by: \.migrationID)
+        // Occurrences removed from imported playlists (hidden rows; counts follow membership).
+        var removed: [UUID: Int] = [:]
+        for row in try Row.fetchAll(db, sql: "SELECT migrationID, COUNT(*) AS removed FROM migration_entries WHERE removedAt IS NOT NULL GROUP BY migrationID") {
+            if let id = UUID(uuidString: row["migrationID"] as String) { removed[id] = row["removed"] as Int }
+        }
         for session in value.migrationSessions {
             guard let id = session.destinationPlaylistID else { continue }
             let rows = (entries[session.id] ?? []).map { entry in
                 MigrationPlaylistRow(entry: entry, playableTrack: entry.status == .ready ? entry.localTrackID.flatMap { available[$0] } : nil)
             }
-            value.migrationPresentations[id] = MigrationPlaylistPresentation(session: session, rows: rows, issues: issues[session.id] ?? [])
+            value.migrationPresentations[id] = MigrationPlaylistPresentation(session: session, rows: rows, issues: issues[session.id] ?? [],
+                                                                             removed: removed[session.id] ?? 0)
         }
         return value
     }

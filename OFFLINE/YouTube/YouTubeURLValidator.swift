@@ -12,7 +12,7 @@ struct YouTubeURLValidator {
         if isValidID(value) { return value }
         guard let c = URLComponents(string: value, encodingInvalidCharacters: false) else { throw YouTubeURLValidationError.malformed }
         guard c.scheme?.lowercased() == "https" else { throw YouTubeURLValidationError.invalidScheme }
-        guard let host = c.percentEncodedHost?.lowercased(), ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"].contains(host) else { throw YouTubeURLValidationError.untrustedHost }
+        guard let host = c.percentEncodedHost?.lowercased(), ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"].contains(host) else { throw YouTubeURLValidationError.untrustedHost }
         guard c.user == nil, c.password == nil, c.port == nil || c.port == 443 else { throw YouTubeURLValidationError.malformed }
         // Split before decoding so an encoded slash cannot introduce a route component.
         guard !value.contains("\\"),
