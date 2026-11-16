@@ -148,8 +148,9 @@ struct MigrationPlaylistDashboard: View {
                     }
                     Text("Issues").font(.headline)
                     if let failure = value.session.failureInformation { Text(failure).foregroundStyle(AppColors.error) }
-                    if value.issues.isEmpty { Text("No recorded migration issues.").foregroundStyle(AppColors.textSecondary) }
-                    ForEach(value.issues) { issue in
+                    let legacy = value.issues.filter { $0.isLegacyMigrationIssue }
+                    if legacy.isEmpty { Text("No recorded migration issues.").foregroundStyle(AppColors.textSecondary) }
+                    ForEach(legacy) { issue in
                         MigrationIssueView(issue: issue, position: issue.entryID.flatMap { value.rowsByID[$0]?.entry.position })
                     }
                 }
@@ -210,7 +211,7 @@ struct MigrationOccurrenceDetailView: View {
                 }
                 // Matching reasons are shown in plain language under the suggestions;
                 // only import-level issues remain listed here.
-                let issues = (value.issuesByEntry[occurrenceID] ?? []).filter { $0.code != "matching-attempt" }
+                let issues = (value.issuesByEntry[occurrenceID] ?? []).filter { $0.code != "matching-attempt" && $0.isLegacyMigrationIssue }
                 if !issues.isEmpty {
                     Section("Issues") { ForEach(issues) { MigrationIssueView(issue: $0, position: row.entry.position) } }
                 }
@@ -279,4 +280,10 @@ extension PlaylistMigrationStatus {
         case .failed: return "Failed"
         }
     }
+}
+
+extension PlaylistMigrationIssue {
+    /// Phase 10.7 report records (`report.*`) and user-action audit records (`user.*`)
+    /// are presented by Migration Issues; the legacy lists keep their original content.
+    var isLegacyMigrationIssue: Bool { !code.hasPrefix("report.") && !code.hasPrefix("user.") }
 }

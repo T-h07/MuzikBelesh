@@ -282,8 +282,10 @@ import XCTest
         XCTAssertEqual(after, before, "Existing open, resolved and dismissed history is preserved")
         let migrations = try await upgraded.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
         XCTAssertEqual(migrations.last, MigrationIssueSchema.version)
-        let categories = try await upgraded.dbQueue.read { try Row.fetchAll($0, sql: "SELECT category, stage, closeReason FROM migration_issues") }
-        XCTAssertTrue(categories.allSatisfy { ($0["category"] as String?) == nil && ($0["stage"] as String?) == nil && ($0["closeReason"] as String?) == nil })
+        let unset: Int = try await upgraded.dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_issues WHERE category IS NULL AND stage IS NULL AND closeReason IS NULL") ?? 0
+        }
+        XCTAssertEqual(unset, 3, "Pre-existing rows get NULL for the new columns")
         let fk = try await upgraded.dbQueue.read { try Row.fetchAll($0, sql: "PRAGMA foreign_key_check").count }
         XCTAssertEqual(fk, 0)
         // The upgraded store reconciles normally, without touching legacy rows.
