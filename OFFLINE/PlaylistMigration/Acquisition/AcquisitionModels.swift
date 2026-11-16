@@ -90,6 +90,8 @@ struct AcquisitionPlan: Equatable, Sendable {
     var playlists: [String: AcquisitionPlaylist] = [:]
     /// entryID → current entry status/local track, for stale-link detection.
     var entries: [String: AcquisitionEntrySnapshot] = [:]
+    /// Staged replacements of already verified recordings ("Change Video").
+    var replacements: [RecordingReplacementRecord] = []
 }
 
 struct AcquisitionPlaylist: Equatable, Sendable {

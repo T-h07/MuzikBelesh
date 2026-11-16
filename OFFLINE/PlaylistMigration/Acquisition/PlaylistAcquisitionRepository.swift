@@ -57,6 +57,7 @@ final class PlaylistAcquisitionRepository: @unchecked Sendable {
                 thumbnail: evidence["thumbnailURL"].flatMap(URL.init(string:)).flatMap { MatchingCandidateArtwork.safe($0) },
                 position: first["sourcePosition"]))
         }
+        plan.replacements = try RecordingReplacementRecord.order(Column("createdAt"), Column("entryID")).fetchAll(db)
         return plan
     }
 

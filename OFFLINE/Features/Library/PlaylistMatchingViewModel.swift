@@ -510,6 +510,9 @@ struct ManualYouTubeSelectionView: View {
     let accepted: PlaylistMigrationCandidate?
     /// Review queue hook; defaults to saving through the repository.
     var onConfirm: ((YouTubeManualLookupResult) async throws -> Void)? = nil
+    /// Choosing a replacement for a song that already plays offline (staged; see
+    /// `RecordingReplacementControls`). The current audio is kept until it is verified.
+    var replacementMode = false
     let changed: () -> Void
     @State private var link = ""
     @State private var preview: YouTubeManualLookupResult?
@@ -518,11 +521,15 @@ struct ManualYouTubeSelectionView: View {
     @State private var confirming = false
     @FocusState private var linkFocused: Bool
     private var selectable: Bool {
-        entry.localTrackID == nil && [.pending, .needsReview, .failed, .unavailable].contains(entry.status)
+        replacementMode || (entry.localTrackID == nil && [.pending, .needsReview, .failed, .unavailable].contains(entry.status))
     }
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let accepted {
+            if let accepted, !replacementMode, entry.status == .ready, entry.localTrackID != nil {
+                // Already downloaded and verified: Change Video stages a replacement and the
+                // song keeps playing its current audio until the new one is verified.
+                RecordingReplacementControls(entry: entry, accepted: accepted, repository: repository, lookup: lookup, changed: changed)
+            } else if let accepted, !replacementMode {
                 Text("Selected: \(accepted.title)").font(.headline)
                 Text("Not downloaded yet.").font(.caption).foregroundStyle(AppColors.textSecondary)
                 Button("Change Video", role: .destructive) { reject(accepted) }
@@ -544,13 +551,18 @@ struct ManualYouTubeSelectionView: View {
             }
             if let message { Text(message).font(.caption).foregroundStyle(AppColors.error) }
         }.tint(AppColors.accentPrimary)
-            .confirmationDialog("Use this video for this song?", isPresented: $confirming, titleVisibility: .visible) {
-                Button("Use This Video") { confirm() }.accessibilityIdentifier("migration-manual-dialog-confirm")
+            .confirmationDialog(replacementMode ? "Replace the current recording with this video?" : "Use this video for this song?",
+                                isPresented: $confirming, titleVisibility: .visible) {
+                Button(replacementMode ? "Download Replacement" : "Use This Video") { confirm() }.accessibilityIdentifier("migration-manual-dialog-confirm")
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text(preview?.metadataVerified == false
-                     ? "Video details couldn't be read. Use it only if you've checked it's the right song. Nothing is downloaded yet."
-                     : "It's linked to this song. Nothing is downloaded yet.")
+                if replacementMode {
+                    Text("The current recording keeps playing offline. The new video is downloaded and verified first, then it replaces the current one.")
+                } else {
+                    Text(preview?.metadataVerified == false
+                         ? "Video details couldn't be read. Use it only if you've checked it's the right song. Nothing is downloaded yet."
+                         : "It's linked to this song. Nothing is downloaded yet.")
+                }
             }
     }
     @ViewBuilder private func previewView(_ value: YouTubeManualLookupResult) -> some View {
@@ -566,7 +578,7 @@ struct ManualYouTubeSelectionView: View {
         if [.live, .upcoming, .unavailable].contains(video.availability) {
             Label("This video may not be playable", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(AppColors.error)
         }
-        Button("Use This Video") { linkFocused = false; confirming = true }.buttonStyle(.matchingPrimaryWide).disabled(busy)
+        Button(replacementMode ? "Use as Replacement" : "Use This Video") { linkFocused = false; confirming = true }.buttonStyle(.matchingPrimaryWide).disabled(busy)
             .accessibilityIdentifier("migration-manual-confirm")
         if let url = video.canonicalURL {
             Button("Preview on YouTube") { openURL(url) }.buttonStyle(.matchingSecondaryWide)
@@ -602,6 +614,7 @@ struct ManualYouTubeSelectionView: View {
                 linkFocused = false; KeyboardDismissal.dismiss()
                 self.preview = nil; link = ""; changed()
             } catch SongMatchingError.staleAttempt { message = "This song is being updated. Try again in a moment."
+            } catch PlaylistMigrationStorageError.invalidCandidate where replacementMode { message = "That's already the video this song uses."
             } catch PlaylistMigrationStorageError.invalidCandidate { message = "This song already has a video. Change it first."
             } catch { message = "The video couldn't be saved. Try again." }
         }

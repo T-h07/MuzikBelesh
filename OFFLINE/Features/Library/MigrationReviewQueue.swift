@@ -215,10 +215,16 @@ struct MigrationReviewQueueView: View {
 
         if let accepted = model.accepted {
             CandidateSummaryCard(candidate: accepted)
-            Text(accepted.provider == "youtube" ? "Selected · Not downloaded yet" : "Selected · Available offline")
+            let offline = model.entry?.status == .ready && model.entry?.localTrackID != nil
+            Text(accepted.provider == "youtube" && !offline ? "Selected · Not downloaded yet" : "Selected · Available offline")
                 .font(.caption).foregroundStyle(AppColors.accentPrimary)
-            if accepted.provider == "youtube" {
+            if accepted.provider == "youtube" && !offline {
                 Button("Change Video") { Task { await model.reject(accepted) } }.buttonStyle(.matchingSecondary).disabled(model.saving)
+            } else if accepted.provider == "youtube", let entry = model.entry, let lookup {
+                // Already downloaded: a staged replacement keeps the current audio playable.
+                RecordingReplacementControls(entry: entry, accepted: accepted, repository: model.repository, lookup: lookup) {
+                    Task { await model.show(model.index) }
+                }
             }
         } else {
             ForEach(model.pendingCandidates) { candidate in

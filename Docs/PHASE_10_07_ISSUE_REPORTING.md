@@ -258,6 +258,41 @@ verification log below for exact counts and run URLs.
   data and Migration Issues is the single place with every recovery action.
 - Historical `PlaylistFileImportUITests`/`ReviewQueueUITests` failures are not claimed fixed.
 
+## 19a. Change Video for verified occurrences (staged replacement)
+
+Before: "Change Video" on a song that was already `ready` called `rejectYouTubeSelection`,
+which only accepts `matched` occurrences, so it always failed with `staleAttempt`.
+
+Now (`v020_recording_replacements`, additive):
+- `migration_replacements` holds one durable request per occurrence: the accepted decision
+  and verified track being replaced, the staged candidate (decision `pending`, never
+  accepted early), the video, the shared job link, state (`waiting`/`failed`), failure and
+  bounded retries.
+- `stageReplacement` (repository) requires the caller's current snapshot, a `ready`
+  occurrence with present verified audio and a different video; staging again supersedes
+  the earlier request (kept as evidence).
+- `PlaylistAcquisitionCoordinator` acquires the replacement through the shared
+  `DownloadManager` job for that video (reusing a completed or in-flight job), applies the
+  acquisition retry policy, pauses with the playlist, and pauses a job created only for a
+  cancelled/superseded request unless another consumer needs it.
+- `commitReplacement` verifies the new audio (decode + SHA-256) outside the transaction,
+  then in one transaction re-checks that the request, the occurrence (`ready`, original
+  track) and the original decision are unchanged before switching: new track, new
+  candidate accepted, previous candidate rejected with `replacedBy`, acquisition link
+  updated, request deleted. Anything else is `stale` (request discarded, nothing switched).
+- Failure or Cancel leaves the original recording associated and playable. Retry restarts
+  the bounded budget. No track or file is deleted, so duplicates and other playlists that
+  share the old recording keep it. The occurrence ID (playback identity), position and
+  source metadata never change.
+- Restarts: the request is SQLite state; DownloadManager restores the job and the next
+  acquisition pass completes the switch once (Phase 10.6 recovery unchanged).
+- Known limitation: a request cancelled while the app was not running does not pause a
+  job it created on the next launch; that job may finish and its track stays in the library.
+
+Tests: `RecordingReplacementTests` (success with the original playable throughout,
+failure + cancel rollback, verification failure + explicit retry, restart, duplicate and
+shared recordings, superseded/cancelled/stale completions).
+
 ## 20. Changed-file manifest
 
 See section 2; `git diff --stat f2c448d..HEAD` on the feature branch is authoritative.

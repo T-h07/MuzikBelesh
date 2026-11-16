@@ -111,6 +111,7 @@ final class DatabaseManager {
         AcquisitionSchema.register(in: &migrator)
         CoordinatorSchema.register(in: &migrator)
         MigrationIssueSchema.register(in: &migrator)
+        ReplacementSchema.register(in: &migrator)
         if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
         else { try migrator.migrate(dbQueue) }
     }

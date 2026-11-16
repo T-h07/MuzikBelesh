@@ -989,3 +989,159 @@ extension GRDBPlaylistMigrationRepository {
         }
     }
 }
+
+// MARK: - Staged recording replacement ("Change Video" for a verified occurrence)
+
+extension GRDBPlaylistMigrationRepository {
+    func replacements() async throws -> [RecordingReplacementRecord] {
+        try await db.read { db in try RecordingReplacementRecord.order(Column("createdAt"), Column("entryID")).fetchAll(db) }
+    }
+    func replacement(entryID: UUID) async throws -> RecordingReplacementRecord? {
+        try await db.read { db in try RecordingReplacementRecord.fetchOne(db, key: entryID.uuidString) }
+    }
+
+    /// Stages a different YouTube recording for an occurrence that is ready with verified,
+    /// present audio. Nothing about the current association changes: the occurrence stays
+    /// `ready` with its track, its accepted decision stays accepted, and the replacement is
+    /// saved as a *pending* candidate. Staging again supersedes the earlier request.
+    @discardableResult
+    func stageReplacement(for expected: PlaylistMigrationEntry, video: YouTubeVideo, metadataVerified: Bool) async throws -> RecordingReplacementRecord {
+        _ = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: metadataVerified) // Validates the video ID.
+        return try await db.write { [paths] db in
+            let entry = try Self.requiredEntry(expected.id, db: db)
+            guard try entry.model() == expected, entry.status == .ready, let trackID = entry.localTrackID,
+                  let track = try StoredTrack.fetchOne(db, key: trackID), MigrationLocalAudio.isAvailable(track, paths: paths) else {
+                throw SongMatchingError.staleAttempt
+            }
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            let accepted = previous.filter { $0.decision == .accepted }
+            guard accepted.count <= 1 else { throw PlaylistMigrationStorageError.invalidCandidate }
+            // Replacing a recording with itself is not a change.
+            if let current = accepted.first, current.provider == "youtube", current.providerTrackID == video.id {
+                throw PlaylistMigrationStorageError.invalidCandidate
+            }
+            try Self.supersedeStagedReplacements(previous, outcome: "superseded", db: db)
+            let reuse = previous.first { $0.provider == "youtube" && $0.providerTrackID == video.id && $0.decision != .accepted }
+            let scored = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: metadataVerified, id: reuse?.id ?? UUID())
+            var evidence = scored.evidence
+            evidence["stagedReplacement"] = "true"
+            evidence["selectionMethod"] = "replacement"
+            evidence["outcome"] = "replacement"
+            evidence["acceptance"] = "Explicit user request to replace the verified recording. The current audio stays in use until this one is downloaded and verified."
+            evidence["selectionExplanation"] = "Replacement requested. The current recording keeps playing until this one is verified."
+            let candidate = PlaylistMigrationCandidate(id: scored.id, entryID: scored.entryID, provider: scored.provider, providerTrackID: scored.providerTrackID,
+                title: scored.title, artist: scored.artist, durationMs: scored.durationMs, confidence: scored.confidence, evidence: evidence, decision: .pending)
+            let metadata = [candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist].compactMap { $0 }
+                + candidate.evidence.filter { $0.key != "thumbnailURL" }.flatMap { [$0.key, $0.value] }
+            guard metadata.allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else { throw PlaylistMigrationStorageError.unsafeDiagnostics }
+            let created = try MigrationCandidateRecord.fetchOne(db, key: candidate.id.uuidString)?.createdAt ?? Date()
+            try MigrationCandidateRecord(candidate, createdAt: created).save(db)
+            let now = Date()
+            let record = RecordingReplacementRecord(entryID: entry.id, migrationID: entry.migrationID, originalCandidateID: accepted.first?.id.uuidString,
+                originalTrackID: trackID, candidateID: candidate.id.uuidString, videoID: video.id, title: candidate.title,
+                channel: candidate.evidence["channel"], durationMs: candidate.durationMs, downloadJobID: nil, createdJob: false,
+                state: .waiting, failure: nil, retries: 0, createdAt: now, updatedAt: now)
+            try record.save(db)
+            return record
+        }
+    }
+
+    /// Cancels a pending replacement. The current recording is untouched; the staged
+    /// candidate is kept as evidence. Returns the removed request, if any.
+    @discardableResult
+    func cancelReplacement(entryID: UUID) async throws -> RecordingReplacementRecord? {
+        try await db.write { db in
+            guard let record = try RecordingReplacementRecord.fetchOne(db, key: entryID.uuidString) else { return nil }
+            try Self.supersedeStagedReplacements(try Self.matchingCandidates(entryID, db: db), outcome: "cancelled", db: db)
+            _ = try record.delete(db)
+            return record
+        }
+    }
+
+    /// Saves acquisition bookkeeping for the replacement the caller still owns (same
+    /// staged candidate). A re-staged or cancelled request is never overwritten.
+    @discardableResult
+    func updateReplacement(_ value: RecordingReplacementRecord) async throws -> Bool {
+        try await db.write { db in
+            guard let current = try RecordingReplacementRecord.fetchOne(db, key: value.entryID), current.candidateID == value.candidateID else { return false }
+            var stored = value
+            if let job = stored.downloadJobID, try StoredDownloadJob.fetchOne(db, key: job) == nil { stored.downloadJobID = nil }
+            stored.createdAt = current.createdAt
+            try stored.update(db)
+            return true
+        }
+    }
+
+    /// The atomic switch. Decoding and SHA-256 verification of the new audio happen first,
+    /// outside the transaction; inside it every precondition is re-checked: the request is
+    /// still this candidate, the occurrence is still `ready` with the original track and
+    /// the original decision. Only then does the occurrence move to the new track, the
+    /// new candidate become the single accepted decision and the previous one become
+    /// rejected-as-replaced. Source position and metadata never change; no track or file
+    /// is deleted, so other occurrences sharing the old recording are unaffected.
+    func commitReplacement(entryID: UUID, candidateID: UUID, trackID: String) async throws -> RecordingReplacementOutcome {
+        let track: StoredTrack
+        do { track = try await verifiedMatchingAudio(trackID: trackID) }
+        catch is CancellationError { throw CancellationError() }
+        catch { return .invalidAudio }
+        return try await db.write { [self] db in
+            guard let request = try RecordingReplacementRecord.fetchOne(db, key: entryID.uuidString),
+                  request.candidateID == candidateID.uuidString, request.state == .waiting else { return .stale }
+            do { try validateMatchingAudio(track, db: db) } catch { return .invalidAudio }
+            let candidates = try Self.matchingCandidates(entryID, db: db)
+            let accepted = candidates.filter { $0.decision == .accepted }
+            let expectedAccepted: [String] = request.originalCandidateID.map { [$0] } ?? []
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: entryID.uuidString), entry.status == .ready,
+                  entry.localTrackID == request.originalTrackID,
+                  accepted.map(\.id.uuidString) == expectedAccepted,
+                  var next = try MigrationCandidateRecord.fetchOne(db, key: candidateID.uuidString),
+                  next.entryID == entryID.uuidString, next.decision == .pending else {
+                // The occurrence changed underneath the request: it can never apply.
+                _ = try request.delete(db)
+                return .stale
+            }
+            let stamp = Date()
+            for old in accepted {
+                guard var record = try MigrationCandidateRecord.fetchOne(db, key: old.id.uuidString) else { continue }
+                var evidence = old.evidence
+                evidence["replacedBy"] = candidateID.uuidString; evidence["currentAttempt"] = "false"
+                record.evidence = try migrationJSON(evidence); record.decision = .rejected; record.updatedAt = stamp
+                try record.update(db)
+            }
+            var evidence = try next.model().evidence
+            evidence.removeValue(forKey: "stagedReplacement")
+            evidence["replacementOf"] = request.originalCandidateID ?? "local-association"
+            evidence["userConfirmedAt"] = ISO8601DateFormatter().string(from: stamp)
+            evidence["acceptance"] = "Explicit user replacement. Managed audio decoding and SHA-256 verification passed before the switch."
+            next.evidence = try migrationJSON(evidence); next.decision = .accepted; next.updatedAt = stamp
+            try next.update(db)
+            entry.localTrackID = trackID; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt)
+            try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false,
+                                   outcome: "selected", updatedAt: stamp).save(db)
+            // The acquisition link follows the new decision, already complete.
+            var link = try AcquisitionLinkRecord.fetchOne(db, key: entry.id)
+                ?? AcquisitionLinkRecord(entryID: entry.id, migrationID: entry.migrationID, candidateID: candidateID.uuidString, provider: "youtube",
+                                         providerIdentity: request.videoID, downloadJobID: nil, createdJob: false, state: .ready, trackID: nil,
+                                         failure: nil, retries: 0, nextRetryAt: nil, createdAt: stamp, updatedAt: stamp, completedAt: nil)
+            var job: String? = nil
+            if let id = request.downloadJobID, try StoredDownloadJob.fetchOne(db, key: id) != nil { job = id }
+            link.candidateID = candidateID.uuidString; link.providerIdentity = request.videoID
+            link.downloadJobID = job; link.createdJob = request.createdJob; link.state = .ready; link.trackID = trackID; link.failure = nil
+            link.retries = 0; link.nextRetryAt = nil; link.completedAt = stamp; link.updatedAt = stamp
+            try link.save(db)
+            _ = try request.delete(db)
+            return .replaced
+        }
+    }
+
+    private static func supersedeStagedReplacements(_ candidates: [PlaylistMigrationCandidate], outcome: String, db: Database) throws {
+        for old in candidates where old.decision == .pending && old.evidence["stagedReplacement"] == "true" {
+            guard var record = try MigrationCandidateRecord.fetchOne(db, key: old.id.uuidString) else { continue }
+            var evidence = old.evidence
+            evidence["stagedReplacement"] = "false"; evidence["replacementOutcome"] = outcome; evidence["currentAttempt"] = "false"
+            record.evidence = try migrationJSON(evidence); record.updatedAt = Date()
+            try record.update(db)
+        }
+    }
+}
