@@ -109,7 +109,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let open = app.buttons["playlist-import-open"].firstMatch
         XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1000 songs")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 songs")
         // Diagnostics are no longer on the playlist screen; they open on request.
         XCTAssertFalse(app.buttons["migration-dashboard-toggle"].exists, "The playlist screen shows no migration diagnostics")
         openMigrationDetails()
@@ -140,7 +140,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let playlist = app.staticTexts["Synthetic Import"]
         XCTAssertTrue(playlist.waitForExistence(timeout: 10)); playlist.tap()
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1000 songs")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "1,000 songs")
         // Import metadata lives in Migration Details (playlist ••• menu).
         openMigrationDetails()
         let details = app.buttons["migration-dashboard-toggle"]

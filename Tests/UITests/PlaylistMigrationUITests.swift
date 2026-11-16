@@ -105,7 +105,7 @@ final class PlaylistMigrationUITests: XCTestCase {
         let count = app.staticTexts["migration-playlist-count"]
         XCTAssertEqual(count.label, "5 songs")
         app.buttons["playlist-add-songs"].tap()
-        let fromLibrary = app.buttons["From Your Library"]
+        let fromLibrary = app.buttons["From Your Library"].firstMatch // The dialog exposes its button more than once.
         XCTAssertTrue(fromLibrary.waitForExistence(timeout: 5)); fromLibrary.tap()
         // ui-track-a already backs three imported occurrences; adding it again is a new occurrence.
         for id in ["ui-track-b", "ui-track-a"] {

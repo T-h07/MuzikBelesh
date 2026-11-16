@@ -134,7 +134,7 @@ final class ReviewQueueUITests: XCTestCase {
         reveal(lookup); lookup.tap()
         let confirm = app.buttons["migration-manual-confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 10)); reveal(confirm); confirm.tap()
-        let use = app.buttons["migration-manual-dialog-confirm"]
+        let use = app.buttons["migration-manual-dialog-confirm"].firstMatch // The dialog exposes its button more than once.
         XCTAssertTrue(use.waitForExistence(timeout: 3)); use.tap()
         // Saved: the queue wraps to the first unresolved song, inside Muzik Belesh.
         assertShowing(1, of: 4)
