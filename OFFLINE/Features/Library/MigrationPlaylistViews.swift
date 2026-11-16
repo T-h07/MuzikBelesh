@@ -114,6 +114,10 @@ struct MigrationPlaylistDashboard: View {
                         .frame(minHeight: 44)
                 }.accessibilityIdentifier("migration-dashboard-toggle")
                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                // Phase 10.7: completion summary and the one place to fix problem songs.
+                if let issues = container.migrationIssues {
+                    MigrationIssuesEntry(issues: issues, playlistID: playlistID)
+                }
                 if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
                     PlaylistMatchingControls(model: model, session: value.session, repository: repository,
                                              playlistID: playlistID, lookup: container.youtubeManualLookup,

@@ -10,6 +10,9 @@ name: Playlist migration verification
 #   coordinator_only=true : Phase 10.6 persistent migration coordinator plus the matching
 #                         lifecycle, acquisition, download and schema suites it touches
 #                         (no UI tests). The coordinator suite always runs otherwise too.
+#   issues_only=true    : Phase 10.7 issue reporting plus the coordinator, acquisition,
+#                         download, schema and playback suites it touches (no UI tests).
+#                         The issue-reporting suites always run otherwise too.
 # Every xcodebuild step is followed by Scripts/check-test-results.py, which fails the job
 # when a required suite executed zero tests, any test was skipped, or a test never
 # reached a final result. See Docs/TESTING_RELIABILITY.md.
@@ -28,6 +31,10 @@ on:
         default: false
       coordinator_only:
         description: Run only the Phase 10.6 coordinator and affected matching/acquisition/persistence unit tests
+        type: boolean
+        default: false
+      issues_only:
+        description: Run only Phase 10.7 issue reporting and affected coordinator/acquisition/persistence/playback unit tests
         type: boolean
         default: false
   pull_request:
@@ -78,7 +85,7 @@ jobs:
           xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$ID" -derivedDataPath build/Products build-for-testing CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/migration-build.log
 
       - name: Foundation persistence and affected regression tests
-        if: inputs.matching_only != true && inputs.acquisition_only != true && inputs.coordinator_only != true
+        if: inputs.matching_only != true && inputs.acquisition_only != true && inputs.coordinator_only != true && inputs.issues_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
@@ -92,7 +99,7 @@ jobs:
           python3 Scripts/check-test-results.py MigrationUnits build/MigrationUnits.xcresult "${REQUIRE[@]}"
 
       - name: Song matching, review queue and import unit tests
-        if: inputs.acquisition_only != true && inputs.coordinator_only != true
+        if: inputs.acquisition_only != true && inputs.coordinator_only != true && inputs.issues_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
@@ -111,7 +118,7 @@ jobs:
           python3 Scripts/check-test-results.py MatchingUnits build/MatchingUnits.xcresult "${REQUIRE[@]}"
 
       - name: Phase 10.5 playlist audio acquisition unit tests
-        if: inputs.coordinator_only != true
+        if: inputs.coordinator_only != true && inputs.issues_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
@@ -126,6 +133,7 @@ jobs:
           python3 Scripts/check-test-results.py AcquisitionUnits build/AcquisitionUnits.xcresult "${REQUIRE[@]}"
 
       - name: Phase 10.6 persistent migration coordinator unit tests
+        if: inputs.issues_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
@@ -144,8 +152,27 @@ jobs:
           xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/CoordinatorUnits.xcresult             "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-coordinator.log
           python3 Scripts/check-test-results.py CoordinatorUnits build/CoordinatorUnits.xcresult "${REQUIRE[@]}"
 
+      - name: Phase 10.7 migration issue reporting unit tests
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(MigrationIssueClassifierTests MigrationIssuePersistenceTests MigrationIssueRecoveryTests
+                  MigrationCompletionSummaryTests MigrationIssueNotificationTests)
+          # A focused run adds every suite whose code path Phase 10.7 touches or extends.
+          if [[ "${{ inputs.issues_only == true }}" == true ]]; then
+            SUITES+=(PlaylistMigrationCoordinatorTests PlaylistAcquisitionTests PlaylistAcquisitionNotificationTests
+                     PlaylistAcquisitionRecoveryTests BackgroundDownloadTests DownloadTests PlaylistMigrationPersistenceTests
+                     HybridPlaylistTests Phase2StorageTests Phase4LibraryMigrationTests PlaylistImportIntegrationTests
+                     MatchingReviewQueueTests ManualYouTubeSelectionTests Phase4PlaybackTests)
+          fi
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/IssueUnits.xcresult \
+            "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-issues.log
+          python3 Scripts/check-test-results.py IssueUnits build/IssueUnits.xcresult "${REQUIRE[@]}"
+
       - name: Migration playlist, review queue and import UI
-        if: inputs.matching_only != true && inputs.acquisition_only != true && inputs.coordinator_only != true
+        if: inputs.matching_only != true && inputs.acquisition_only != true && inputs.coordinator_only != true && inputs.issues_only != true
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)

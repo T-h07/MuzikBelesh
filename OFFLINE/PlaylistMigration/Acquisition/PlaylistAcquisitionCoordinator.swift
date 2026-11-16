@@ -146,6 +146,15 @@ import OSLog
         await retry([link])
     }
 
+    /// Phase 10.7 bulk retry: only links that are `.failed` (retryable categories);
+    /// `.unsupported` sources are never retried. Returns how many were reset.
+    @discardableResult
+    func retry(entryIDs: [UUID]) async -> Int {
+        let failed = entryIDs.compactMap { links[$0.uuidString] }.filter { $0.state == .failed }
+        await retry(failed)
+        return failed.count
+    }
+
     private func retry(_ failed: [AcquisitionLinkRecord]) async {
         guard !failed.isEmpty else { return }
         var reset: [AcquisitionLinkRecord] = []

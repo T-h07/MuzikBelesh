@@ -71,6 +71,7 @@ struct PlaylistAcquisitionControls: View {
 /// Playlist-scoped view of the single shared download queue, in source order.
 struct PlaylistAcquisitionQueueView: View {
     @EnvironmentObject private var library: MusicLibraryService
+    @EnvironmentObject private var container: AppContainer
     @ObservedObject var acquisition: PlaylistAcquisitionCoordinator
     let playlistID: String
     @State private var importing: PlaylistMigrationEntry?
@@ -91,6 +92,15 @@ struct PlaylistAcquisitionQueueView: View {
             section("Downloading", active)
             section("Waiting", waiting)
             section("Needs Attention", attention)
+            if !attention.isEmpty, let issues = container.migrationIssues {
+                Section {
+                    NavigationLink { MigrationIssuesView(issues: issues, playlistID: playlistID) } label: {
+                        Label("Open Migration Issues", systemImage: "exclamationmark.bubble")
+                    }.accessibilityIdentifier("acquisition-open-issues")
+                } footer: {
+                    Text("Migration Issues explains each problem and lists every way to fix it.").foregroundStyle(AppColors.textSecondary)
+                }.listRowBackground(AppColors.backgroundPrimary)
+            }
             if !done.isEmpty {
                 Section("Available Offline") {
                     Text("\(done.count) of \(rows.count) songs").foregroundStyle(AppColors.textSecondary)
