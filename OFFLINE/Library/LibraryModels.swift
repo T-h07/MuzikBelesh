@@ -106,6 +106,9 @@ struct LibrarySnapshot: Equatable, Sendable {
     var migrationEntries: [PlaylistMigrationEntry] = []
     var migrationIssues: [PlaylistMigrationIssue] = []
     var migrationPresentations: [String: MigrationPlaylistPresentation] = [:]
+    /// Songs added by YouTube link whose audio is not in the library yet, per playlist,
+    /// in submission order (they are playlist entries already).
+    var pendingLinks: [String: [PlaylistLinkDownloadRecord]] = [:]
     var likedIDs: Set<String> = []
     var recentIDs: [String] = []
     var sort: LibrarySort = .newest

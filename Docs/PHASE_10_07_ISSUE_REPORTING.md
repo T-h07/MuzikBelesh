@@ -336,6 +336,31 @@ stay as placeholders, reported as "Audio file missing" with **Download Again** (
 `matched`, re-acquired through the shared queue). Delete from Library states exactly which
 playlists and imported songs are affected before confirming.
 
+## 19c. Clean playlist screen, Add Songs (library or YouTube links)
+
+- The playlist screen shows artwork, title, "N songs", Play, Shuffle, Add Songs and the
+  songs. Imported/manual/offline counters, the dashboard, Migration Issues, the completion
+  banner and Cancel Migration moved to **Migration Details** (playlist `•••`, only for
+  playlists with migration history). Everything there works as before; the migration runs
+  regardless of whether the sheet is open. Per-song status lines remain on the rows.
+- **Add Songs** offers *From Your Library* (existing multi-select; same audio, no
+  download) and *From YouTube Links*: paste any number of links (multiline, Paste, Add
+  Another, per-link remove), each parsed with `YouTubeURLValidator` (watch, youtu.be,
+  music.youtube.com — newly accepted host —, Shorts, tracking parameters ignored), with
+  invalid links explained and duplicates flagged (imported playlists can add a repeat as a
+  separate occurrence; ordinary playlists keep one membership per song and report it).
+- `v022_playlist_link_downloads` (additive table): one row per accepted link with its
+  submitted order and slot. Rows are playlist entries immediately (counted, listed after
+  the songs with status, Retry and Remove). `PlaylistAcquisitionCoordinator` acquires each
+  through the shared `DownloadManager` job for that video (reused if it exists or already
+  completed; global concurrency, Wi-Fi-only, background transfers and launch recovery
+  unchanged). When the verified track exists, `completeLink` turns the row into an
+  ordinary membership (ordinary playlists, at the submitted position) or a manual
+  occurrence (imported playlists, at the reserved position) in one transaction; removed
+  rows and repeated callbacks are no-ops. One failure never blocks the batch; failed rows
+  keep their reason with Retry (bounded automatic retries first). Removing a pending row
+  pauses a job only it needed. Spotify source entries are never inflated by additions.
+
 ## 20. Changed-file manifest
 
 See section 2; `git diff --stat f2c448d..HEAD` on the feature branch is authoritative.

@@ -24,7 +24,7 @@ final class PlaylistMigrationUITests: XCTestCase {
     func testFiveHundredPlaceholdersRemainVisibleAcrossRelaunch() {
         executionTimeAllowance = 120 // Includes a relaunch (49 s of 60 in CI #23); capped at 120 s.
         open("Imported placeholders")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 imported • 0 manually added • 500 total • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 songs")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
         // Hybrid playlists (80bdeba): songs can be added manually to an imported playlist,
         // but its source order is preserved, so it is never reorderable.
@@ -34,12 +34,12 @@ final class PlaylistMigrationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Original artist"].firstMatch.exists)
         app.terminate(); app.launchArguments = ["--ui-testing", "--migration-fixtures"]; app.launch()
         open("Imported placeholders")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 imported • 0 manually added • 500 total • 0 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "500 songs")
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
     }
     func testMixedOccurrencesShowSourceCountAndDistinctRows() {
         open("Imported mixed")
-        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 imported • 0 manually added • 5 total • 3 available offline")
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 songs")
         XCTAssertTrue(app.buttons["collection-play"].isEnabled)
         app.swipeUp()
         let first = app.staticTexts["Original song 0"], second = app.staticTexts["Original song 1"]
@@ -83,7 +83,7 @@ final class PlaylistMigrationUITests: XCTestCase {
     func testRemovingAnImportedOccurrenceUpdatesCountsAndUndoRestoresIt() {
         open("Imported mixed")
         let count = app.staticTexts["migration-playlist-count"]
-        XCTAssertEqual(count.label, "5 imported • 0 manually added • 5 total • 3 available offline")
+        XCTAssertEqual(count.label, "5 songs")
         let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "occurrence-options-")).firstMatch
         if !options.isHittable { app.swipeUp() }
         XCTAssertTrue(options.waitForExistence(timeout: 5)); options.tap()
@@ -91,10 +91,10 @@ final class PlaylistMigrationUITests: XCTestCase {
         XCTAssertTrue(remove.waitForExistence(timeout: 5)); remove.tap()
         let undo = app.buttons["playlist-removal-undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
-        waitUntil(count, "label == %@", "4 imported • 0 manually added • 4 total • 2 available offline", timeout: 5,
+        waitUntil(count, "label == %@", "4 songs", timeout: 5,
                   message: "Only the selected occurrence is removed; the other two using the same audio stay playable")
         undo.tap()
-        waitUntil(count, "label == %@", "5 imported • 0 manually added • 5 total • 3 available offline", timeout: 5, message: "Undo restores it")
+        waitUntil(count, "label == %@", "5 songs", timeout: 5, message: "Undo restores it")
     }
 
     /// Product contract: imported playlists accept existing local songs as independent
@@ -103,15 +103,17 @@ final class PlaylistMigrationUITests: XCTestCase {
         executionTimeAllowance = 120 // Includes a relaunch; capped at 120 s by the workflows.
         open("Imported mixed")
         let count = app.staticTexts["migration-playlist-count"]
-        XCTAssertEqual(count.label, "5 imported • 0 manually added • 5 total • 3 available offline")
+        XCTAssertEqual(count.label, "5 songs")
         app.buttons["playlist-add-songs"].tap()
+        let fromLibrary = app.buttons["From Your Library"]
+        XCTAssertTrue(fromLibrary.waitForExistence(timeout: 5)); fromLibrary.tap()
         // ui-track-a already backs three imported occurrences; adding it again is a new occurrence.
         for id in ["ui-track-b", "ui-track-a"] {
             let row = app.buttons["select-track-" + id]
             XCTAssertTrue(row.waitForExistence(timeout: 5)); XCTAssertTrue(row.isEnabled, "\(id) is selectable"); row.tap()
         }
         app.buttons["playlist-confirm-add"].tap()
-        let expected = "5 imported • 2 manually added • 7 total • 5 available offline"
+        let expected = "7 songs"
         waitUntil(count, "label == %@", expected, timeout: 5, message: "Manual songs are appended and playable")
         XCTAssertTrue(app.buttons["collection-play"].isEnabled)
         XCTAssertFalse(app.buttons["playlist-reorder"].exists, "Source order stays fixed")

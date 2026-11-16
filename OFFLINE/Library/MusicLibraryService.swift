@@ -54,12 +54,16 @@ import SwiftUI
         return tracks(playlistTrackIDs[id] ?? [])
     }
     func isMigrationPlaylist(_ id: String) -> Bool { snapshot.migrationPresentations[id] != nil }
+    /// Every song occurrence in the playlist: imported entries, songs added from the
+    /// library and songs added by YouTube link (including ones still downloading).
     func playlistEntryCount(_ id: String) -> Int {
+        let pending = pendingLinks(id).count
         if let presentation = snapshot.migrationPresentations[id] {
-            return presentation.rows.count + manualRows(id).count
+            return presentation.rows.count + manualRows(id).count + pending
         }
-        return playlistTracks(id).count
+        return (playlistTrackIDs[id]?.count ?? 0) + pending
     }
+    func pendingLinks(_ id: String) -> [PlaylistLinkDownloadRecord] { snapshot.pendingLinks[id] ?? [] }
     func migrationRows(_ id: String) -> [MigrationPlaylistRow] {
         snapshot.migrationPresentations[id]?.rows ?? []
     }

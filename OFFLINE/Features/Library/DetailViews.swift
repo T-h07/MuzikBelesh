@@ -10,6 +10,9 @@ struct PlaylistDetailView: View {
     @State private var confirmingDelete = false
     @State private var editMode: EditMode = .inactive
     @State private var songOptions: SongOptionsContext?
+    @State private var choosingSource = false
+    @State private var showingLinks = false
+    @State private var showingMigrationDetails = false
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
     private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
@@ -23,15 +26,17 @@ struct PlaylistDetailView: View {
                         if let description = playlist.description, !description.isEmpty { Text(description).foregroundStyle(AppColors.textSecondary) }
                         if migrationManaged {
                             MigrationPlaylistPlaybackHeader(playlistID: playlistID)
-                            Button { showingTracks = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
+                            Button { choosingSource = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
                         } else {
-                            Text("\(songs.count) songs • \(formatDuration(songs))").font(.caption).foregroundStyle(AppColors.textSecondary)
+                            let total = library.playlistEntryCount(playlistID)
+                            Text((total == 1 ? "1 song" : "\(total) songs") + " • " + formatDuration(songs)).font(.caption).foregroundStyle(AppColors.textSecondary)
+                                .accessibilityIdentifier("playlist-song-count")
                             CollectionPlaybackButtons(tracks: songs, kind: "playlist", sourceID: playlist.id)
-                            Button { showingTracks = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
+                            Button { choosingSource = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
                         }
                     }.padding(.vertical, AppSpacing.md)
                 }.listRowBackground(AppColors.backgroundPrimary)
-                if migrationManaged { MigrationPlaylistDashboard(playlistID: playlistID) }
+
                 Section {
                     if migrationManaged {
                         ForEach(library.migrationRows(playlistID)) { row in
@@ -59,7 +64,7 @@ struct PlaylistDetailView: View {
                                 .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeManualRow(row, playlistID: playlistID) } }
                         }
                     } else {
-                    if songs.isEmpty { Text("This playlist is empty. Add songs from your Library.").foregroundStyle(AppColors.textSecondary) }
+                    if songs.isEmpty && library.pendingLinks(playlistID).isEmpty { Text("This playlist is empty. Tap Add Songs to add music.").foregroundStyle(AppColors.textSecondary) }
                     ForEach(songs) { track in
                         Group {
                             if editMode == .active {
@@ -78,6 +83,11 @@ struct PlaylistDetailView: View {
                         library.perform { try library.reorder(order, playlistID: playlistID) }
                     }
                     }
+                    // Songs added by YouTube link that are still downloading (or failed):
+                    // already playlist entries, shown in submitted order after the songs.
+                    ForEach(library.pendingLinks(playlistID)) { link in
+                        PlaylistLinkDownloadRow(link: link).listRowBackground(AppColors.backgroundPrimary)
+                    }
                 }
             } else { Text("This playlist was removed.").foregroundStyle(AppColors.textSecondary) }
         }
@@ -95,6 +105,11 @@ struct PlaylistDetailView: View {
                     Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }.accessibilityIdentifier("playlist-reorder")
                 }
                 Menu {
+                    if migrationManaged {
+                        // Import diagnostics are an internal workflow, available on request.
+                        Button { showingMigrationDetails = true } label: { Label("Migration Details", systemImage: "list.bullet.clipboard") }
+                            .accessibilityIdentifier("playlist-migration-details")
+                    }
                     Button("Edit Playlist") { showingEditor = true }
                     Button("Delete Playlist", role: .destructive) { confirmingDelete = true }
                 } label: { Label("Playlist Actions", systemImage: "ellipsis.circle") }
@@ -103,6 +118,13 @@ struct PlaylistDetailView: View {
         }
         .sheet(isPresented: $showingEditor) { PlaylistEditorView(playlistID: playlistID) }
         .sheet(isPresented: $showingTracks) { AddTracksToPlaylistView(playlistID: playlistID) }
+        .sheet(isPresented: $showingLinks) { AddYouTubeLinksView(playlistID: playlistID) }
+        .sheet(isPresented: $showingMigrationDetails) { MigrationDetailsSheet(playlistID: playlistID) }
+        .confirmationDialog("Add Songs", isPresented: $choosingSource, titleVisibility: .visible) {
+            Button("From Your Library") { showingTracks = true }.accessibilityIdentifier("playlist-add-from-library")
+            Button("From YouTube Links") { showingLinks = true }.accessibilityIdentifier("playlist-add-from-youtube")
+            Button("Cancel", role: .cancel) { }
+        } message: { Text("Add songs you already have, or paste one or more YouTube links to download them.") }
         .confirmationDialog("Delete Playlist?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Playlist", role: .destructive) { Task { do { try await library.deletePlaylist(id: playlistID, confirmed: true); dismiss() } catch { library.report(error) } } }.accessibilityIdentifier("confirm-delete-playlist")
             Button("Cancel", role: .cancel) { }

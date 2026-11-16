@@ -24,6 +24,10 @@ import OSLog
     @Published private(set) var replacementStates: [UUID: AcquisitionDisplayState] = [:]
     private var replacements: [String: RecordingReplacementRecord] = [:]
     private var repairedReplacements = Set<String>()
+    /// Songs added by YouTube link, keyed by entry ID (display state per entry).
+    @Published private(set) var linkStates: [String: AcquisitionDisplayState] = [:]
+    private var linkDownloads: [String: PlaylistLinkDownloadRecord] = [:]
+    private var repairedLinks = Set<String>()
     /// Set when the user opens a completion notification.
     @Published var requestedPlaylistID: String?
 
@@ -258,6 +262,7 @@ import OSLog
 
     private func jobsChanged(_ jobs: [StoredDownloadJob]) {
         let linked = Set(links.values.compactMap(\.downloadJobID)).union(replacements.values.compactMap(\.downloadJobID))
+            .union(linkDownloads.values.compactMap(\.downloadJobID))
         var transition = false
         var states: [String: StoredDownloadState] = [:]
         for job in jobs where linked.contains(job.id) {
@@ -458,9 +463,12 @@ import OSLog
         await reconcileNotifications(due)
         await reconcileReplacements(plan.replacements)
         guard !invalidated else { return }
+        reconcileLinkDownloads(plan.linkDownloads)
+        guard !invalidated else { return }
         refreshDisplay(downloads.jobs)
         if !links.values.filter({ $0.state == .waiting && !pausedMigrations.contains($0.migrationID) }).isEmpty
-            || replacements.values.contains(where: { $0.state == .waiting && !pausedMigrations.contains($0.migrationID) }) {
+            || replacements.values.contains(where: { $0.state == .waiting && !pausedMigrations.contains($0.migrationID) })
+            || linkDownloads.values.contains(where: { $0.state == .waiting }) {
             downloads.continueInBackgroundIfPossible()
         }
     }
@@ -539,6 +547,15 @@ import OSLog
             staged[id] = display(link, job: value.downloadJobID.flatMap { jobsByID[$0] }, paused: pausedMigrations.contains(value.migrationID))
         }
         if staged != replacementStates { replacementStates = staged }
+        var added: [String: AcquisitionDisplayState] = [:]
+        for value in linkDownloads.values {
+            let link = AcquisitionLinkRecord(entryID: value.id, migrationID: "", candidateID: value.id, provider: "youtube",
+                providerIdentity: value.videoID, downloadJobID: value.downloadJobID, createdJob: value.createdJob,
+                state: value.state == .failed ? .failed : .waiting, trackID: nil, failure: value.failure, retries: value.retries,
+                nextRetryAt: nil, createdAt: value.createdAt, updatedAt: value.updatedAt, completedAt: nil)
+            added[value.id] = display(link, job: value.downloadJobID.flatMap { jobsByID[$0] }, paused: false)
+        }
+        if added != linkStates { linkStates = added }
     }
 
     private func display(_ link: AcquisitionLinkRecord, job: StoredDownloadJob?, paused: Bool) -> AcquisitionDisplayState {
@@ -692,6 +709,112 @@ import OSLog
             downloads.pause(job)
         }
         replacements = next
+    }
+
+    // MARK: Songs added by YouTube link
+
+    /// Accepts validated links as playlist entries (submitted order) and queues them.
+    @discardableResult
+    func submitLinks(_ videoIDs: [String], playlistID: String) async throws -> PlaylistLinkSubmissionResult {
+        let result = try LibraryRepository(db: repository.db).submitLinks(videoIDs, playlistID: playlistID, now: now())
+        if !result.accepted.isEmpty, !requestedAuthorization {
+            requestedAuthorization = true
+            let notifier = notifier
+            Task { await notifier.requestAuthorizationIfUndetermined() }
+        }
+        await reconcileNow()
+        return result
+    }
+
+    /// Explicit Retry of a failed link entry (its bounded automatic budget starts again).
+    func retryLink(id: String) async {
+        do {
+            if let jobID = linkDownloads[id]?.downloadJobID, let job = downloads.jobs.first(where: { $0.id == jobID }) {
+                repairedLinks.remove(jobID)
+                if job.state == .completed { downloads.retry(jobID, repair: true) }
+                else if [.failed, .cancelled, .paused, .interrupted].contains(job.state) { downloads.retry(jobID) }
+            }
+            try LibraryRepository(db: repository.db).resetLink(id: id)
+        } catch { report(error) }
+        await reconcileNow()
+    }
+
+    /// Remove from Playlist for a link entry that has no audio yet. A job created only for
+    /// it is paused by the next pass unless another consumer needs it; nothing is deleted.
+    func removeLink(id: String) async {
+        do { _ = try LibraryRepository(db: repository.db).removeLink(id: id) } catch { report(error) }
+        await reconcileNow()
+    }
+
+    /// One idempotent evaluation per pass. Completion re-checks everything in one
+    /// transaction (`completeLink`), so a removed entry or a repeated callback never adds
+    /// a song twice; an existing or completed job for the same video is reused.
+    private func reconcileLinkDownloads(_ current: [PlaylistLinkDownloadRecord]) {
+        let previous = linkDownloads
+        let library = LibraryRepository(db: repository.db)
+        var next: [String: PlaylistLinkDownloadRecord] = [:]
+        for value in current {
+            guard !invalidated else { return }
+            var link = value
+            guard link.state == .waiting else { next[link.id] = link; continue }
+            var job = downloads.job(for: link.videoID)
+            var created = false
+            if job == nil, let result = downloads.acquisitionJob(for: YouTubeVideo(id: link.videoID, title: "YouTube video"), quality: preferences.quality) {
+                job = result.job; created = result.created
+            }
+            guard let job else { next[link.id] = link; continue }
+            var changed = false
+            if link.downloadJobID != job.id {
+                if !created {
+                    switch job.state {
+                    case .paused, .cancelled, .interrupted: downloads.retry(job.id)
+                    case .failed where AcquisitionFailureCategory.classify(job.errorMessage).retryable && link.retries < 1: downloads.retry(job.id)
+                    default: break
+                    }
+                }
+                link.downloadJobID = job.id; link.createdJob = link.createdJob || created; changed = true
+            }
+            switch job.state {
+            case .completed:
+                if let trackID = job.trackID {
+                    let outcome: LibraryRepository.LinkCompletion
+                    do { outcome = try library.completeLink(id: link.id, trackID: trackID, paths: migrations.paths, now: now()) }
+                    catch { report(error); break }
+                    if outcome == .added || outcome == .gone { continue }
+                }
+                // The completed job has no usable track: repair the shared download once.
+                if !repairedLinks.contains(job.id) {
+                    repairedLinks.insert(job.id); downloads.retry(job.id, repair: true)
+                } else {
+                    link.state = .failed; link.failure = AcquisitionFailureCategory.verificationFailed.message; changed = true
+                }
+            case .failed, .cancelled:
+                let category: AcquisitionFailureCategory = job.state == .cancelled ? .userCancelled : .classify(job.errorMessage)
+                if category.retryable && link.retries < category.automaticRetries {
+                    link.retries += 1; changed = true
+                    downloads.retry(job.id)
+                } else {
+                    link.state = .failed; link.failure = category.message; changed = true
+                }
+            default: break
+            }
+            if changed {
+                link.updatedAt = now()
+                do { guard try library.updateLink(link) else { continue } } catch { report(error) }
+            }
+            next[link.id] = link
+        }
+        // A job created only for an entry that no longer exists is paused unless anything
+        // else (another entry, a playlist link or a replacement) still needs it.
+        let wanted = Set(next.values.compactMap(\.downloadJobID)).union(replacements.values.compactMap(\.downloadJobID))
+        for (key, old) in previous where next[key] == nil {
+            guard old.createdJob, old.state != .added, let id = old.downloadJobID, !wanted.contains(id), !linkConsumers(id, excludingPaused: false),
+                  let job = downloads.jobs.first(where: { $0.id == id }), job.state.stoppable else { continue }
+            // Only when the entry was removed (an added entry's job has completed anyway).
+            if current.contains(where: { $0.id == key }) { continue }
+            downloads.pause(job)
+        }
+        linkDownloads = next
     }
 
     private func linkConsumers(_ jobID: String, excludingPaused: Bool) -> Bool {

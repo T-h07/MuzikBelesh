@@ -281,7 +281,7 @@ import XCTest
         let after = try await GRDBPlaylistMigrationRepository(db: upgraded.dbQueue, paths: paths).issues(migrationID: session.id)
         XCTAssertEqual(after, before, "Existing open, resolved and dismissed history is preserved")
         let migrations = try await upgraded.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
-        XCTAssertTrue(migrations.contains(MigrationIssueSchema.version)); XCTAssertEqual(migrations.last, PlaylistOccurrenceRemovalSchema.version)
+        XCTAssertTrue(migrations.contains(MigrationIssueSchema.version)); XCTAssertEqual(migrations.last, PlaylistLinkDownloadSchema.version)
         let unset: Int = try await upgraded.dbQueue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_issues WHERE category IS NULL AND stage IS NULL AND closeReason IS NULL") ?? 0
         }

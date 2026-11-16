@@ -8,8 +8,11 @@ struct MigrationPlaylistPlaybackHeader: View {
         let rows = library.migrationRows(playlistID)
         let manual = library.manualRows(playlistID)
         let ready = (library.snapshot.migrationPresentations[playlistID]?.progress.ready ?? 0) + manual.filter(\.available).count
+        let total = library.playlistEntryCount(playlistID)
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("\(rows.count) imported • \(manual.count) manually added • \(rows.count + manual.count) total • \(ready) available offline")
+            // A playlist is a playlist: one plain song count. Import provenance and offline
+            // statistics live in Migration Details.
+            Text(total == 1 ? "1 song" : "\(total) songs")
                 .font(.caption).foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("migration-playlist-count")
             HStack {
                 Button { Task { await library.playMigration(playlistID: playlistID) } } label: {
@@ -20,7 +23,7 @@ struct MigrationPlaylistPlaybackHeader: View {
                 }.buttonStyle(.bordered).tint(AppColors.accentPrimary).accessibilityIdentifier("collection-shuffle")
             }.disabled(ready == 0)
             if ready == 0 {
-                Text(rows.isEmpty ? "This source playlist is empty." : "Source songs are saved. No local audio is available yet.")
+                Text(total == 0 ? "This playlist is empty." : "No songs are available offline yet.")
                     .font(.caption).foregroundStyle(AppColors.textSecondary)
             }
         }.task { await recover() }

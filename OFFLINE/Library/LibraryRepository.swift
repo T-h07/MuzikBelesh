@@ -30,6 +30,9 @@ final class LibraryRepository {
         result.migrationSessions = try GRDBPlaylistMigrationRepository.sessions(db)
         result.migrationEntries = try GRDBPlaylistMigrationRepository.entries(db)
         result.migrationIssues = try GRDBPlaylistMigrationRepository.issues(db)
+        result.pendingLinks = Dictionary(grouping: try PlaylistLinkDownloadRecord.fetchAll(db, sql: """
+            SELECT * FROM playlist_link_downloads WHERE state != 'added' ORDER BY playlistID, createdAt, batchID, sequence
+            """), by: \.playlistID)
         result.likedIDs = Set(try String.fetchAll(db, sql: "SELECT trackID FROM liked_tracks"))
         result.recentIDs = try String.fetchAll(db, sql: "SELECT trackID FROM playback_history GROUP BY trackID ORDER BY MAX(startedAt) DESC, trackID LIMIT 20")
         return result

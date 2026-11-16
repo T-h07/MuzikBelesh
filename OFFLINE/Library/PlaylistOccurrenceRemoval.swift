@@ -149,8 +149,7 @@ extension LibraryRepository {
             let taken = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist_local_occurrences WHERE playlistID = ? AND position = ?",
                                          arguments: [value.playlistID, value.position]) ?? 0
             if taken > 0 {
-                let last = try Int.fetchOne(db, sql: "SELECT MAX(position) FROM playlist_local_occurrences WHERE playlistID = ?", arguments: [value.playlistID]) ?? -1
-                value.position = last + 1
+                value.position = try Self.nextManualPosition(db, playlistID: value.playlistID)
             }
             try value.insert(db)
             try db.execute(sql: "UPDATE playlists SET dateModified = ? WHERE id = ?", arguments: [Date(), value.playlistID])
