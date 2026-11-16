@@ -3,6 +3,12 @@ import SwiftUI
 /// One authoritative worker per app. Durable intents in `migration_matching_jobs`:
 /// running/systemPaused resume automatically; userPaused, userCancelled, completed
 /// and fatal never do.
+///
+/// Phase 10.6: when `scheduler` (the application-scoped `PlaylistMigrationCoordinator`)
+/// is attached, this type is the execution and presentation adapter only. The
+/// coordinator decides which migration slice runs next; the worker executes it under a
+/// single iOS execution grant and keeps the proven pause/cancel/expiration semantics.
+/// Without a scheduler the original single-job behavior is unchanged.
 @MainActor final class PlaylistMatchingViewModel: ObservableObject {
     @Published private(set) var activeID: UUID?
     @Published private(set) var busy = false
@@ -19,6 +25,12 @@ import SwiftUI
     private var retryFailed = false
     private var intentWrite: Task<Void, Never>?
     private var lastPublish = ContinuousClock.now
+    /// The coordinator. Weak: the application container owns both.
+    weak var scheduler: (any MatchingScheduling)?
+    /// The coordinator's unit of work being executed (nil for a direct command).
+    private(set) var currentItem: MatchingWorkItem?
+    /// Set by `abandon()`: this instance never writes intent or schedules again.
+    private var abandoned = false
     private let service: PlaylistMigrationMatchingService
     private let repository: GRDBPlaylistMigrationRepository
     private let execution: any MatchingBackgroundExecuting
@@ -42,7 +54,19 @@ import SwiftUI
         if let intent = try? await repository.matchingIntent(id) { intents[id] = intent } else { intents[id] = nil }
     }
     func start(_ id: UUID, only: Set<UUID>? = nil, retryFailed: Bool = false) {
-        guard !busy else { return }
+        guard !busy, !abandoned else { return }
+        currentItem = nil
+        begin(id, only: only, retryFailed: retryFailed)
+    }
+    /// Executes one coordinator-selected unit of work.
+    func start(_ item: MatchingWorkItem) {
+        guard !busy, !abandoned else { return }
+        currentItem = item
+        begin(item.migrationID, only: item.only, retryFailed: item.retryFailed)
+    }
+    /// Presentation only: the coordinator persisted this intent itself.
+    func presentIntent(_ id: UUID, _ intent: String?) { intents[id] = intent }
+    private func begin(_ id: UUID, only: Set<UUID>?, retryFailed: Bool) {
         onlyEntries = only; self.retryFailed = retryFailed
         activeID = id; busy = true; message = nil; stopReason = nil
         intents[id] = "running"
@@ -75,7 +99,7 @@ import SwiftUI
         }
     }
     private func finishBeforeStart(_ id: UUID, reason: MatchingFailureCategory) async throws {
-        defer { busy = false; work = nil }
+        defer { busy = false; work = nil; scheduler?.matchingWorkerDidStop(id, reason: reason) }
         try await repository.setMatchingIntent(id, intent: Self.intent(for: reason))
         intents[id] = Self.intent(for: reason)
         message = reason.message
@@ -84,32 +108,58 @@ import SwiftUI
         guard busy, activeID == id else { return }
         work = Task {
             var success = false, offline = false
+            var current = id
+            var stopped: MatchingFailureCategory?
             do {
-                if stopReason != nil { throw CancellationError() }
-                try await service.run(migrationID: id, only: onlyEntries, retryFailed: retryFailed) { [weak self] value in await self?.update(value) }
-                try Task.checkCancellation()
-                let final = await service.lastReport
-                offline = final.waitingForConnection
-                // A pause requested while the last song finished still wins.
-                let intent = stopReason == .userPaused ? "userPaused" : offline ? "systemPaused" : "completed"
-                try await repository.setMatchingIntent(id, intent: intent)
-                intents[id] = intent
-                progress = try await repository.matchingSummary(migrationID: id)
-                progress.waitingForConnection = offline
-                message = offline ? MatchingFailureCategory.offline.message : stopReason == .userPaused ? MatchingFailureCategory.userPaused.message : nil
+                // With a coordinator, consecutive slices (possibly of different playlists)
+                // run under this one execution grant; without one, exactly one run.
+                while true {
+                    if stopReason != nil { throw CancellationError() }
+                    let startedAt = Date()
+                    try await service.run(migrationID: current, only: onlyEntries, retryFailed: retryFailed) { [weak self] value in await self?.update(value) }
+                    try Task.checkCancellation()
+                    let final = await service.lastReport
+                    offline = final.waitingForConnection
+                    // A pause requested while the last song finished still wins.
+                    var intent = stopReason == .userPaused ? "userPaused" : offline ? "systemPaused" : "completed"
+                    if let scheduler, stopReason != .userPaused {
+                        intent = await scheduler.intentAfterRun(current, item: currentItem, report: final, startedAt: startedAt)
+                    }
+                    try Task.checkCancellation()
+                    try await repository.setMatchingIntent(current, intent: intent)
+                    intents[current] = intent
+                    progress = try await repository.matchingSummary(migrationID: current)
+                    progress.waitingForConnection = offline
+                    message = offline ? MatchingFailureCategory.offline.message : stopReason == .userPaused ? MatchingFailureCategory.userPaused.message : nil
+                    guard stopReason == nil, !offline, let scheduler, let next = await scheduler.nextMatchingWork() else { break }
+                    try Task.checkCancellation()
+                    if stopReason != nil { throw CancellationError() }
+                    currentItem = next; onlyEntries = next.only; retryFailed = next.retryFailed
+                    current = next.migrationID; activeID = next.migrationID
+                    try await repository.setMatchingIntent(current, intent: "running")
+                    intents[current] = "running"
+                    if let saved = try? await repository.matchingSummary(migrationID: current) { progress = saved; execution.update(saved) }
+                }
                 success = true
             } catch {
                 let reason = stopReason ?? MatchingFailureCategory.classify(error)
+                stopped = reason
+                if abandoned {
+                    // Process termination: nothing further is written by this instance.
+                    execution.finish(success: false); busy = false; work = nil; currentItem = nil
+                    return
+                }
                 let intent = Self.intent(for: reason)
                 // Detached cleanup does not inherit the worker's cancellation.
-                let repository = repository
-                do { try await Task.detached { try await repository.setMatchingIntent(id, intent: intent) }.value }
-                catch { MatchingDiagnostics.record(error, session: id, entry: nil, stage: "save-intent") }
-                intents[id] = intent
-                if let saved = try? await repository.matchingSummary(migrationID: id) { progress = saved }
-                failure(error, id: id, reason: reason)
+                let repository = repository, failedID = current
+                do { try await Task.detached { try await repository.setMatchingIntent(failedID, intent: intent) }.value }
+                catch { MatchingDiagnostics.record(error, session: current, entry: nil, stage: "save-intent") }
+                intents[current] = intent
+                if let saved = try? await repository.matchingSummary(migrationID: current) { progress = saved }
+                failure(error, id: current, reason: reason)
             }
-            execution.finish(success: success); busy = false; work = nil
+            execution.finish(success: success); busy = false; work = nil; currentItem = nil
+            scheduler?.matchingWorkerDidStop(current, reason: success ? nil : stopped)
             if resumeOnIdle { resumeOnIdle = false; await restoreIfNeeded() }
             else if success && foreground && !offline { await restoreIfNeeded() }
         }
@@ -166,12 +216,19 @@ import SwiftUI
         if active { Task { await restoreIfNeeded() } }
     }
     /// Resumes only system-interrupted/running jobs; a user-paused job never restarts here.
+    /// With a coordinator, it alone chooses the work (fair, network/resource/cooldown aware).
     func restoreIfNeeded() async {
-        guard foreground, !busy, !restoring else { return }
+        guard foreground, !busy, !restoring, !abandoned else { return }
         restoring = true
         defer { restoring = false }
         do {
             await intentWrite?.value
+            if let scheduler {
+                guard let next = await scheduler.nextMatchingWork() else { return }
+                guard foreground, !busy, !abandoned else { return }
+                start(next)
+                return
+            }
             let jobs = try await repository.resumableMatchingJobs()
             guard foreground, !busy, let id = jobs.first else { return }
             start(id)
@@ -180,6 +237,18 @@ import SwiftUI
     func waitForCompletion() async {
         while busy { if let work { await work.value } else { await Task.yield() } }
     }
+    /// Ends this instance's ownership as process termination would: the in-flight run is
+    /// cancelled and no further intent is written or work scheduled by this instance.
+    /// Committed progress stays exactly as the next launch will find it.
+    func abandon() async {
+        abandoned = true; scheduler = nil
+        if stopReason == nil { stopReason = .interrupted }
+        while busy {
+            if let work { work.cancel(); await work.value }
+            else { execution.finish(success: false); busy = false }
+        }
+    }
+    var isAbandoned: Bool { abandoned }
 }
 
 /// Concise, consumer-facing matching status. Counts always come from persisted state.
@@ -189,6 +258,8 @@ struct PlaylistMatchingControls: View {
     let repository: GRDBPlaylistMigrationRepository
     var playlistID: String? = nil
     var lookup: YouTubeManualLookup? = nil
+    /// Phase 10.6: commands go through the coordinator (durable, queued fairly).
+    var coordinator: PlaylistMigrationCoordinator? = nil
     @State private var saved = SongMatchingProgress()
     @State private var loaded = false
     @State private var readError = false
@@ -229,14 +300,14 @@ struct PlaylistMatchingControls: View {
             if readError { Text("Progress couldn't be loaded. Reopen the playlist.").foregroundStyle(AppColors.error) }
             HStack(spacing: AppSpacing.sm) {
                 if active {
-                    Button { model.pause() } label: { Label("Pause Matching", systemImage: "pause") }
+                    Button { command({ model.pause() }) { try await $0.pauseMatching(session.id) } } label: { Label("Pause Matching", systemImage: "pause") }
                         .buttonStyle(.matchingPrimary).accessibilityIdentifier("migration-pause-matching")
                 } else if paused || interrupted {
-                    Button { model.resume(session.id) } label: { Label("Resume Matching", systemImage: "play") }
-                        .buttonStyle(.matchingPrimary).disabled(model.busy).accessibilityIdentifier("migration-resume-matching")
+                    Button { command({ model.resume(session.id) }) { try await $0.resumeMatching(session.id) } } label: { Label("Resume Matching", systemImage: "play") }
+                        .buttonStyle(.matchingPrimary).disabled(coordinator == nil && model.busy).accessibilityIdentifier("migration-resume-matching")
                 } else if !started {
-                    Button { model.start(session.id) } label: { Label("Find Matching Songs", systemImage: "magnifyingglass") }
-                        .buttonStyle(.matchingPrimary).disabled(model.busy || session.status.isTerminal)
+                    Button { command({ model.start(session.id) }) { try await $0.startMigration(session.id) } } label: { Label("Find Matching Songs", systemImage: "magnifyingglass") }
+                        .buttonStyle(.matchingPrimary).disabled((coordinator == nil && model.busy) || session.status.isTerminal)
                         .accessibilityIdentifier("migration-find-matches")
                 }
                 if let playlistID, progress.readyToReview + progress.needAttention > 0 {
@@ -248,8 +319,10 @@ struct PlaylistMatchingControls: View {
                 }
             }
             if complete && retryable > 0 {
-                Button("Retry \(retryable) Song\(retryable == 1 ? "" : "s") That Failed") { model.retryFailedSongs(session.id) }
-                    .buttonStyle(.matchingSecondary).disabled(model.busy)
+                Button("Retry \(retryable) Song\(retryable == 1 ? "" : "s") That Failed") {
+                    command({ model.retryFailedSongs(session.id) }) { try await $0.retryFailedEntries(session.id) }
+                }
+                    .buttonStyle(.matchingSecondary).disabled(coordinator == nil && model.busy)
                     .accessibilityIdentifier("migration-retry-failed")
             }
         }.tint(AppColors.accentPrimary)
@@ -260,6 +333,11 @@ struct PlaylistMatchingControls: View {
                 catch { readError = true }
                 loaded = true
             }
+    }
+    /// Coordinator command when attached; the original direct command otherwise.
+    private func command(_ direct: @escaping () -> Void, _ coordinated: @escaping (PlaylistMigrationCoordinator) async throws -> Void) {
+        guard let coordinator else { direct(); return }
+        Task { try? await coordinated(coordinator) }
     }
     private func title(active: Bool, paused: Bool, interrupted: Bool, complete: Bool, progress: SongMatchingProgress) -> String {
         if active { return "Finding recordings…" }

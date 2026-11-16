@@ -75,8 +75,16 @@ struct MigrationResolutionListView: View {
 struct MigrationRetrySongButton: View {
     @ObservedObject var model: PlaylistMatchingViewModel
     let entry: PlaylistMigrationEntry
+    /// Phase 10.6: with the coordinator the retry is queued durably, even while another
+    /// playlist is being matched; without it the original direct retry is used.
+    var coordinator: PlaylistMigrationCoordinator? = nil
     var body: some View {
-        Button("Retry This Song") { model.retry(entry.migrationID, entry: entry.id) }
-            .buttonStyle(.matchingSecondary).disabled(model.busy).accessibilityIdentifier("migration-retry-song")
+        Button("Retry This Song") {
+            if let coordinator {
+                let entry = entry
+                Task { try? await coordinator.retryEntry(entry.migrationID, entryID: entry.id) }
+            } else { model.retry(entry.migrationID, entry: entry.id) }
+        }
+            .buttonStyle(.matchingSecondary).disabled(coordinator == nil && model.busy).accessibilityIdentifier("migration-retry-song")
     }
 }

@@ -116,11 +116,15 @@ struct MigrationPlaylistDashboard: View {
                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 if let model = container.playlistMatching, let repository = library.storage?.playlistMigrations {
                     PlaylistMatchingControls(model: model, session: value.session, repository: repository,
-                                             playlistID: playlistID, lookup: container.youtubeManualLookup)
+                                             playlistID: playlistID, lookup: container.youtubeManualLookup,
+                                             coordinator: container.migrationCoordinator)
                     MigrationResolutionSummaryLink(playlistID: playlistID, session: value.session, repository: repository)
                 }
                 if let acquisition = container.playlistAcquisition {
                     PlaylistAcquisitionControls(acquisition: acquisition, presentation: value, playlistID: playlistID)
+                }
+                if let coordinator = container.migrationCoordinator {
+                    MigrationCoordinatorStatusView(coordinator: coordinator, session: value.session)
                 }
                 if expanded {
                     Text("\(value.session.source.displayName) • \(value.rows.count) entries • \(value.session.status.displayName)").font(.caption)
@@ -191,7 +195,7 @@ struct MigrationOccurrenceDetailView: View {
                     }
                     if let model = container.playlistMatching, row.entry.localTrackID == nil,
                        [.needsReview, .unavailable, .failed].contains(row.entry.status) {
-                        MigrationRetrySongButton(model: model, entry: row.entry)
+                        MigrationRetrySongButton(model: model, entry: row.entry, coordinator: container.migrationCoordinator)
                     }
                 }
                 if let acquisition = container.playlistAcquisition {
