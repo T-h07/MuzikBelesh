@@ -33,7 +33,9 @@ final class AppContainer: ObservableObject {
     let youtubePreferences: YouTubePreferences
     let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
-    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil) {
+    /// Phase 11.1 device-local profile. Owns no library data and no network access.
+    let profile: LocalProfileService
+    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil, profileStore: (any LocalProfileStoring)? = nil) {
         self.resources = resourceMonitor ?? ResourceMonitor()
         self.configuration = configuration
         if let storage { self.storage = storage } else { self.storage = try? StorageCoordinator(paths: AppStoragePaths()) }
@@ -53,6 +55,10 @@ final class AppContainer: ObservableObject {
         // Exactly one DownloadManager owns every job, ordinary and playlist-driven.
         self.downloads = DownloadManager(storage: self.storage, preferences: self.youtubePreferences, preparer: self.youtubePreparer, transfer: audioTransfer, artwork: youtubeArtwork, observeNetwork: observeDownloadNetwork, system: backgroundTransfers, execution: backgroundExecution)
         self.youtubeProbe = youtubeProbe ?? YouTubeKitProbe(resolver: resolver)
+        // A single-row read, so the launch destination is known before the first frame and the
+        // tab interface never flashes ahead of onboarding. Storage failure stays a failure.
+        self.profile = LocalProfileService(store: profileStore ?? self.storage.map { LocalProfileRepository(db: $0.database.dbQueue, paths: $0.paths) })
+        self.profile.load()
         self.audioPlayer = AudioPlayerService(storage: self.storage)
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }

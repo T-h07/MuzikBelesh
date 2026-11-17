@@ -8,12 +8,54 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     let coordinator: AppCoordinator
     var body: some View {
-        KeyboardSafeHost(content: RootTabsView(scenePhase: scenePhase, coordinator: coordinator)
+        KeyboardSafeHost(content: ProfileGate(scenePhase: scenePhase, coordinator: coordinator, profile: container.profile)
             .environmentObject(container)
             .environmentObject(coordinator)
             .environmentObject(container.audioPlayer)
-            .environmentObject(container.library))
+            .environmentObject(container.library)
+            .environmentObject(container.profile))
             .ignoresSafeArea().preferredColorScheme(.dark)
+    }
+}
+
+/// Phase 11.1 launch gate. The destination is resolved from a committed profile read in
+/// `AppContainer`, so the tabs never appear before onboarding. The tab interface (and its
+/// share-inbox delivery) mounts only after a profile exists; pending shares wait in the App
+/// Group inbox meanwhile. App lifecycle forwarding lives here so it keeps running during
+/// onboarding: downloads, playback and migrations are never paused by the profile flow.
+private struct ProfileGate: View {
+    let scenePhase: ScenePhase
+    let coordinator: AppCoordinator
+    @ObservedObject var profile: LocalProfileService
+    @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var audioPlayer: AudioPlayerService
+    @EnvironmentObject private var library: MusicLibraryService
+    var body: some View {
+        Group {
+            switch profile.launchDestination {
+            case .loading: ProgressView().tint(AppColors.textSecondary).frame(maxWidth: .infinity, maxHeight: .infinity).screenBackground()
+            case .onboarding: LocalProfileOnboardingView()
+            case .failure(let message): ProfileStorageErrorView(message: message)
+            case .main: RootTabsView(scenePhase: scenePhase, coordinator: coordinator)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .inactive {
+                if let coordinator = container.migrationCoordinator {
+                    let active = phase == .active
+                    Task {
+                        if active { await coordinator.applicationDidBecomeActive() }
+                        else { await coordinator.applicationDidEnterBackground() }
+                    }
+                } else { container.playlistMatching?.setForeground(phase == .active) }
+            }
+            if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
+            if phase == .active {
+                audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile()
+                container.migrationIssues?.applicationDidBecomeActive()
+            }
+        }
     }
 }
 
@@ -37,23 +79,8 @@ private struct RootTabsView: View {
         .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
         .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .inactive {
-                if let coordinator = container.migrationCoordinator {
-                    let active = phase == .active
-                    Task {
-                        if active { await coordinator.applicationDidBecomeActive() }
-                        else { await coordinator.applicationDidEnterBackground() }
-                    }
-                } else { container.playlistMatching?.setForeground(phase == .active) }
-            }
-            if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
-            if phase == .active {
-                audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile()
-                container.migrationIssues?.applicationDidBecomeActive()
-            }
-            else { searchFocus = nil }
-        }
+        // Lifecycle forwarding is in ProfileGate, which stays mounted during onboarding.
+        .onChange(of: scenePhase) { _, phase in if phase != .active { searchFocus = nil } }
         .preferredColorScheme(.dark)
         .alert("Library", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
             Button("OK") { library.error = nil }
@@ -98,6 +125,7 @@ private struct RootTabsView: View {
             case .settings: SettingsView()
             case .importLink: ImportLinkView()
             case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)])
+            case .profile: LocalProfileView()
             case .playlist(let id): NotificationPlaylistSheet(playlistID: id)
             case .migrationIssues(let id): NotificationMigrationIssuesSheet(playlistID: id)
             case .sharedLink(let share):
