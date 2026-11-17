@@ -125,7 +125,33 @@ storage, library migration, playback, hybrid playlists.
 
 ### Stage C — complete regression
 
-FINAL_PENDING
+Run [44077441555](https://github.com/T-h07/MuzikBelesh/actions/runs/44077441555) (`ci.yml`, `complete`) on the frozen
+candidate `3c18885`: **FAIL — every failure is a pre-existing baseline or a timing flake;
+no Phase 10.9 regression.** Comparison with the same suite on `develop` at the accepted
+Phase 10.7 merge `c2be900` (run [43975347911](https://github.com/T-h07/MuzikBelesh/actions/runs/43975347911)):
+
+| Shard | `develop` `c2be900` | Candidate `3c18885` |
+|---|---|---|
+| Units (+ accessibility) | 582 run, 2 failed | 598 run, **597 passed, 1 failed** (+16 Phase 10.9 tests, search fixture fixed) |
+| Library UI (iPhone 16 Pro Max) | 16/16 | **16/16 PASS** |
+| Compact (iPhone SE) | 5/5 | 4/5 |
+| Other UI | 25 run, 6 failed | 25 run, 19 passed, **the same 6 failed** |
+
+| Failing test | Classification | Evidence |
+|---|---|---|
+| `PlaylistMigrationCoordinatorTests.testT18ThousandEntryMigrationUsesBoundedWorkersQueriesAndUpdates` | Baseline timing: exceeds the shard's 60 s default allowance | Same on `develop` `c2be900` and `f2c448d`; passes in Stage B (120 s allowance) |
+| `PlaylistFileImportUITests.testMultipleSelectionRenamePreviewAndInvalidCandidate` | Baseline UI failure | Fails in every complete run on `develop` since `f655286` (15 Nov) |
+| `PlaylistFileImportUITests.testThousandEntryScrollDashboardInspectionAndRestartSmoke` | Baseline UI failure | Same history |
+| `ReviewQueueUITests.testLastAndFirstCandidatesConfirmAndAdvance` | Baseline UI failure | Same history |
+| `ReviewQueueUITests.testMiddleCandidateConfirmsAdvancesAndPersistsAcrossRelaunch` | Baseline UI timeout | Same history |
+| `ReviewQueueUITests.testNavigationResetsScrollAndNeverSelects` | Baseline UI failure/timeout | Same history |
+| `PlaylistMigrationUITests.testPlaylistSearchFiltersAndClearRestoresAllSongs` | Baseline UI failure (search field not found within 5 s) | Fails on `develop` since the 10.7 merge |
+| `LibraryManagementUITests.testEmptyAlbumCreationAndSearchPersistAfterRelaunch` (compact) | Timing flake | Passed in the Library UI shard of the same run; LibraryManagement timeouts rotate between tests across runs (`f2c448d`, `4df61bb`, `49f3fa5`) |
+
+Phase 10.9 changed no UI code. The six migration/review UI failures are **unresolved
+baseline test failures**, not confirmed product defects; they are not disabled or skipped.
+Their flows are covered on the device by P09, P14 and P16. Investigating them needs
+interactive UI debugging and is recommended as follow-up work.
 
 ## 6. Stress-test results
 
@@ -186,8 +212,9 @@ All v1.0.0 limitations in `Docs/KNOWN_LIMITATIONS.md` still apply.
 
 ## 10. Outstanding defects
 
-None open from Phase 10.9 automated verification (see §5). Physical acceptance may add
-items.
+No product defect is open from Phase 10.9 verification. Open test items, all pre-existing
+on `develop` (§5): six migration/review-queue UI tests failing and the T18 coordinator test
+exceeding the complete-regression 60 s allowance. Physical acceptance may add items.
 
 ## 11. Physical iPhone acceptance matrix (iPhone 13 Pro Max, SideStore)
 
@@ -230,11 +257,28 @@ backup — never the user's real library.
 
 ## 12. Release-candidate source commit
 
-CANDIDATE_PENDING
+`3c188856bd7f38b4a66c1c7effbadc6224091534` on `feature/phase-10-09-release` — the commit
+the IPA was built from and Stage C ran on. Later commits on the branch change only `Docs/`
+(this file's results); if any source changes after acceptance, Stage B, the IPA and the
+affected device rows must be repeated for the new candidate.
 
 ## 13. IPA artifact
 
-IPA_PENDING
+| Field | Value |
+|---|---|
+| Workflow run | [44083978843](https://github.com/T-h07/MuzikBelesh/actions/runs/44083978843) (`build-ipa.yml`, run #98) |
+| Artifact | `OFFLINE-unsigned-IPA` (id 14328752269, expires 2027-02-15) |
+| File | `OFFLINE-unsigned.ipa`, 6,340,217 bytes |
+| SHA-256 | `1dd6f93ba8ab82d182fe67bf2f64b7f8bebf275bbcdd5a3cfc74bbb4ce6c0414` (manifest and independent re-hash agree) |
+| Version / build | 1.1.0 / 98 (installed 10.8 test IPA: build 97) |
+| Embedded commit | `3c18885` = source SHA |
+| Main app | `com.th07.muzikbelesh`, arm64, `UIBackgroundModes` = audio, processing |
+| Share extension | `com.th07.muzikbelesh.share`, 1.1.0 / 98, `com.apple.share-services`, present in `PlugIns/` |
+| App Group requested by both executables | `group.com.th07.muzikbelesh.inbox` |
+| Signing | Unsigned; ad-hoc entitlement metadata only; no `_CodeSignature` or provisioning profile |
+| Canceled 10.8 content | No Spotify client ID keys, no `accounts.spotify.com`/`api.spotify.com`, no `spotify_pending_imports` in either binary; inbox downgrade code present |
+
+Verified independently after download (ZIP integrity, both bundles, Info.plists, strings).
 
 ## 14. Rollback and recovery
 
@@ -250,4 +294,22 @@ IPA_PENDING
 
 ## 15. Release-readiness decision
 
-DECISION_PENDING
+**READY FOR PHYSICAL ACCEPTANCE** — not ready for release.
+
+| Gate | Status |
+|---|---|
+| G01 Phase 10 components integrated | PASS (automated) |
+| G02 New automated tests pass | PASS (Stage B, Stage C units) |
+| G03 v1.0.0 functionality verified | Automated: Library UI 16/16, playback/library/download/YouTube units pass; device: NOT RUN (P22–P25) |
+| G04 1,000-entry ordering/occurrence integrity | PASS (automated); device P07 NOT RUN |
+| G05 No incorrect audio associations | Automated suites pass; device P09/P21 NOT RUN |
+| G06 Retry/recovery tests pass | PASS (automated); device P11/P13 NOT RUN |
+| G07 Share inbox downgrade compatibility | PASS (automated); device P04 NOT RUN |
+| G08 In-place upgrade preserves data | Automated PASS (10.8 state, v012); device P01–P03 NOT RUN |
+| G09 Physical acceptance recorded | NOT RUN |
+| G10 No unresolved P0/P1 defects | None known; 6 baseline UI test failures unresolved (§5) — to be confirmed or cleared by device rows |
+| G11 IPA provenance and checksum | PASS (§13) |
+| G12 User approves release | NOT GIVEN |
+
+Nothing has been merged into `develop`, `main` or `release`; no `v1.1.0` tag or GitHub
+Release exists.
