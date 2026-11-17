@@ -49,12 +49,10 @@ final class ReleaseHardeningTests: XCTestCase {
         XCTAssertFalse(result.duplicate)
         XCTAssertEqual(result.track.title.count, AudioMetadata.libraryTextLimit)
         XCTAssertNil(result.track.title.rangeOfCharacter(from: .controlCharacters))
-        let artist = try coordinator.database.dbQueue.read { db in
-            try String.fetchOne(db, sql: "SELECT name FROM artists WHERE id = ?", arguments: [result.track.artistID])
-        }
+        let (artist, foreignKeyViolations) = try databaseFacts(coordinator, artistID: result.track.artistID)
         XCTAssertEqual(artist?.count, AudioMetadata.libraryTextLimit)
         XCTAssertTrue(FileManager.default.fileExists(atPath: try paths.musicURL(relativePath: result.track.fileRelativePath).path))
-        XCTAssertEqual(try coordinator.database.dbQueue.read { try Row.fetchAll($0, sql: "PRAGMA foreign_key_check").count }, 0)
+        XCTAssertEqual(foreignKeyViolations, 0)
         // No staging copy is left behind.
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: paths.imports.path).filter { $0 != "long-metadata.wav" }
         XCTAssertEqual(leftovers, [])
@@ -71,6 +69,14 @@ final class ReleaseHardeningTests: XCTestCase {
     }
 
     // MARK: Helpers
+
+    /// Synchronous reads: inside an async test, `read` would resolve to GRDB's async overload.
+    private func databaseFacts(_ coordinator: StorageCoordinator, artistID: String?) throws -> (String?, Int) {
+        try coordinator.database.dbQueue.read { db in
+            (try String.fetchOne(db, sql: "SELECT name FROM artists WHERE id = ?", arguments: [artistID]),
+             try Row.fetchAll(db, sql: "PRAGMA foreign_key_check").count)
+        }
+    }
 
     private func makeStorage() throws -> (AppStoragePaths, StorageCoordinator) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MuzikBelesh-Hardening-\(UUID().uuidString)")
