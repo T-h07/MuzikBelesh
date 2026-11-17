@@ -11,6 +11,7 @@ struct HomeView: View {
                 HStack {
                     Text("Muzik Belesh").font(.system(size: 28, weight: .bold)).foregroundStyle(AppColors.textPrimary)
                     Spacer(); Button { coordinator.sheet = .settings } label: { Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44) }.accessibilityLabel("Settings")
+                    ProfileHeaderButton { coordinator.sheet = .profile }
                 }
                 if let track = currentTrack {
                     VStack(alignment: .leading, spacing: AppSpacing.md) {

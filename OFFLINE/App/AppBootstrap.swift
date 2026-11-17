@@ -13,6 +13,11 @@ import Foundation
                 if process.arguments.contains("--reset-ui-library"), FileManager.default.fileExists(atPath: root.path) { try FileManager.default.removeItem(at: root) }
                 let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))
                 if process.arguments.contains("--reset-ui-library") { try seed(storage) }
+                // Historical suites expect Home: a reset library has a profile unless a Phase 11.1
+                // test asks for the first-launch (or v1.1.0-upgrade) onboarding state.
+                if process.arguments.contains("--reset-ui-library"), !process.arguments.contains("--profile-onboarding") {
+                    _ = try LocalProfileRepository(db: storage.database.dbQueue, paths: storage.paths).create(username: "UI Listener", avatar: nil)
+                }
                 if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--migration-fixtures") { try seedMigrations(storage) }
                 if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--review-queue-fixture") { try seedReviewQueue(storage) }
                 if process.arguments.contains("--youtube-fixtures") {
@@ -31,7 +36,9 @@ import Foundation
                     }
                     return container
                 }
-                return AppContainer(storage: storage, resourceMonitor: ResourceMonitor(observeSystem: false))
+                let profileStore: (any LocalProfileStoring)? = process.arguments.contains("--profile-load-failure")
+                    ? FailingFirstLoadProfileStore(base: LocalProfileRepository(db: storage.database.dbQueue, paths: storage.paths)) : nil
+                return AppContainer(storage: storage, resourceMonitor: ResourceMonitor(observeSystem: false), profileStore: profileStore)
             } catch { fatalError("Could not create the isolated UI test library") }
         }
         #endif
@@ -102,3 +109,21 @@ import Foundation
     }
     #endif
 }
+
+#if DEBUG
+/// UI-test double: the first profile read fails like an unreadable database, later reads
+/// succeed. Proves a read failure shows a recoverable error and never onboarding.
+final class FailingFirstLoadProfileStore: LocalProfileStoring, @unchecked Sendable {
+    private let base: any LocalProfileStoring
+    private var failed = false
+    init(base: any LocalProfileStoring) { self.base = base }
+    func load() throws -> LocalUserProfile? {
+        if !failed { failed = true; throw LocalProfileError.storageUnavailable }
+        return try base.load()
+    }
+    func create(username: String, avatar: PreparedAvatar?) throws -> LocalUserProfile { try base.create(username: username, avatar: avatar) }
+    func update(profileID: UUID, username: String, avatar: AvatarChange) throws -> LocalUserProfile { try base.update(profileID: profileID, username: username, avatar: avatar) }
+    func removeUnreferencedAvatars() throws { try base.removeUnreferencedAvatars() }
+    func avatarURL(_ relativePath: String, thumbnail: Bool) -> URL? { base.avatarURL(relativePath, thumbnail: thumbnail) }
+}
+#endif
