@@ -68,8 +68,8 @@ final class PortableLibrarySchemaTests: XCTestCase {
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist_migrations WHERE id = 'mig-1'"), 0)
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_entries WHERE id = 'entry-1'"), 0)
         }
-        let session = try upgraded.dbQueue.read { try MigrationSessionRecord.fetchOne($0, key: "mig-2")?.model() }
-        XCTAssertEqual(session?.source, .muzikBelesh)
+        let source = try upgraded.dbQueue.read { try String.fetchOne($0, sql: "SELECT source FROM playlist_migrations WHERE id = 'mig-2'") }
+        XCTAssertEqual(source.flatMap(PlaylistMigrationSource.init(rawValue:)), .muzikBelesh)
         XCTAssertEqual(PlaylistMigrationSource.muzikBelesh.displayName, "Muzik Belesh library")
     }
 }

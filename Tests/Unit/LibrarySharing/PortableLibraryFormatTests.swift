@@ -72,7 +72,7 @@ final class PortableLibraryFormatTests: XCTestCase {
         shuffled.occurrences[1].position = 5
         rejects(F.document(songs: [F.song("s1", "One")], playlists: [shuffled]))
         // Invalid YouTube identity.
-        rejects(F.document(songs: [F.song("s1", "One", videos: ["not-a-video"])], playlists: []))
+        rejects(F.document(songs: [F.song("s1", "One", videos: ["bad id!"])], playlists: []))
         // Neither title nor recording.
         rejects(F.document(songs: [F.song("s1", nil)], playlists: []))
         // Control characters and over-long text.
