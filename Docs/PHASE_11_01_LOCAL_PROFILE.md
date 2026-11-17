@@ -1,6 +1,6 @@
 # Phase 11.1 — Local Account System, Profile Onboarding & Profile Management
 
-**Status:** implemented on `feature/phase-11-01-profile`, awaiting physical-device acceptance.
+**Status:** implemented on `feature/phase-11-01-profile`; **12/12 developer-reported physical-device checks PASS**. Native CI verification remains pending before final merge assessment.
 Not released: the public release remains v1.1.0 until all Phase 11 work is accepted.
 
 Muzik Belesh now asks for a local profile (a username and an optional photo) on first
@@ -272,3 +272,34 @@ CI results for the pushed commit are recorded in the delivery report, not here, 
 
 The key risk is P01–P03: an in-place upgrade from v1.1.0 that creates the first profile
 without changing existing data.
+
+## Developer-reported physical acceptance — 2026-11-17
+
+The developer confirmed the Phase 11.1 IPA was installed on a physical iPhone and explicitly reported **PASS** for all twelve tests in the user-facing Phase 11.1 acceptance checklist.
+
+| Reported test ID | User-facing acceptance check | Developer result |
+|---|---|---|
+| P01 | In-place upgrade | **PASS** |
+| P02 | First-launch onboarding | **PASS** |
+| P03 | Username creation | **PASS** |
+| P04 | Profile picture | **PASS** |
+| P05 | Profile navigation | **PASS** |
+| P06 | Edit username | **PASS** |
+| P07 | Change/remove photo | **PASS** |
+| P08 | Persistence across restart | **PASS** |
+| P09 | Username/input validation | **PASS** |
+| P10 | Playback regression | **PASS** |
+| P11 | Library and migration | **PASS** |
+| P12 | Share and downloads | **PASS** |
+
+**Outcome: 12 PASS, 0 FAIL** (developer-reported, not independently observed device telemetry).
+
+**Checklist mapping note:** The user-facing checklist above uses different ID-to-description assignments than the earlier, more detailed repository checklist in the preceding section. The result table reproduces **exactly what the developer attested**; it must not be used to claim that additional detailed conditions (such as a specific HEIC format, forcing a storage-read failure, sharing while onboarding is visible, or every invalid input subtype) were independently exercised.
+
+### Integration readiness
+
+- **Physical acceptance gate: PASS.**
+- Build workflow for the tested Phase 11.1 source: [44138530250](https://github.com/T-h07/MuzikBelesh/actions/runs/44138530250) — **SUCCESS** (source `b0f381c3d0ff16c9729e95a281fd247b5393ba29`).
+- Latest full CI verification: [44137722813](https://github.com/T-h07/MuzikBelesh/actions/runs/44137722813) — **PENDING at the time of recording**. A successful IPA build does not establish that native XCTest passed.
+- Feature branch is ahead of `develop` with no divergence as checked before recording these results.
+- **No merge authorized or performed by recording the results.** Merge into `develop` after checking native CI and identifying any blocking regressions. Do not promote Phase 11.1 into `release` or `main` until the larger v1.2.0 release is approved.
