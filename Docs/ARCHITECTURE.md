@@ -85,3 +85,17 @@ derived `ThemePalette` in the SwiftUI environment (`\.themePalette`) and sets th
 Views read `palette.accent` / `palette.onAccent`; `AppColors.accentPrimary` no longer exists.
 Backgrounds, text and status colours stay fixed. A theme change touches no database, player,
 library, download or analytics state. See [Phase 11.3](PHASE_11_03_CUSTOM_THEMES.md).
+
+## Phase 11.4 library sharing
+
+`LibrarySharingService` (`OFFLINE/LibrarySharing`) is owned by `AppContainer` and created after
+the migration coordinator. Export builds an allowlisted `.mbelesh` document field by field from
+one read snapshot (`PortableLibraryExporter`) and writes it atomically for the share sheet.
+Import validates the file (`PortableLibraryCodec`), previews it, commits every selected playlist
+in one transaction as migration sessions with source `muzikBelesh`, then
+`PortableImportReconciler` reuses local songs (exact recording provenance, then the existing
+local matching policy) and, when automatic acquisition was chosen, accepts only shared
+recordings the strict policy recommends before handing each playlist to
+`PlaylistMigrationCoordinator`. Downloads stay with `PlaylistAcquisitionCoordinator` and
+`DownloadManager`. Opened files are staged privately and presented after the profile gate.
+See [Phase 11.4](PHASE_11_04_LIBRARY_SHARING.md).

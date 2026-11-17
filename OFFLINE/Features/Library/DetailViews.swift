@@ -13,6 +13,7 @@ struct PlaylistDetailView: View {
     @State private var choosingSource = false
     @State private var showingLinks = false
     @State private var showingMigrationDetails = false
+    @State private var showingExport = false
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
     private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
@@ -150,6 +151,8 @@ struct PlaylistDetailView: View {
                             .accessibilityIdentifier("playlist-migration-details")
                     }
                     Button("Edit Playlist") { showingEditor = true }
+                    Button { showingExport = true } label: { Label("Export Playlist", systemImage: "square.and.arrow.up") }
+                        .accessibilityIdentifier("playlist-export")
                     Button("Delete Playlist", role: .destructive) { confirmingDelete = true }
                 } label: { Label("Playlist Actions", systemImage: "ellipsis.circle") }
                     .accessibilityIdentifier("playlist-actions")
@@ -159,6 +162,7 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showingTracks) { AddTracksToPlaylistView(playlistID: playlistID) }
         .sheet(isPresented: $showingLinks) { AddYouTubeLinksView(playlistID: playlistID) }
         .sheet(isPresented: $showingMigrationDetails) { MigrationDetailsSheet(playlistID: playlistID) }
+        .sheet(isPresented: $showingExport) { LibraryExportView(initialScope: .playlist(playlistID)) }
         .confirmationDialog("Add Songs", isPresented: $choosingSource, titleVisibility: .visible) {
             Button("From Your Library") { showingTracks = true }.accessibilityIdentifier("playlist-add-from-library")
             Button("From YouTube Links") { showingLinks = true }.accessibilityIdentifier("playlist-add-from-youtube")

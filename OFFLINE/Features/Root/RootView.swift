@@ -16,6 +16,9 @@ struct RootView: View {
             .environmentObject(container.profile)
             .environmentObject(container.listening)))
             .ignoresSafeArea().preferredColorScheme(.dark)
+            // Phase 11.4: a `.mbelesh` file opened from Files, Mail or AirDrop is staged
+            // privately at once; the tab interface presents it after the profile gate.
+            .onOpenURL { url in container.sharing.receive(url) }
     }
 }
 
@@ -70,6 +73,7 @@ private struct RootTabsView: View {
     @ObservedObject var coordinator: AppCoordinator
     @State private var shareRevision = 0
     @State private var shareReadFailed = false
+    @State private var inboxRevision = 0
     @FocusState private var searchFocus: LibrarySearchField?
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
@@ -119,6 +123,19 @@ private struct RootTabsView: View {
             container.migrationIssues?.requestedIssuesPlaylistID = nil
             openMigrationIssues(id)
         }
+        .onReceive(container.sharing.$inbox) { _ in inboxRevision += 1 }
+        .task(id: "\(scenePhase)-\(inboxRevision)-\(shareRevision)") {
+            // Opened library documents wait for any presentation in progress, like shared links.
+            guard scenePhase == .active, let document = container.sharing.inbox else { return }
+            do {
+                while coordinator.sheet != nil || coordinator.showingNowPlaying || Self.hasModal {
+                    try await Task.sleep(for: .milliseconds(350))
+                }
+                try Task.checkCancellation()
+                guard container.sharing.inbox?.id == document.id else { return }
+                coordinator.sheet = .libraryImport(document)
+            } catch { }
+        }
         .alert("Could not read the shared link inbox", isPresented: $shareReadFailed) {
             Button("Retry") { shareRevision += 1 }
             Button("Close", role: .cancel) { }
@@ -131,6 +148,8 @@ private struct RootTabsView: View {
             case .profile: LocalProfileView()
             case .playlist(let id): NotificationPlaylistSheet(playlistID: id)
             case .migrationIssues(let id): NotificationMigrationIssuesSheet(playlistID: id)
+            case .librarySharing: LibrarySharingHubView()
+            case .libraryImport(let document): LibraryImportView(inbox: document)
             case .sharedLink(let share):
                 ImportLinkView(initialURL: share.url).onAppear {
                     Task {

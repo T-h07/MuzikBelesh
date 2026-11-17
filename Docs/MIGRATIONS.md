@@ -10,6 +10,8 @@ schema definitions. The Phase 10.1 tests upgrade a real v012 database, reopen v0
 and verify existing playlist, likes, queue, history and playback state.
 See [Phase 10.1 persistence](PHASE_10_01_PERSISTENCE.md).
 
+Phase 11.4 appends `v026_portable_library_sharing` after `v025_listening_analytics`. It rebuilds `playlist_migrations` (GRDB runs migrations with foreign keys off; the migration refuses to run if enforcement is on) to widen the `source` CHECK to `muzikBelesh`, preserving every row, rowid, constraint and index, and creates three new tables. `PortableLibrarySchemaTests` upgrades a populated v025 database. See [Phase 11.4](PHASE_11_04_LIBRARY_SHARING.md).
+
 Phase 11.2 appends `v025_listening_analytics` after `v024_local_user_profile`; it creates
 new tables only and changes no existing row. See [Phase 11.2](PHASE_11_02_LISTENING_ANALYTICS.md).
 

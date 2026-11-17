@@ -49,3 +49,25 @@ session's time across local calendar days. `listening_analytics_state` is a sing
 `trackingStartedAt`. Indexes cover `startDay`, `trackID`, `(contextKind, contextSourceID)`,
 active sessions and `(day, sessionID, listenedMs)`. `playback_history` is unchanged and is
 not used for listening time. See [Phase 11.2](PHASE_11_02_LISTENING_ANALYTICS.md).
+
+## Phase 11.4 library sharing
+
+`v026_portable_library_sharing` (appended after v025) rebuilds `playlist_migrations` with the
+same columns, rows (including rowids), primary key, UNIQUE constraints and
+`playlist_migrations_status` index, widening only the `source` CHECK to admit `muzikBelesh`.
+Child tables keep their `REFERENCES playlist_migrations(id)` clauses. It adds:
+
+- `portable_library_imports`: `id`, `operationID` (unique), `requestFingerprint`, `exportID`,
+  `documentName`, `schemaVersion`, `automaticAcquisition`, `phase`
+  (`committed`, `reconciling`, `handedOff`, `cancelled`), `createdAt`, `updatedAt`.
+- `portable_library_import_items`: `migrationID` (primary key, cascade from
+  `playlist_migrations`), `importID` (cascade), `kind` (`playlist`, `standaloneSongs`),
+  `documentPlaylistID`, `contentFingerprint` (indexed, duplicate detection), `ordinal`
+  (unique per import).
+- `portable_library_entries`: `entryID` (primary key, cascade from `migration_entries`),
+  `migrationID`, `importID` (cascades), `songRef`, `recordings` (JSON array of validated
+  YouTube IDs, ≤ 200 characters), `resolution` (`pending`, `provenance`, `localMatch`,
+  `reference`, `proposed`, `deferred`), `updatedAt`.
+
+No profile, listening, preference or device data is referenced. See
+[Phase 11.4](PHASE_11_04_LIBRARY_SHARING.md).
