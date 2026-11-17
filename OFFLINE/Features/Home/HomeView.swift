@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HomeView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     @EnvironmentObject private var audioPlayer: AudioPlayerService
     @ObservedObject var coordinator: AppCoordinator
@@ -15,7 +16,7 @@ struct HomeView: View {
                 }
                 if let track = currentTrack {
                     VStack(alignment: .leading, spacing: AppSpacing.md) {
-                        Text("CONTINUE LISTENING").font(.caption.weight(.semibold)).foregroundStyle(AppColors.accentPrimary)
+                        Text("CONTINUE LISTENING").font(.caption.weight(.semibold)).foregroundStyle(palette.accent)
                         HStack(spacing: AppSpacing.md) {
                             StoredArtworkView(track: track, size: 100)
                             VStack(alignment: .leading, spacing: 8) {
@@ -26,7 +27,7 @@ struct HomeView: View {
                                         if audioPlayer.state.currentTrackID == nil { await library.play(track.id, ids: library.snapshot.tracks.map(\.id), kind: "library") }
                                         coordinator.showingNowPlaying = true
                                     }
-                                }.buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black)
+                                }.buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent)
                             }
                         }
                     }.cardSurface()
@@ -50,7 +51,7 @@ struct HomeView: View {
     }
     private func shortcut(_ title: String, _ icon: String, _ filter: String) -> some View {
         Button { coordinator.libraryFilter = filter; coordinator.selectedTab = .library } label: {
-            HStack { Image(systemName: icon).foregroundStyle(AppColors.accentPrimary); Text(title).font(.subheadline).lineLimit(1); Spacer(); Image(systemName: "chevron.right").font(.caption) }.padding(AppSpacing.md).frame(minHeight: 52).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+            HStack { Image(systemName: icon).foregroundStyle(palette.accent); Text(title).font(.subheadline).lineLimit(1); Spacer(); Image(systemName: "chevron.right").font(.caption) }.padding(AppSpacing.md).frame(minHeight: 52).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
         }.foregroundStyle(AppColors.textPrimary)
     }
 }

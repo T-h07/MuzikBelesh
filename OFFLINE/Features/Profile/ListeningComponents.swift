@@ -1,10 +1,9 @@
 import Charts
 import SwiftUI
 
-/// Analytics styling. Every color comes from the central design system so the Phase 11.3
-/// accent theme can replace `accent` in one place.
+/// Analytics styling. Accent colours come from the environment `ThemePalette` (Phase 11.3), so
+/// rings, bars and rankings follow the user's theme without reloading any statistics.
 enum ListeningStyle {
-    static var accent: Color { AppColors.accentPrimary }
     static var track: Color { AppColors.textPrimary.opacity(0.08) }
     static let heroFont: CGFloat = 60
     static func eyebrow(_ text: String) -> some View {
@@ -18,6 +17,7 @@ enum ListeningStyle {
 /// active days in the range, qualified share of playback starts, completed share of
 /// qualified plays. The rings draw in once when the data changes; nothing loops.
 struct ListeningHero: View {
+    @Environment(\.themePalette) private var palette
     let summary: ListeningSummary
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = ListeningStyle.heroFont
@@ -38,7 +38,7 @@ struct ListeningHero: View {
                     let inset = CGFloat(index) * 16
                     Circle().stroke(ListeningStyle.track, lineWidth: 3).padding(inset)
                     Circle().trim(from: 0, to: drawn ? min(max(ring.fraction, 0), 1) : 0)
-                        .stroke(ListeningStyle.accent.opacity(ring.opacity), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .stroke(palette.accent.opacity(ring.opacity), style: StrokeStyle(lineWidth: 3, lineCap: .round))
                         .rotationEffect(.degrees(-90)).padding(inset)
                 }
                 VStack(spacing: 2) {
@@ -79,7 +79,7 @@ struct ListeningHero: View {
     private func legend(opacity: Double, value: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Capsule().fill(ListeningStyle.accent.opacity(opacity)).frame(width: 14, height: 3)
+                Capsule().fill(palette.accent.opacity(opacity)).frame(width: 14, height: 3)
                 Text(value).font(.headline).monospacedDigit().foregroundStyle(AppColors.textPrimary)
             }
             Text(label).font(.caption).foregroundStyle(AppColors.textSecondary).fixedSize(horizontal: false, vertical: true)
@@ -92,6 +92,7 @@ struct ListeningHero: View {
 // MARK: Range picker
 
 struct ListeningRangePicker: View {
+    @Environment(\.themePalette) private var palette
     @Binding var range: ListeningRange
     @Namespace private var selection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -103,10 +104,10 @@ struct ListeningRangePicker: View {
                     withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85)) { range = option }
                 } label: {
                     Text(option.shortTitle).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(range == option ? Color.black : AppColors.textSecondary)
+                        .foregroundStyle(range == option ? palette.onAccent : AppColors.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background {
-                            if range == option { Capsule().fill(ListeningStyle.accent).matchedGeometryEffect(id: "range", in: selection) }
+                            if range == option { Capsule().fill(palette.accent).matchedGeometryEffect(id: "range", in: selection) }
                         }
                         .contentShape(Capsule())
                 }
@@ -126,6 +127,7 @@ struct ListeningRangePicker: View {
 
 /// Swift Charts bars with rounded ends, a fine dashed grid and drag-to-inspect selection.
 struct ListeningActivityChart: View {
+    @Environment(\.themePalette) private var palette
     let summary: ListeningSummary
     @State private var selected: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -157,7 +159,7 @@ struct ListeningActivityChart: View {
                 BarMark(x: .value("Date", bucket.start, unit: ListeningChartModel.component(granularity)),
                         y: .value("Minutes", bucket.minutes))
                     .cornerRadius(4)
-                    .foregroundStyle(ListeningStyle.accent.opacity(selectedBucket == nil || selectedBucket?.start == bucket.start ? 1 : 0.32))
+                    .foregroundStyle(palette.accent.opacity(selectedBucket == nil || selectedBucket?.start == bucket.start ? 1 : 0.32))
                     .accessibilityLabel(ListeningChartModel.label(for: bucket.start, granularity: granularity, range: summary.range))
                     .accessibilityValue(ListeningFormat.spokenDuration(bucket.listenedMs))
                 if let selectedBucket, selectedBucket.start == bucket.start {
@@ -213,12 +215,13 @@ struct ListeningActivityChart: View {
 
 /// A proportional bar plus the value in text, so rankings never rely on color alone.
 struct ListeningShareBar: View {
+    @Environment(\.themePalette) private var palette
     let fraction: Double
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(ListeningStyle.track)
-                Capsule().fill(ListeningStyle.accent.opacity(0.85)).frame(width: max(4, proxy.size.width * min(max(fraction, 0), 1)))
+                Capsule().fill(palette.accent.opacity(0.85)).frame(width: max(4, proxy.size.width * min(max(fraction, 0), 1)))
             }
         }
         .frame(height: 3)
@@ -227,11 +230,12 @@ struct ListeningShareBar: View {
 }
 
 struct ListeningRankNumber: View {
+    @Environment(\.themePalette) private var palette
     let rank: Int
     var size: CGFloat = 22
     var body: some View {
         Text("\(rank)").font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
-            .foregroundStyle(rank == 1 ? ListeningStyle.accent : AppColors.textTertiary)
+            .foregroundStyle(rank == 1 ? palette.accent : AppColors.textTertiary)
             .frame(minWidth: size, alignment: .leading)
             .accessibilityHidden(true)
     }
@@ -240,6 +244,7 @@ struct ListeningRankNumber: View {
 /// Top Songs: the number-one song is presented editorially with large artwork; the rest
 /// form a compact ranked list. Tapping an available song plays it; unavailable songs say so.
 struct TopSongsSection: View {
+    @Environment(\.themePalette) private var palette
     let songs: [RankedSong]
     let play: (RankedSong) -> Void
 
@@ -280,7 +285,7 @@ struct TopSongsSection: View {
                 Text(song.title).font(.title3.weight(.bold)).foregroundStyle(AppColors.textPrimary).lineLimit(2)
                 Text(song.artistName).font(.subheadline).foregroundStyle(AppColors.textSecondary).lineLimit(1)
                 HStack(spacing: AppSpacing.sm) {
-                    Text(ListeningFormat.duration(song.listenedMs)).font(.subheadline.weight(.semibold)).foregroundStyle(ListeningStyle.accent)
+                    Text(ListeningFormat.duration(song.listenedMs)).font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
                     Text(ListeningFormat.plays(song.plays)).font(.caption).foregroundStyle(AppColors.textTertiary)
                 }
                 if !song.isAvailable { unavailableTag }
@@ -289,10 +294,10 @@ struct TopSongsSection: View {
         }
         .padding(AppSpacing.lg)
         .background(
-            LinearGradient(colors: [ListeningStyle.accent.opacity(0.14), AppColors.backgroundPrimary.opacity(0)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [palette.accent.opacity(0.14), AppColors.backgroundPrimary.opacity(0)], startPoint: .topLeading, endPoint: .bottomTrailing)
         )
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.large))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.large).stroke(ListeningStyle.accent.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.large).stroke(palette.accent.opacity(0.12)))
     }
 
     private func row(_ song: RankedSong, rank: Int) -> some View {
@@ -330,6 +335,7 @@ struct TopSongsSection: View {
 
 /// Top Artists: circular artwork, large rank numbers and bars relative to the leader.
 struct TopArtistsSection<Destination: View>: View {
+    @Environment(\.themePalette) private var palette
     let artists: [RankedCollection]
     let destination: (RankedCollection) -> Destination
 
@@ -340,9 +346,9 @@ struct TopArtistsSection<Destination: View>: View {
                 NavigationLink { destination(first) } label: {
                     HStack(spacing: AppSpacing.lg) {
                         ManagedArtworkView(path: first.artworkPath, fallbackID: first.id, size: 104).clipShape(Circle())
-                            .overlay(Circle().stroke(ListeningStyle.accent.opacity(0.6), lineWidth: 1.5).padding(-5))
+                            .overlay(Circle().stroke(palette.accent.opacity(0.6), lineWidth: 1.5).padding(-5))
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Most listened-to artist").font(.caption.weight(.semibold)).foregroundStyle(ListeningStyle.accent)
+                            Text("Most listened-to artist").font(.caption.weight(.semibold)).foregroundStyle(palette.accent)
                             Text(first.title).font(.title2.weight(.bold)).foregroundStyle(AppColors.textPrimary).lineLimit(2)
                             Text("\(ListeningFormat.duration(first.listenedMs)) · \(ListeningFormat.plays(first.plays))")
                                 .font(.subheadline).foregroundStyle(AppColors.textSecondary)
@@ -391,6 +397,7 @@ struct TopArtistsSection<Destination: View>: View {
 /// Albums and playlists as artwork-first collections in a horizontal carousel. The artwork
 /// slot is a single view so Phase 11.5 can drop in rotating mosaics.
 struct TopCollectionsCarousel<Destination: View>: View {
+    @Environment(\.themePalette) private var palette
     let title: String
     let items: [RankedCollection]
     let showsPlays: Bool
@@ -420,14 +427,14 @@ struct TopCollectionsCarousel<Destination: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
                 ManagedArtworkView(path: item.artworkPath, fallbackID: item.id, size: rank == 1 ? 168 : 136)
-                Text("\(rank)").font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(rank == 1 ? Color.black : AppColors.textPrimary)
-                    .frame(width: 28, height: 28).background(Circle().fill(rank == 1 ? ListeningStyle.accent : Color.black.opacity(0.7)))
+                Text("\(rank)").font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(rank == 1 ? palette.onAccent : AppColors.textPrimary)
+                    .frame(width: 28, height: 28).background(Circle().fill(rank == 1 ? palette.accent : Color.black.opacity(0.7)))
                     .padding(8)
             }
             Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1)
             if !item.subtitle.isEmpty { Text(item.subtitle).font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1) }
             Text(showsPlays ? "\(ListeningFormat.duration(item.listenedMs)) · \(ListeningFormat.plays(item.plays))" : ListeningFormat.duration(item.listenedMs))
-                .font(.caption.weight(.medium)).foregroundStyle(ListeningStyle.accent)
+                .font(.caption.weight(.medium)).foregroundStyle(palette.accent)
         }
         .frame(width: rank == 1 ? 168 : 136, alignment: .leading)
     }
@@ -449,6 +456,7 @@ struct ListeningPressStyle: ButtonStyle {
 /// The Profile page's Listening Activity entry: last 30 days at a glance and the way into
 /// the full dashboard.
 struct ListeningPreviewCard: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var stats: ListeningStatsService
     private let range = ListeningRange.last30
 
@@ -461,7 +469,7 @@ struct ListeningPreviewCard: View {
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(AppColors.textTertiary)
                 }
                 content
-                Text("See Your Listening").font(.subheadline.weight(.semibold)).foregroundStyle(ListeningStyle.accent)
+                Text("See Your Listening").font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
                     .frame(minHeight: 32)
             }
             .padding(AppSpacing.lg)

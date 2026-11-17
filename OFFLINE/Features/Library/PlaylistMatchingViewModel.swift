@@ -253,6 +253,7 @@ import SwiftUI
 
 /// Concise, consumer-facing matching status. Counts always come from persisted state.
 struct PlaylistMatchingControls: View {
+    @Environment(\.themePalette) private var palette
     @ObservedObject var model: PlaylistMatchingViewModel
     let session: PlaylistMigrationSession
     let repository: GRDBPlaylistMigrationRepository
@@ -275,7 +276,7 @@ struct PlaylistMatchingControls: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Matching Songs").font(.headline)
             Text(title(active: active, paused: paused, interrupted: interrupted, complete: complete, progress: progress))
-                .font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.accentPrimary)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
                 .accessibilityIdentifier("matching-status")
             if paused { Text(MatchingFailureCategory.userPaused.message).foregroundStyle(AppColors.textSecondary) }
             else if interrupted {
@@ -284,7 +285,7 @@ struct PlaylistMatchingControls: View {
             }
             if started && progress.total > 0 {
                 ProgressView(value: Double(min(progress.processed, progress.total)), total: Double(progress.total))
-                    .tint(AppColors.accentPrimary)
+                    .tint(palette.accent)
                     .accessibilityLabel("Matching progress")
                     .accessibilityValue("\(progress.processed) of \(progress.total) songs checked")
                 Text("\(progress.processed) / \(progress.total) songs checked").foregroundStyle(AppColors.textSecondary)
@@ -325,7 +326,7 @@ struct PlaylistMatchingControls: View {
                     .buttonStyle(.matchingSecondary).disabled(coordinator == nil && model.busy)
                     .accessibilityIdentifier("migration-retry-failed")
             }
-        }.tint(AppColors.accentPrimary)
+        }.tint(palette.accent)
             .task(id: "\(session.updatedAt.timeIntervalSince1970)-\(model.busy)") {
                 await model.refreshIntent(session.id)
                 guard !active else { return }
@@ -375,13 +376,14 @@ enum MatchingUserText {
 
 /// One recording suggestion in plain language (artwork, title, uploader, length, match).
 struct CandidateSummaryCard: View {
+    @Environment(\.themePalette) private var palette
     let candidate: PlaylistMigrationCandidate
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if candidate.provider == "youtube" {
                 YouTubeArtwork(url: MatchingCandidateArtwork.thumbnail(candidate))
                     .frame(height: 170).clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityHidden(true)
-            } else { Label("In your library", systemImage: "music.note").foregroundStyle(AppColors.accentPrimary) }
+            } else { Label("In your library", systemImage: "music.note").foregroundStyle(palette.accent) }
             Text(candidate.title).font(.headline)
             Text(Self.subtitle(candidate)).font(.subheadline).foregroundStyle(AppColors.textSecondary)
             if let warning = Self.warning(candidate) {
@@ -412,6 +414,7 @@ struct CandidateSummaryCard: View {
 }
 
 struct MigrationCandidateInspection: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.openURL) private var openURL
     let entry: PlaylistMigrationEntry
     let repository: GRDBPlaylistMigrationRepository
@@ -437,7 +440,7 @@ struct MigrationCandidateInspection: View {
                     CandidateSummaryCard(candidate: candidate)
                     if candidate.decision == .accepted {
                         Text(candidate.provider == "youtube" ? "Selected · Not downloaded yet" : "Selected · Available offline")
-                            .font(.caption).foregroundStyle(AppColors.accentPrimary)
+                            .font(.caption).foregroundStyle(palette.accent)
                     }
                     // Separate, explicitly styled controls: each has its own hit area in the row.
                     if candidate.decision == .pending && canSelect {
@@ -503,6 +506,7 @@ struct MigrationCandidateInspection: View {
 /// never creates a track, never marks audio playable and never opens another app.
 /// Only the separate "Preview on YouTube" button opens a URL.
 struct ManualYouTubeSelectionView: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.openURL) private var openURL
     let entry: PlaylistMigrationEntry
     let repository: GRDBPlaylistMigrationRepository
@@ -550,7 +554,7 @@ struct ManualYouTubeSelectionView: View {
                 if let preview { previewView(preview) }
             }
             if let message { Text(message).font(.caption).foregroundStyle(AppColors.error) }
-        }.tint(AppColors.accentPrimary)
+        }.tint(palette.accent)
             .confirmationDialog(replacementMode ? "Replace the current recording with this video?" : "Use this video for this song?",
                                 isPresented: $confirming, titleVisibility: .visible) {
                 Button(replacementMode ? "Download Replacement" : "Use This Video") { confirm() }.accessibilityIdentifier("migration-manual-dialog-confirm")

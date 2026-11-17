@@ -118,6 +118,7 @@ import SwiftUI
 }
 
 struct MigrationReviewQueueView: View {
+    @Environment(\.themePalette) private var palette
     @StateObject private var model: MigrationReviewQueueModel
     private let lookup: YouTubeManualLookup?
     init(model: @autoclosure @escaping () -> MigrationReviewQueueModel, lookup: YouTubeManualLookup?) {
@@ -150,7 +151,7 @@ struct MigrationReviewQueueView: View {
             }
         }
         .background(AppColors.backgroundPrimary.ignoresSafeArea())
-        .tint(AppColors.accentPrimary)
+        .tint(palette.accent)
         .navigationTitle(model.caughtUp || !model.loaded ? "Review Songs" : "Review \(model.position) of \(model.items.count)")
         .navigationBarTitleDisplayMode(.inline)
         .task { model.openURL = { openURL($0) }; if !model.loaded { await model.load() } }
@@ -169,7 +170,7 @@ struct MigrationReviewQueueView: View {
 
     private var caughtUp: some View {
         VStack(spacing: AppSpacing.md) {
-            Image(systemName: "checkmark.circle").font(.system(size: 48)).foregroundStyle(AppColors.accentPrimary).accessibilityHidden(true)
+            Image(systemName: "checkmark.circle").font(.system(size: 48)).foregroundStyle(palette.accent).accessibilityHidden(true)
             Text("You're all caught up.").font(.title3.weight(.semibold))
             Button("Back to Playlist") { dismiss() }.buttonStyle(.matchingPrimary)
                 .accessibilityIdentifier("review-back-to-playlist")
@@ -217,7 +218,7 @@ struct MigrationReviewQueueView: View {
             CandidateSummaryCard(candidate: accepted)
             let offline = model.entry?.status == .ready && model.entry?.localTrackID != nil
             Text(accepted.provider == "youtube" && !offline ? "Selected · Not downloaded yet" : "Selected · Available offline")
-                .font(.caption).foregroundStyle(AppColors.accentPrimary)
+                .font(.caption).foregroundStyle(palette.accent)
             if accepted.provider == "youtube" && !offline {
                 Button("Change Video") { Task { await model.reject(accepted) } }.buttonStyle(.matchingSecondary).disabled(model.saving)
             } else if accepted.provider == "youtube", let entry = model.entry, let lookup {

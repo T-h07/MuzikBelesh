@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PlaylistImportView: View {
+    @Environment(\.themePalette) private var palette
     @ObservedObject var model: PlaylistImportViewModel
     @EnvironmentObject private var library: MusicLibraryService
     @State private var showingFiles = false
@@ -77,7 +78,7 @@ struct PlaylistImportView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .scrollContentBackground(.hidden).screenBackground().tint(AppColors.accentPrimary)
+            .scrollContentBackground(.hidden).screenBackground().tint(palette.accent)
             .navigationTitle("Import Playlist").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() }.accessibilityIdentifier("playlist-import-close") } }
             .fileImporter(isPresented: $showingFiles, allowedContentTypes: [.json, .commaSeparatedText, .zip], allowsMultipleSelection: false) { result in

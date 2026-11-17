@@ -4,6 +4,7 @@ import SwiftUI
 /// playlist. Rows are the persisted, classified report (one per original occurrence),
 /// observed from `MigrationIssueCoordinator`; closing this screen changes nothing.
 struct MigrationIssuesView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var container: AppContainer
     @ObservedObject var issues: MigrationIssueCoordinator
     let playlistID: String
@@ -28,7 +29,7 @@ struct MigrationIssuesView: View {
                         }.buttonStyle(.matchingPrimaryWide).disabled(bulkRunning || report.context.cancelled)
                             .accessibilityIdentifier("migration-issues-retry-all")
                     }
-                    if let bulkMessage { Text(bulkMessage).font(.caption).foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("migration-issues-bulk-message") }
+                    if let bulkMessage { Text(bulkMessage).font(.caption).foregroundStyle(palette.accent).accessibilityIdentifier("migration-issues-bulk-message") }
                     if let bulkError { Text(bulkError).font(.caption).foregroundStyle(AppColors.error) }
                     if let error = issues.lastError { Text(error).font(.caption).foregroundStyle(AppColors.error) }
                 }.listRowBackground(AppColors.backgroundPrimary)
@@ -46,12 +47,12 @@ struct MigrationIssuesView: View {
                 }.listRowBackground(AppColors.backgroundPrimary)
             } else {
                 Section {
-                    ProgressView().tint(AppColors.accentPrimary)
+                    ProgressView().tint(palette.accent)
                     Text("Reading migration results…").foregroundStyle(AppColors.textSecondary)
                 }.listRowBackground(AppColors.backgroundPrimary)
             }
         }
-        .scrollContentBackground(.hidden).screenBackground().tint(AppColors.accentPrimary)
+        .scrollContentBackground(.hidden).screenBackground().tint(palette.accent)
         .navigationTitle("Migration Issues").navigationBarTitleDisplayMode(.inline)
         .onAppear { issues.requestReconcile(immediately: true) }
         .refreshable { await issues.reconcileNow() }
@@ -88,8 +89,8 @@ struct MigrationIssuesView: View {
                     Button { filter = value } label: {
                         Text("\(value.title) \(count)").font(.caption.weight(.semibold)).lineLimit(1)
                             .padding(.horizontal, 12).frame(minHeight: 36)
-                            .foregroundStyle(filter == value ? Color.black : AppColors.textPrimary)
-                            .background(filter == value ? AppColors.accentPrimary : AppColors.backgroundSecondary, in: Capsule())
+                            .foregroundStyle(filter == value ? palette.onAccent : AppColors.textPrimary)
+                            .background(filter == value ? palette.accent : AppColors.backgroundSecondary, in: Capsule())
                     }.buttonStyle(.plain)
                         .accessibilityLabel("\(value.title), \(count)")
                         .accessibilityAddTraits(filter == value ? .isSelected : [])
@@ -137,6 +138,7 @@ struct MigrationIssuesView: View {
 /// actions valid for its actual state. Details open in place; the list keeps its filter
 /// and scroll position.
 private struct MigrationIssueListRow: View {
+    @Environment(\.themePalette) private var palette
     let row: MigrationOccurrenceReport
     let playlistID: String
     @ObservedObject var issues: MigrationIssueCoordinator
@@ -164,7 +166,7 @@ private struct MigrationIssueListRow: View {
                         Text(explanation).font(.caption).foregroundStyle(AppColors.textPrimary).fixedSize(horizontal: false, vertical: true)
                     }
                     Text(statusLine).font(.caption.weight(.semibold))
-                        .foregroundStyle(assessment.disposition.needsAttention ? AppColors.error : AppColors.accentPrimary)
+                        .foregroundStyle(assessment.disposition.needsAttention ? AppColors.error : palette.accent)
                         .accessibilityIdentifier("migration-issue-status-" + row.id.uuidString)
                 }
             }
@@ -186,9 +188,9 @@ private struct MigrationIssueListRow: View {
                     Button("Restore Song", action: restore).buttonStyle(.matchingSecondary).disabled(busy)
                         .accessibilityIdentifier("migration-issue-restore-" + row.id.uuidString)
                 }
-                if busy { ProgressView().tint(AppColors.accentPrimary) }
+                if busy { ProgressView().tint(palette.accent) }
             }
-            if let message { Text(message).font(.caption).foregroundStyle(AppColors.accentPrimary) }
+            if let message { Text(message).font(.caption).foregroundStyle(palette.accent) }
             if let error { Text(error).font(.caption).foregroundStyle(AppColors.error) }
         }.padding(.vertical, 4)
     }

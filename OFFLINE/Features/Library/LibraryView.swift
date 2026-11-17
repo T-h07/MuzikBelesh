@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
@@ -63,19 +64,19 @@ struct LibraryView: View {
             Text("Library").font(.largeTitle.bold()).foregroundStyle(AppColors.textPrimary)
             Spacer()
             Button { searchFocus = nil; showingImporter = true } label: { Label("Import", systemImage: "square.and.arrow.down").lineLimit(1) }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).frame(minHeight: 44).accessibilityIdentifier("library-import")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).frame(minHeight: 44).accessibilityIdentifier("library-import")
         }
     }
     @ViewBuilder private var content: some View {
         if coordinator.libraryFilter == "Albums" {
             Button { searchFocus = nil; showingAlbumEditor = true } label: { Label("Create Album", systemImage: "plus.circle.fill") }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-album")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("create-album")
         }
         if coordinator.libraryFilter == "Playlists" {
             Button { searchFocus = nil; showingPlaylistImporter = true } label: { Label("Import Playlist", systemImage: "square.and.arrow.down") }
-                .tint(AppColors.accentPrimary).disabled(container.storage == nil).accessibilityIdentifier("import-spotify-playlist")
+                .tint(palette.accent).disabled(container.storage == nil).accessibilityIdentifier("import-spotify-playlist")
             Button { searchFocus = nil; showingPlaylistEditor = true } label: { Label("Create Playlist", systemImage: "plus.circle.fill") }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-playlist")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("create-playlist")
         }
         if ["All", "Songs", "Liked Songs"].contains(coordinator.libraryFilter) { HStack { Spacer(); LibrarySortMenu() } }
         if let results = search.results {
@@ -85,6 +86,7 @@ struct LibraryView: View {
 }
 
 struct LibrarySortMenu: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     var body: some View {
         Menu {
@@ -94,7 +96,7 @@ struct LibrarySortMenu: View {
                 }
             }
         } label: { Label("Sort", systemImage: "arrow.up.arrow.down").frame(minHeight: 44) }
-            .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("library-sort")
+            .foregroundStyle(palette.accent).accessibilityIdentifier("library-sort")
     }
 }
 
@@ -128,6 +130,7 @@ struct LibraryGroupRow: View {
 }
 
 struct StoredTrackRow: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     @EnvironmentObject private var container: AppContainer
     let track: StoredTrack
@@ -148,7 +151,7 @@ struct StoredTrackRow: View {
     var body: some View {
         HStack(spacing: AppSpacing.md) {
             Button { play() } label: { rowLabel }.buttonStyle(.plain).disabled(track.availability != .available)
-            if library.snapshot.likedIDs.contains(track.id) { Image(systemName: "heart.fill").foregroundStyle(AppColors.accentPrimary).font(.caption).accessibilityLabel("Liked") }
+            if library.snapshot.likedIDs.contains(track.id) { Image(systemName: "heart.fill").foregroundStyle(palette.accent).font(.caption).accessibilityLabel("Liked") }
             Menu { actions } label: { Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 44, height: 44) }
                 .accessibilityLabel("Actions for \(track.title)").accessibilityIdentifier("track-actions-" + track.id)
         }

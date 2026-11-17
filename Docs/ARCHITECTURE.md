@@ -75,3 +75,13 @@ with guarded, synchronous checkpoints; a failure is recorded and never reaches p
 `AppContainer` creates a `ListeningStatsService` that runs aggregate SQL off the main thread
 for the Profile preview and the "Your Listening" dashboard. Everything stays on the device.
 See [Phase 11.2](PHASE_11_02_LISTENING_ANALYTICS.md).
+
+## Phase 11.3 themes
+
+`ThemeService` (`OFFLINE/DesignSystem`) is owned by `AppContainer`, created first and
+synchronously from a versioned `UserDefaults` entry (`appearance.theme.v1`), so the first frame
+already uses the saved accent. `ThemeRoot`, inside the root hosting controller, places the
+derived `ThemePalette` in the SwiftUI environment (`\.themePalette`) and sets the root tint.
+Views read `palette.accent` / `palette.onAccent`; `AppColors.accentPrimary` no longer exists.
+Backgrounds, text and status colours stay fixed. A theme change touches no database, player,
+library, download or analytics state. See [Phase 11.3](PHASE_11_03_CUSTOM_THEMES.md).

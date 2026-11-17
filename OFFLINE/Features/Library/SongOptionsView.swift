@@ -22,6 +22,7 @@ enum SongOptionsContext: Identifiable {
 /// title, artist, duration, Play/Pause and song actions. Matching candidates are never
 /// shown here; Change Video is the explicit entry point for replacing the recording.
 struct SongOptionsView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
@@ -100,7 +101,7 @@ struct SongOptionsView: View {
                 VStack(spacing: 6) {
                     Text(details.title).font(.title2.bold()).foregroundStyle(AppColors.textPrimary).multilineTextAlignment(.center)
                         .lineLimit(3).accessibilityIdentifier("song-options-title")
-                    Text(details.artist).font(.headline).foregroundStyle(AppColors.accentPrimary).lineLimit(2)
+                    Text(details.artist).font(.headline).foregroundStyle(palette.accent).lineLimit(2)
                         .accessibilityIdentifier("song-options-artist")
                     let secondary = [details.album, details.durationMs.map(Self.duration)].compactMap { $0 }.joined(separator: " · ")
                     if !secondary.isEmpty {
@@ -110,7 +111,7 @@ struct SongOptionsView: View {
                 Button { togglePlayback(details, current: current) } label: {
                     Label(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill").frame(maxWidth: .infinity, minHeight: 48)
                 }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black)
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent)
                 .disabled(track.availability != .available)
                 .padding(.horizontal, AppSpacing.lg)
                 .accessibilityIdentifier("song-options-play")
@@ -263,6 +264,7 @@ struct SongOptionsView: View {
 
 /// Feedback for Remove from Playlist with an Undo action. Hides itself after a few seconds.
 struct PlaylistRemovalUndoBanner: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     let undo: PlaylistRemovalUndo
     var body: some View {
@@ -271,7 +273,7 @@ struct PlaylistRemovalUndoBanner: View {
                 .accessibilityIdentifier("playlist-removal-message")
             Spacer(minLength: 0)
             Button("Undo") { Task { await library.undoRemoval() } }
-                .font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.accentPrimary).frame(minHeight: 44)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent).frame(minHeight: 44)
                 .accessibilityIdentifier("playlist-removal-undo")
         }
         .padding(.horizontal, AppSpacing.lg).padding(.vertical, AppSpacing.sm)

@@ -206,6 +206,7 @@ struct ArtistDetailView: View {
 }
 
 struct CollectionPlaybackButtons: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     let tracks: [StoredTrack]
     let kind: String
@@ -214,9 +215,9 @@ struct CollectionPlaybackButtons: View {
     var body: some View {
         HStack(spacing: AppSpacing.md) {
             Button { start(shuffle: false) } label: { Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 36) }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("collection-play")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("collection-play")
             Button { start(shuffle: true) } label: { Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 36) }
-                .buttonStyle(.bordered).tint(AppColors.accentPrimary).accessibilityIdentifier("collection-shuffle")
+                .buttonStyle(.bordered).tint(palette.accent).accessibilityIdentifier("collection-shuffle")
         }.disabled(playable.isEmpty)
     }
     private func start(shuffle: Bool) {
@@ -226,6 +227,7 @@ struct CollectionPlaybackButtons: View {
 }
 
 struct AddTracksToPlaylistView: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: MusicLibraryService
     var playlistID: String? = nil
@@ -256,7 +258,7 @@ struct AddTracksToPlaylistView: View {
                         HStack {
                             StoredArtworkView(track: track, size: 44)
                             VStack(alignment: .leading) { Text(track.title).lineLimit(1); Text(library.artistName(track.artistID)).font(.caption).foregroundStyle(AppColors.textSecondary) }
-                            Spacer(); Image(systemName: existing.contains(track.id) || selected.contains(track.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(AppColors.accentPrimary)
+                            Spacer(); Image(systemName: existing.contains(track.id) || selected.contains(track.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(palette.accent)
                         }
                     }.disabled(existing.contains(track.id)).accessibilityIdentifier("select-track-" + track.id)
                 }
@@ -415,6 +417,7 @@ func formatDuration(_ tracks: [StoredTrack]) -> String {
 /// Search inside the open playlist only (title and artist). Purely local and immediate;
 /// it never reaches global search, YouTube or any remote service.
 struct PlaylistSearchField: View {
+    @Environment(\.themePalette) private var palette
     @Binding var text: String
     @FocusState private var focused: Bool
     var body: some View {
@@ -437,6 +440,6 @@ struct PlaylistSearchField: View {
         }
         .padding(.horizontal, AppSpacing.md).frame(minHeight: 44)
         .background(AppColors.backgroundSecondary, in: RoundedRectangle(cornerRadius: 10))
-        .tint(AppColors.accentPrimary)
+        .tint(palette.accent)
     }
 }

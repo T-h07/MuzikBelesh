@@ -8,13 +8,13 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     let coordinator: AppCoordinator
     var body: some View {
-        KeyboardSafeHost(content: ProfileGate(scenePhase: scenePhase, coordinator: coordinator, profile: container.profile)
+        KeyboardSafeHost(content: ThemeRoot(theme: container.theme, content: ProfileGate(scenePhase: scenePhase, coordinator: coordinator, profile: container.profile)
             .environmentObject(container)
             .environmentObject(coordinator)
             .environmentObject(container.audioPlayer)
             .environmentObject(container.library)
             .environmentObject(container.profile)
-            .environmentObject(container.listening))
+            .environmentObject(container.listening)))
             .ignoresSafeArea().preferredColorScheme(.dark)
     }
 }
@@ -51,6 +51,7 @@ private struct ProfileGate: View {
                     }
                 } else { container.playlistMatching?.setForeground(phase == .active) }
             }
+            if phase != .active { container.theme.commitCustomColor() }
             if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
             if phase == .active {
                 audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile()
@@ -61,6 +62,7 @@ private struct ProfileGate: View {
 }
 
 private struct RootTabsView: View {
+    @Environment(\.themePalette) private var palette
     let scenePhase: ScenePhase
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
@@ -76,7 +78,7 @@ private struct RootTabsView: View {
                 TabContent(coordinator: coordinator, onPresent: { searchFocus = nil }) { NavigationStack { LibraryView(coordinator: coordinator, searchFocus: $searchFocus) } }.tabItem { Label("Library", systemImage: "square.stack") }.tag(RootTab.library)
                 TabContent(coordinator: coordinator) { NavigationStack { DownloadsView(manager: container.downloads) } }.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }.tag(RootTab.downloads)
         }
-        .tint(AppColors.accentPrimary)
+        .tint(palette.accent)
         .onChange(of: coordinator.selectedTab) { _, _ in searchFocus = nil }
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
         .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
@@ -191,6 +193,7 @@ private struct TabContent<Content: View>: View {
 }
 
 struct SearchBar: View {
+    @Environment(\.themePalette) private var palette
     @Binding var text: String
     let placeholder: String
     @FocusState.Binding var focus: LibrarySearchField?
@@ -206,7 +209,7 @@ struct SearchBar: View {
             }
             if focus == field {
                 Button("Done") { focus = nil }.frame(minHeight: 44)
-                    .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("keyboard-done")
+                    .foregroundStyle(palette.accent).accessibilityIdentifier("keyboard-done")
             }
         }.frame(minHeight: 44).padding(.horizontal, AppSpacing.md).padding(.vertical, 4).background(AppColors.backgroundSecondary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
     }
