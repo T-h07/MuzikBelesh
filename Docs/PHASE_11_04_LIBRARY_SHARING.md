@@ -1,7 +1,11 @@
 # Phase 11.4: Portable music library export, import and sharing
 
 Branch: `feature/phase-11-04-sharing`, from `develop` at `86f983e` (Phase 11.3 merged, #27).
-Status: implemented; awaiting CI and developer physical-device acceptance. **Not merged, not released.**
+Status: implemented; unsigned IPA built (run 44195714530); awaiting developer physical-device acceptance. **Not merged, not released.**
+
+CI (run 44195714008, commit 8f5ac3e): static checks and the library shard pass; all 29 Phase 11.4 unit tests pass. The run is red only for failures that also fail on `develop` at 86f983e (ReleasePerformanceTests clock count, two ThemeServiceTests, ListeningAnalytics/PlaylistFileImport/PlaylistMigration/ReviewQueue UI tests) plus one simulator "Failed to terminate" flake in `LibraryManagementUITests.testAlbumNameAndArtistSurviveRelaunch` (passed on the previous run of identical app code).
+
+Measured on CI (iOS 26.2 simulator, single run, not a guarantee): decode+validate of a 10,000-song / 1.55 MB document 0.71 s; preview+commit of a 10,000-occurrence playlist 2.93 s.
 
 A user can export one playlist, several playlists or the whole library as a small `.mbelesh`
 file, send it with AirDrop, Messages, Mail or Files, and import it on another iPhone running
