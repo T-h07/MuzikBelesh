@@ -411,3 +411,23 @@ Other rows keep their earlier status; any still NOT RUN remain required as liste
 no known data-loss, corruption, traversal, download-integrity or association defect. Open
 items: the seven baseline test failures above, and device rows. G12 (user approval) NOT
 GIVEN. Nothing merged into `develop`, `main` or `release`; no `v1.1.0` tag or GitHub Release.
+
+## 17. Developer acceptance and release authorization (2026-11-17)
+
+**This section supersedes the earlier candidate-only status and NOT RUN markers where device results were subsequently supplied.** It does not retrospectively turn unexecuted tests into passes.
+
+### Device-reported results
+
+- **Build 98:** The developer installed the IPA in place, confirmed all existing data survived, and reported **P01–P08 PASS**. These covered existing library/playlist integrity, a YouTube share after the canceled-10.8 inbox downgrade, and 100/500/1,000-entry CSV import and re-import behavior.
+- **Build 99:** After installing the final hardening IPA, the developer explicitly reported **all requested targeted tests passed**, covering **P01, P10, P12, P15, P16, P18, P22 and P24**. These are developer-reported results, not independently recorded iPhone logs.
+- **Not rerun on build 99:** Other P09–P26 checks were previously accepted during Phases 10.0–10.7 or are supported by the unchanged implementation and automated suites; they must not be represented as newly executed 10.9 tests.
+
+### Final evidence and disposition
+
+- Final production candidate: `d5551d54198a75af6dafac7af109dbc2e5b31e29`, v1.1.0 **build 99**, IPA SHA-256 `2358a7bdd6da6dafa3d309501464c4fc53163c99f46e732bd64b90c6b530984f`.
+- Later changes before merge: test-only compile correction, documentation and release metadata; no new production code changes.
+- Focused Stage B: **261/261 PASS** on `e9430c8`. Complete Stage C: library and compact UI passed, but **seven pre-existing test failures** remain documented and are not waived as passing.
+- Security audit reported no confirmed Critical/High finding; measured on-device performance improvements were not claimed.
+- **User authorization:** The developer expressly approved publishing Muzik Belesh **v1.1.0** after reporting that all requested final build-99 device tests passed.
+
+**Disposition: OWNER-APPROVED FOR v1.1.0 RELEASE PROMOTION WITH DOCUMENTED BASELINE CI FAILURES.** Merge Phase 10.9 into `develop` first, then promote that integrated state into `release` and `main`, and publish the tag, unsigned IPA and manifest. Never replace the verified build-99 IPA with an untested rebuilt binary solely because merge commits or README text changed.
