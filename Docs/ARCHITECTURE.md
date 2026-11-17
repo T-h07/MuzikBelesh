@@ -54,3 +54,14 @@ use `playlist_tracks`. LibrarySnapshot observes both, and typed MigrationPlaylis
 values expose placeholders and verified local tracks. PlaybackQueueManager maps
 occurrence identities to real track IDs before AudioPlayerService selection, preserving
 repetitions through navigation and restart. See [Phase 10.1](PHASE_10_01_PERSISTENCE.md).
+
+## Phase 11.1 local profile
+
+`AppContainer` creates one `LocalProfileService` backed by `LocalProfileRepository`
+(single-row `local_user_profile`, migration `v024_local_user_profile`) and reads it
+before the first frame. `RootView` routes through a profile gate: onboarding when storage
+holds no profile, a recoverable error screen when the profile can't be read, otherwise the
+unchanged four-tab interface. App lifecycle forwarding lives in that always-mounted gate.
+The profile owns no library data, has no foreign keys and makes no network requests;
+avatars live in `Application Support/MuzikBelesh/Profile`. See
+[Phase 11.1](PHASE_11_01_LOCAL_PROFILE.md).

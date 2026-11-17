@@ -28,3 +28,11 @@ context. Session destinations and operation identities are unique; occurrence ID
 and (migrationID, sourcePosition) are unique; provider track IDs are not. Track
 links use SET NULL and migration ownership uses CASCADE. See
 [Phase 10.1](PHASE_10_01_PERSISTENCE.md) for constraints, indexes and deletion triggers.
+
+## Phase 11.1 local profile
+
+`v024_local_user_profile` (appended after v022; `v023` stays reserved for the canceled
+Phase 10.8 build) adds `local_user_profile`: `slot INTEGER PRIMARY KEY CHECK(slot = 1)`,
+`id TEXT UNIQUE`, `username`, nullable `avatarRelativePath` (a bare file name, no `/`),
+`createdAt`, `updatedAt`. The `slot` key allows exactly one row. No table references it
+and it references none. See [Phase 11.1](PHASE_11_01_LOCAL_PROFILE.md).

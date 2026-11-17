@@ -9,3 +9,9 @@ The current sequence ends at `v013_playlist_migration_storage` (13 migrations).
 schema definitions. The Phase 10.1 tests upgrade a real v012 database, reopen v013,
 and verify existing playlist, likes, queue, history and playback state.
 See [Phase 10.1 persistence](PHASE_10_01_PERSISTENCE.md).
+
+Phase 11.1 appends `v024_local_user_profile` after `v022_playlist_link_downloads`.
+`v023` is intentionally unused: the canceled Phase 10.8 test build applied
+`v023_spotify_pending_imports` on some phones, and GRDB ignores that unknown identifier.
+`LocalProfileUpgradeTests` rewinds a database to the exact v1.1.0 schema, reopens it and
+checks every library table is unchanged.
