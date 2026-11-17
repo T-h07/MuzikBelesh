@@ -78,14 +78,25 @@ enum ManagedLibraryFiles {
         if var saved = try StoredPlaybackState.fetchOne(db, key: "default") {
             func ids(_ value: String?) -> [String] { value.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? [] }
             func json(_ values: [String]) -> String? { (try? JSONEncoder().encode(values)).flatMap { String(data: $0, encoding: .utf8) } }
+            var removedIdentities: Set<String> = [id]
+            if let data = saved.migrationContextJSON?.data(using: .utf8),
+               var migration = try? JSONDecoder().decode(MigrationNavigationContext.self, from: data) {
+                removedIdentities.formUnion(migration.occurrences.filter { $0.trackID == id }.map(\.id))
+                removedIdentities.formUnion(migration.queuedOccurrences.filter { $0.trackID == id }.map(\.id))
+                migration.occurrences.removeAll { $0.trackID == id }
+                migration.queuedOccurrences.removeAll { $0.trackID == id }
+                if let current = migration.currentID, removedIdentities.contains(current) { migration.currentID = nil }
+                if let resume = migration.resumeOccurrenceID, removedIdentities.contains(resume) { migration.resumeOccurrenceID = nil }
+                saved.migrationContextJSON = String(decoding: try JSONEncoder().encode(migration), as: UTF8.self)
+            }
             saved.contextTrackIDsJSON = json(ids(saved.contextTrackIDsJSON).filter { $0 != id })
             let shuffle = ids(saved.shuffleOrderJSON); let position = min(shuffle.count, max(0, saved.shufflePosition ?? 0))
-            let consumed = shuffle.prefix(position).filter { $0 != id }
-            saved.shuffleOrderJSON = json(consumed + shuffle.dropFirst(position).filter { $0 != id })
+            let consumed = shuffle.prefix(position).filter { !removedIdentities.contains($0) }
+            saved.shuffleOrderJSON = json(consumed + shuffle.dropFirst(position).filter { !removedIdentities.contains($0) })
             saved.shufflePosition = consumed.count
             let history = ids(saved.navigationHistoryJSON)
-            let before = history.prefix(max(0, min(history.count, (saved.navigationHistoryPosition ?? -1) + 1))).filter { $0 != id }
-            let after = history.dropFirst(max(0, min(history.count, (saved.navigationHistoryPosition ?? -1) + 1))).filter { $0 != id }
+            let before = history.prefix(max(0, min(history.count, (saved.navigationHistoryPosition ?? -1) + 1))).filter { !removedIdentities.contains($0) }
+            let after = history.dropFirst(max(0, min(history.count, (saved.navigationHistoryPosition ?? -1) + 1))).filter { !removedIdentities.contains($0) }
             saved.navigationHistoryJSON = json(before + after); saved.navigationHistoryPosition = before.count - 1
             if saved.currentTrackID == id { saved.currentTrackID = nil; saved.positionMs = 0 }
             saved.dateModified = Date(); try saved.save(db)

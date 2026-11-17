@@ -18,3 +18,13 @@ Tracks reference optional artists and albums. Playlist membership, likes, queue 
 ## Phase 7 downloads
 
 v009 and v010 add library management and managed albums. v011 extends download_jobs with title, channel, thumbnail, position, received and expected bytes, attempt count, and start and finish dates. A partial unique index covers YouTube IDs for managed jobs. Legacy rows retain their original fields.
+
+## Phase 10.1 migration playlists
+
+`v012_background_transfers` extends download transfer ownership.
+`v013_playlist_migration_storage` adds `playlist_migrations`, `migration_entries`,
+`migration_candidates`, and `migration_issues`, plus nullable playback occurrence
+context. Session destinations and operation identities are unique; occurrence IDs
+and (migrationID, sourcePosition) are unique; provider track IDs are not. Track
+links use SET NULL and migration ownership uses CASCADE. See
+[Phase 10.1](PHASE_10_01_PERSISTENCE.md) for constraints, indexes and deletion triggers.

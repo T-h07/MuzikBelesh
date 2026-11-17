@@ -10,6 +10,8 @@ struct YouTubeVideo: Identifiable, Hashable, Sendable {
     var duration: TimeInterval?
     var availability: Availability = .unknown
     var isShort: Bool = false
+    /// Which discovery source returned this video (e.g. "searxng:bing videos"); nil for direct YouTube.
+    var discoverySource: String? = nil
     var canonicalURL: URL? { URL(string: "https://www.youtube.com/watch?v=\(id)") }
     var durationLabel: String {
         guard let duration, duration.isFinite, duration >= 0, duration < 10_000_000 else { return availability == .live ? "Live" : "Duration unavailable" }
@@ -95,6 +97,9 @@ struct YouTubeDownloadPreparer: YouTubeDownloadPreparing {
 enum YouTubeError: String, Error, LocalizedError, Equatable, Sendable {
     case invalidURL, invalidVideoID, networkUnavailable, requestTimeout, rateLimited, searchUnavailable
     case metadataUnavailable, videoUnavailable, regionRestricted, accessRestricted, noAudioStreams
+    case providerRestricted, redirectUnavailable
+    /// A third-party search source has no reachable instance right now (no request was made).
+    case sourceUnavailable
     case noCompatibleAudio, streamNotReady, streamExpired, extractionFailed, cancelled
     var errorDescription: String? {
         switch self {
@@ -108,6 +113,9 @@ enum YouTubeError: String, Error, LocalizedError, Equatable, Sendable {
         case .videoUnavailable: "This video is unavailable, private or removed."
         case .regionRestricted: "This video is unavailable in your region."
         case .accessRestricted: "This video requires access or verification that this app cannot provide."
+        case .providerRestricted: "YouTube requires consent, sign-in or verification. Automatic discovery is paused."
+        case .redirectUnavailable: "YouTube redirected outside the supported discovery endpoint. Retry later or search in your browser."
+        case .sourceUnavailable: "No public search instance is reachable right now. Other sources and manual links remain available."
         case .noAudioStreams: "No audio-only streams were found for this video."
         case .noCompatibleAudio: "No iPhone-compatible audio stream was found."
         case .streamNotReady: "The audio stream is not ready. Try again shortly."

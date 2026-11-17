@@ -44,3 +44,13 @@ cache/URL rules, local-only configuration and the transient Phase 7 contract.
 ## Phase 7 downloads
 
 AppContainer shares one DownloadManager across Video Details and Downloads. It coordinates the GRDB repository, local resolver, URLSession download delegate and existing managed library import. See PHASE_07_DOWNLOADS.md.
+
+## Migration-managed playlist persistence
+
+`PlaylistMigration/GRDBPlaylistMigrationRepository` owns atomic destination/session/
+occurrence creation and persistent lifecycle mutations. `migration_entries` is the
+authoritative ordered model for imported playlists; ordinary playlists continue to
+use `playlist_tracks`. LibrarySnapshot observes both, and typed MigrationPlaylistRow
+values expose placeholders and verified local tracks. PlaybackQueueManager maps
+occurrence identities to real track IDs before AudioPlayerService selection, preserving
+repetitions through navigation and restart. See [Phase 10.1](PHASE_10_01_PERSISTENCE.md).

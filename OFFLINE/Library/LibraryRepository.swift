@@ -26,11 +26,46 @@ final class LibraryRepository {
         result.albums = try StoredAlbum.fetchAll(db)
         result.playlists = try StoredPlaylist.order(Column("dateAdded"), Column("id")).fetchAll(db)
         result.memberships = try PlaylistMembership.order(Column("playlistID"), Column("position")).fetchAll(db)
+        result.localOccurrences = try LocalPlaylistOccurrence.order(Column("playlistID"), Column("position")).fetchAll(db)
+        result.migrationSessions = try GRDBPlaylistMigrationRepository.sessions(db)
+        result.migrationEntries = try GRDBPlaylistMigrationRepository.entries(db)
+        result.migrationIssues = try GRDBPlaylistMigrationRepository.issues(db)
+        result.pendingLinks = Dictionary(grouping: try PlaylistLinkDownloadRecord.fetchAll(db, sql: """
+            SELECT * FROM playlist_link_downloads WHERE state != 'added' ORDER BY playlistID, createdAt, batchID, sequence
+            """), by: \.playlistID)
         result.likedIDs = Set(try String.fetchAll(db, sql: "SELECT trackID FROM liked_tracks"))
         result.recentIDs = try String.fetchAll(db, sql: "SELECT trackID FROM playback_history GROUP BY trackID ORDER BY MAX(startedAt) DESC, trackID LIMIT 20")
         return result
     }
     func snapshot() throws -> LibrarySnapshot { try db.read(Self.snapshot) }
+    /// Runs on GRDB's observation queue, never from a SwiftUI row body.
+    static func observedSnapshot(_ db: Database, paths: AppStoragePaths) throws -> LibrarySnapshot {
+        var value = try snapshot(db)
+        let tracks = value.trackByID
+        let associated = Set(value.migrationEntries.compactMap(\.localTrackID))
+            .union(value.localOccurrences.map(\.trackID))
+        let available = tracks.filter { associated.contains($0.key) && MigrationLocalAudio.isAvailable($0.value, paths: paths) }
+        value.localPlaylistRows = Dictionary(grouping: value.localOccurrences.compactMap { occurrence -> LocalPlaylistRow? in
+            guard let track = tracks[occurrence.trackID] else { return nil }
+            return LocalPlaylistRow(occurrence: occurrence, track: track, available: available[track.id] != nil)
+        }, by: { $0.occurrence.playlistID })
+        let entries = Dictionary(grouping: value.migrationEntries, by: \.migrationID)
+        let issues = Dictionary(grouping: value.migrationIssues, by: \.migrationID)
+        // Occurrences removed from imported playlists (hidden rows; counts follow membership).
+        var removed: [UUID: Int] = [:]
+        for row in try Row.fetchAll(db, sql: "SELECT migrationID, COUNT(*) AS removed FROM migration_entries WHERE removedAt IS NOT NULL GROUP BY migrationID") {
+            if let id = UUID(uuidString: row["migrationID"] as String) { removed[id] = row["removed"] as Int }
+        }
+        for session in value.migrationSessions {
+            guard let id = session.destinationPlaylistID else { continue }
+            let rows = (entries[session.id] ?? []).map { entry in
+                MigrationPlaylistRow(entry: entry, playableTrack: entry.status == .ready ? entry.localTrackID.flatMap { available[$0] } : nil)
+            }
+            value.migrationPresentations[id] = MigrationPlaylistPresentation(session: session, rows: rows, issues: issues[session.id] ?? [],
+                                                                             removed: removed[session.id] ?? 0)
+        }
+        return value
+    }
     func setSort(_ sort: LibrarySort) throws {
         try db.write { try StoredSetting(key: "librarySort", value: sort.rawValue, valueType: "string", dateModified: Date()).save($0) }
     }
@@ -67,6 +102,7 @@ final class LibraryRepository {
     }
     static func replaceMembership(_ ids: [String], playlistID: String, db: Database) throws {
         guard try StoredPlaylist.fetchOne(db, key: playlistID) != nil else { throw LibraryError.notFound }
+        guard try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist_migrations WHERE destinationPlaylistID = ?", arguments: [playlistID]) == 0 else { throw PlaylistMigrationStorageError.managedPlaylist }
         guard Set(ids).count == ids.count else { throw LibraryError.invalidOrder }
         for id in ids { guard try StoredTrack.fetchOne(db, key: id) != nil else { throw LibraryError.notFound } }
         try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlistID = ?", arguments: [playlistID])
@@ -77,6 +113,10 @@ final class LibraryRepository {
     }
     func addTracks(_ ids: [String], playlistID: String) throws {
         try db.write { db in
+            if try MigrationSessionRecord.filter(Column("destinationPlaylistID") == playlistID).fetchOne(db) != nil {
+                try Self.appendManualOccurrences(ids, playlistID: playlistID, db: db)
+                return
+            }
             var order = try String.fetchAll(db, sql: "SELECT trackID FROM playlist_tracks WHERE playlistID = ? ORDER BY position", arguments: [playlistID])
             for id in ids where !order.contains(id) { order.append(id) }
             try Self.replaceMembership(order, playlistID: playlistID, db: db)

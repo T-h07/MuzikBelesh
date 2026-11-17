@@ -8,6 +8,19 @@ enum DownloadFailure: String, Error {
     case invalid = "The response did not contain a complete supported audio file."
     case disk = "The audio file could not be stored."
     case size = "The audio exceeds the download size limit."
+    /// iOS ended the background transfer with the app (force quit, background refresh
+    /// disabled, or system resources). Not a failure of the recording: requeue in place.
+    case terminated = "The transfer stopped when the app was closed."
+
+    /// Classifies a URLSession completion error from a background session.
+    static func background(_ error: Error?) -> DownloadFailure? {
+        guard let error else { return nil }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain, ns.code == NSURLErrorCancelled, ns.userInfo[NSURLErrorBackgroundTaskCancelledReasonKey] != nil {
+            return .terminated
+        }
+        return .connection
+    }
 }
 
 protocol AudioTransferring: Sendable {

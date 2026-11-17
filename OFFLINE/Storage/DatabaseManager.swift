@@ -106,6 +106,14 @@ final class DatabaseManager {
             }
             try db.execute(sql: "CREATE UNIQUE INDEX download_system_task ON download_jobs(transferSession, transferNumber)")
         }
+        MigrationStorageSchema.register(in: &migrator)
+        HybridPlaylistSchema.register(in: &migrator)
+        AcquisitionSchema.register(in: &migrator)
+        CoordinatorSchema.register(in: &migrator)
+        MigrationIssueSchema.register(in: &migrator)
+        ReplacementSchema.register(in: &migrator)
+        PlaylistOccurrenceRemovalSchema.register(in: &migrator)
+        PlaylistLinkDownloadSchema.register(in: &migrator)
         if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
         else { try migrator.migrate(dbQueue) }
     }

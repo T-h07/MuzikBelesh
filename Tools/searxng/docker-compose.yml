@@ -1,0 +1,14 @@
+# Private SearXNG for Muzik Belesh Spotify matching (development machine only).
+# Start:  docker compose up -d      Stop: docker compose down
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: muzikbelesh-searxng
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # Reachable from the LAN as http://<this-PC-IPv4>:8080
+    environment:
+      SEARXNG_BASE_URL: "http://localhost:8080/"
+      SEARXNG_SECRET: "${SEARXNG_SECRET:-replace-with-a-long-random-string}"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 enum LibrarySearchField: Hashable { case search, library }
@@ -37,8 +38,20 @@ private struct RootTabsView: View {
         .onChange(of: coordinator.showingNowPlaying) { _, presented in if presented { searchFocus = nil } }
         .onChange(of: coordinator.sheet?.id) { _, presented in if presented != nil { searchFocus = nil } }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .inactive {
+                if let coordinator = container.migrationCoordinator {
+                    let active = phase == .active
+                    Task {
+                        if active { await coordinator.applicationDidBecomeActive() }
+                        else { await coordinator.applicationDidEnterBackground() }
+                    }
+                } else { container.playlistMatching?.setForeground(phase == .active) }
+            }
             if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
-            if phase == .active { audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() } }
+            if phase == .active {
+                audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile()
+                container.migrationIssues?.applicationDidBecomeActive()
+            }
             else { searchFocus = nil }
         }
         .preferredColorScheme(.dark)
@@ -48,6 +61,8 @@ private struct RootTabsView: View {
         } message: { Text(library.error ?? "") }
         .task(id: "\(scenePhase)-\(shareRevision)") {
             guard scenePhase == .active else { return }
+            if let coordinator = container.migrationCoordinator { await coordinator.restoreUnfinishedMigrations() }
+            else { await container.playlistMatching?.restoreIfNeeded() }
             do {
                 guard let share = try await coordinator.shareHandoff.next() else { return }
                 // A library editor, document picker, or nested sheet may own the presentation.
@@ -61,6 +76,19 @@ private struct RootTabsView: View {
             catch SharedLinkInbox.Failure.unavailable { } // Manual import remains usable without a group.
             catch { shareReadFailed = true }
         }
+        .onReceive(container.playlistAcquisition.map { $0.$requestedPlaylistID.eraseToAnyPublisher() } ?? Empty<String?, Never>().eraseToAnyPublisher()) { id in
+            // A playlist-ready notification was opened.
+            guard let id, library.snapshot.playlists.contains(where: { $0.id == id }) else { return }
+            container.playlistAcquisition?.requestedPlaylistID = nil
+            coordinator.selectedTab = .library
+            coordinator.sheet = .playlist(id)
+        }
+        .onReceive(container.migrationIssues.map { $0.$requestedIssuesPlaylistID.eraseToAnyPublisher() } ?? Empty<String?, Never>().eraseToAnyPublisher()) { id in
+            // A migration attention notification was opened. A deleted playlist is ignored.
+            guard let id else { return }
+            container.migrationIssues?.requestedIssuesPlaylistID = nil
+            openMigrationIssues(id)
+        }
         .alert("Could not read the shared link inbox", isPresented: $shareReadFailed) {
             Button("Retry") { shareRevision += 1 }
             Button("Close", role: .cancel) { }
@@ -70,6 +98,8 @@ private struct RootTabsView: View {
             case .settings: SettingsView()
             case .importLink: ImportLinkView()
             case .sleepTimer: SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)])
+            case .playlist(let id): NotificationPlaylistSheet(playlistID: id)
+            case .migrationIssues(let id): NotificationMigrationIssuesSheet(playlistID: id)
             case .sharedLink(let share):
                 ImportLinkView(initialURL: share.url).onAppear {
                     Task {
@@ -80,6 +110,22 @@ private struct RootTabsView: View {
             }
         }
         .fullScreenCover(isPresented: $coordinator.showingNowPlaying) { NowPlayingView(coordinator: coordinator) }
+    }
+
+    /// On a cold launch the library snapshot may still be loading: wait a bounded time
+    /// for the playlist, then give up silently if it was deleted (no invalid destination).
+    private func openMigrationIssues(_ id: String) {
+        Task { @MainActor in
+            for _ in 0..<40 {
+                if library.snapshot.playlists.contains(where: { $0.id == id }) {
+                    guard library.isMigrationPlaylist(id) else { return }
+                    coordinator.selectedTab = .library
+                    coordinator.sheet = .migrationIssues(id)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
     }
 
     private static var hasModal: Bool {
@@ -114,52 +160,6 @@ private struct TabContent<Content: View>: View {
         .sheet(isPresented: $showingTimer) { SleepTimerSheet(timer: audioPlayer.sleepTimer).presentationDetents([.height(390)]) }
     }
 }
-
-// Retained only for the original Phase 1 fixture tests.
-#if DEBUG
-struct TrackRow: View {
-    @EnvironmentObject private var container: AppContainer
-    let track: MockTrack
-    var showDuration = true
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            ArtworkView(name: track.artwork, size: 52)
-            VStack(alignment: .leading, spacing: 3) { Text(track.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.artist).font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1) }
-            Spacer()
-            if container.music.likedTrackIDs.contains(track.id) { Image(systemName: "heart.fill").foregroundStyle(AppColors.accentPrimary).font(.caption) }
-            if showDuration { Text(format(track.duration)).font(.caption).foregroundStyle(AppColors.textTertiary) }
-            Menu { TrackContextMenu(track: track) } label: { Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 32, height: 40) }.accessibilityLabel("More actions for \(track.title)")
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { }
-        .contextMenu { TrackContextMenu(track: track) }
-        .accessibilityIdentifier("track-row-\(track.id)")
-    }
-    private func format(_ seconds: TimeInterval) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
-}
-
-struct TrackContextMenu: View {
-    @EnvironmentObject private var container: AppContainer
-    let track: MockTrack
-    var body: some View {
-        Button {} label: { Label("Demo track Â· import local audio to play", systemImage: "waveform") }.disabled(true)
-        Button { container.playback.addToQueue(track.id) } label: { Label("Add to Demo Queue", systemImage: "text.badge.plus") }
-        Button { container.music.toggleLiked(track.id) } label: { Label(container.music.likedTrackIDs.contains(track.id) ? "Unlike" : "Like", systemImage: "heart") }
-        Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Demo Playlist", systemImage: "text.badge.plus") }
-    }
-}
-
-struct AlbumCard: View {
-    let album: MockAlbum
-    var body: some View { VStack(alignment: .leading, spacing: AppSpacing.sm) { ArtworkView(name: album.artwork, size: 148); Text(album.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(album.artist).font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1) }.frame(width: 148, alignment: .leading) }
-}
-
-struct PlaylistCard: View {
-    let playlist: MockPlaylist
-    var body: some View { VStack(alignment: .leading, spacing: AppSpacing.sm) { ArtworkView(name: playlist.id, size: 148); Text(playlist.name).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text("\(playlist.trackIDs.count) tracks").font(.caption).foregroundStyle(AppColors.textSecondary) }.frame(width: 148, alignment: .leading) }
-}
-
-#endif
 
 struct SearchBar: View {
     @Binding var text: String
@@ -196,11 +196,3 @@ struct MiniPlayer: View {
         Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")
     }.padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AppRadius.medium)).accessibilityIdentifier("mini-player") } }
 }
-
-#if DEBUG
-struct ProgressRow: View {
-    let job: MockDownloadJob
-    var body: some View { HStack(spacing: AppSpacing.md) { ArtworkView(name: job.video.artwork, size: 58); VStack(alignment: .leading, spacing: 5) { Text(job.video.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(job.state.rawValue.capitalized).font(.caption).foregroundStyle(job.state == .failed ? AppColors.error : AppColors.textSecondary); ProgressView(value: job.progress).tint(AppColors.accentPrimary) }; Spacer(); Text("\(Int(job.progress * 100))%").font(.caption).foregroundStyle(AppColors.textSecondary) }.padding(.vertical, 6) }
-}
-
-#endif

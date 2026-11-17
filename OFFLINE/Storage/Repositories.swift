@@ -84,6 +84,11 @@ final class GRDBDownloadJobRepository: DownloadJobRepository {
     init(db: DatabaseQueue) { self.db = db }
     func all() throws -> [StoredDownloadJob] { try db.read { try StoredDownloadJob.order(Column("dateAdded").desc).fetchAll($0) } }
     func save(_ job: StoredDownloadJob) throws { try db.write { try job.save($0) } }
+    /// The persisted track reference. Deleting a library track nulls it in SQLite
+    /// (`ON DELETE SET NULL`) without touching in-memory copies of the job.
+    func storedTrackID(jobID: String) throws -> String? {
+        try db.read { try String.fetchOne($0, sql: "SELECT trackID FROM download_jobs WHERE id = ?", arguments: [jobID]) }
+    }
     func ownsFile(of track: StoredTrack) throws -> Bool {
         try db.read { db in
             try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM download_jobs WHERE trackID = ? AND sourceType = 'youtube' AND id || '.m4a' = ?)", arguments: [track.id, track.originalFilename]) == true

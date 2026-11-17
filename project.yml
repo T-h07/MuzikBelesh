@@ -6,6 +6,9 @@ options:
   createIntermediateGroups: true
   defaultConfig: Debug
 packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    exactVersion: 0.9.20
   YouTubeKit:
     url: https://github.com/alexeichhorn/YouTubeKit.git
     exactVersion: 0.4.10
@@ -20,7 +23,7 @@ settings:
     CODE_SIGNING_REQUIRED: NO
     CODE_SIGN_IDENTITY: ''
     CURRENT_PROJECT_VERSION: '3'
-    MARKETING_VERSION: '1.0.0'
+    MARKETING_VERSION: '1.1.0'
 targets:
   OFFLINE:
     type: application
@@ -36,14 +39,17 @@ targets:
       path: OFFLINE/Resources/Info.plist
       properties:
         CFBundleDisplayName: Muzik Belesh
-        CFBundleShortVersionString: '1.0.0'
+        CFBundleShortVersionString: '1.1.0'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         MBBuildCommit: '$(GIT_COMMIT_SHORT)'
         MBBuildDate: '$(BUILD_DATE)'
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        UIBackgroundModes: [audio]
+        UIBackgroundModes: [audio, processing]
+        BGTaskSchedulerPermittedIdentifiers: ['com.th07.muzikbelesh.matching.*']
+        NSAppTransportSecurity: {NSAllowsArbitraryLoads: false, NSAllowsLocalNetworking: true}
+        NSLocalNetworkUsageDescription: Muzik Belesh connects to the SearXNG search server you configure on your local network to find song candidates.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.th07.muzikbelesh
@@ -58,6 +64,7 @@ targets:
         Release: {SWIFT_OPTIMIZATION_LEVEL: -O}
     dependencies:
       - package: YouTubeKit
+      - package: ZIPFoundation
       - package: GRDB
         product: GRDB
       - target: OFFLINEShareExtension
@@ -68,6 +75,7 @@ targets:
     sources: [Tests/Unit, Tests/Fixtures]
     dependencies:
       - target: OFFLINE
+      - package: ZIPFoundation
       - package: YouTubeKit
       - package: GRDB
         product: GRDB
@@ -100,7 +108,7 @@ targets:
       properties:
         CFBundleDisplayName: Muzik Belesh
         CFBundlePackageType: 'XPC!'
-        CFBundleShortVersionString: '1.0.0'
+        CFBundleShortVersionString: '1.1.0'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services

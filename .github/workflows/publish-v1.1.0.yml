@@ -1,0 +1,127 @@
+name: Publish Muzik Belesh v1.1.0
+# Owner-approved, single-version publisher. The IPA is the physically accepted build 99,
+# not a new build from the post-merge documentation commit.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.1.0.yml'
+  workflow_dispatch:
+    inputs:
+      approve_publish:
+        description: 'I authorize publishing the tested Muzik Belesh v1.1.0 build 99'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: muzik-belesh-v1.1.0-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'T-h07/MuzikBelesh' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APPROVED_SOURCE_SHA: d5551d54198a75af6dafac7af109dbc2e5b31e29
+      ACCEPTED_IPA_SHA256: 2358a7bdd6da6dafa3d309501464c4fc53163c99f46e732bd64b90c6b530984f
+      ACCEPTED_RUN_ID: 44093034975
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify branch, permission and unchanged accepted app source
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_APPROVAL: ${{ inputs.approve_publish || false }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            test "$MANUAL_APPROVAL" = "true"
+          fi
+          git merge-base --is-ancestor 807ca588422da34dbca0c514bca6b6b093186747 HEAD
+          git merge-base --is-ancestor "$APPROVED_SOURCE_SHA" HEAD
+          git diff --exit-code "$APPROVED_SOURCE_SHA" HEAD -- \
+            OFFLINE OFFLINEShareExtension Sharing project.yml Scripts/package-ipa.sh
+          test -f Docs/RELEASE_NOTES_v1.1.0.md
+          echo "Production app matches the physically accepted build 99 source."
+
+      - name: Download accepted build 99 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: OFFLINE-unsigned-IPA
+          run-id: 44093034975
+          github-token: ${{ github.token }}
+          path: release-assets
+
+      - name: Check IPA SHA, manifest, bundle identities and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, plistlib, zipfile
+          root = pathlib.Path("release-assets")
+          ipa = root / "OFFLINE-unsigned.ipa"
+          manifest_file = root / "OFFLINE-build-manifest.json"
+          assert ipa.is_file() and manifest_file.is_file(), "Missing accepted IPA or manifest"
+          digest = hashlib.sha256(ipa.read_bytes()).hexdigest()
+          assert digest == os.environ["ACCEPTED_IPA_SHA256"], "Unexpected IPA hash"
+          manifest = json.loads(manifest_file.read_text())
+          assert manifest["sha256"] == digest
+          assert manifest["version"] == "1.1.0"
+          assert str(manifest["build"]) == "99"
+          assert manifest["sourceSHA"] == os.environ["APPROVED_SOURCE_SHA"]
+          assert manifest["bundleID"] == "com.th07.muzikbelesh"
+          assert manifest["extensionID"] == "com.th07.muzikbelesh.share"
+          assert manifest["requestedGroupBothExecutables"] == "group.com.th07.muzikbelesh.inbox"
+          with zipfile.ZipFile(ipa) as z:
+              assert z.testzip() is None, "Corrupt IPA"
+              for path, bundle in (
+                  ("Payload/OFFLINE.app/Info.plist", "com.th07.muzikbelesh"),
+                  ("Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex/Info.plist", "com.th07.muzikbelesh.share"),
+              ):
+                  info = plistlib.loads(z.read(path))
+                  assert info["CFBundleIdentifier"] == bundle
+                  assert info["CFBundleShortVersionString"] == "1.1.0"
+                  assert str(info["CFBundleVersion"]) == "99"
+          print("Verified v1.1.0 (99) source, bundle IDs and SHA-256:", digest)
+          PY
+
+      - name: Tag stable main commit and publish v1.1.0 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/tags/*:refs/tags/*'
+          if git show-ref --verify --quiet refs/tags/v1.1.0; then
+            test "$(git rev-list -n 1 v1.1.0)" = "$GITHUB_SHA"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a v1.1.0 "$GITHUB_SHA" -m "Muzik Belesh v1.1.0 — Build 99"
+            git push origin refs/tags/v1.1.0
+          fi
+          if gh release view v1.1.0 >/dev/null 2>&1; then
+            echo "v1.1.0 release already exists; verifying expected assets."
+            gh release view v1.1.0 --json assets --jq '.assets[].name' | grep -Fx 'OFFLINE-unsigned.ipa'
+            gh release view v1.1.0 --json assets --jq '.assets[].name' | grep -Fx 'OFFLINE-build-manifest.json'
+          else
+            gh release create v1.1.0 \
+              release-assets/OFFLINE-unsigned.ipa \
+              release-assets/OFFLINE-build-manifest.json \
+              --verify-tag \
+              --title 'Muzik Belesh v1.1.0' \
+              --notes-file Docs/RELEASE_NOTES_v1.1.0.md \
+              --latest
+          fi
+          echo "Published approved Muzik Belesh v1.1.0, build 99." >> "$GITHUB_STEP_SUMMARY"

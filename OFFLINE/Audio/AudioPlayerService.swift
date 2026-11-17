@@ -122,13 +122,37 @@ final class AudioPlayerService: ObservableObject {
         timerExpired = false
         queue.cancelCandidate()
         let old = (activeContextTrackIDs, activeContextKind, activeContextSourceID)
+        let rollback = queue.selectionRollback()
+        queue.clearMigrationContext()
         activeContextTrackIDs = contextTrackIDs.map { ids in var seen = Set<String>(); return ids.filter { seen.insert($0).inserted } }
         activeContextKind = contextTrackIDs == nil ? nil : (contextKind ?? "library")
         activeContextSourceID = contextSourceID
         do { try await selectTrack(trackID, direction: direction) }
         catch {
             (activeContextTrackIDs, activeContextKind, activeContextSourceID) = old
+            rollback()
             refreshContext(); persist(); throw error
+        }
+    }
+
+    /// `shuffle == nil` keeps the user's current shuffle setting (selecting a song never
+    /// changes it); Play/Shuffle buttons pass an explicit value.
+    func playMigration(occurrences: [MigrationPlaybackOccurrence], selected: String, playlistID: String, shuffle: Bool?) async throws {
+        guard let occurrence = occurrences.first(where: { $0.id == selected }) else { return }
+        guard await beginCommand("select") else { throw AudioPlaybackError.playerFailed("Playback is busy. Try again.") }
+        defer { endCommand() }
+        // Resolve before changing navigation, then selectTrack validates again before AVPlayer.
+        _ = try resolver.resolve(trackID: occurrence.trackID)
+        let old = (activeContextTrackIDs, activeContextKind, activeContextSourceID)
+        let rollback = queue.selectionRollback()
+        timerExpired = false; queue.cancelCandidate()
+        activeContextTrackIDs = occurrences.map(\.trackID); activeContextKind = "migrationPlaylist"; activeContextSourceID = playlistID
+        queue.setMigrationContext(occurrences, selected: selected)
+        if let shuffle, queue.shuffleEnabled != shuffle { queue.toggleShuffle() }
+        do { try await selectTrack(occurrence.trackID) }
+        catch {
+            (activeContextTrackIDs, activeContextKind, activeContextSourceID) = old
+            rollback(); refreshContext(); persist(); throw error
         }
     }
 
@@ -140,6 +164,8 @@ final class AudioPlayerService: ObservableObject {
         guard reconcileSleepTimer() else { throw AudioPlaybackError.playerFailed("Sleep Timer has expired") }
         do {
             let resolved = try resolver.resolve(trackID: trackID)
+            if activeContextKind == "migrationPlaylist", let storage,
+               !MigrationLocalAudio.isAvailable(resolved.track, paths: storage.paths) { throw AudioPlaybackError.missingFile }
             let revision = intentRevision
             let asset = AVURLAsset(url: resolved.url)
             let duration = try await PlaybackAssetInspection.duration(of: asset)
@@ -184,7 +210,15 @@ final class AudioPlayerService: ObservableObject {
         }
         if case .failed = state.status, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false); return }
         if item == nil, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false); return }
+        try requireAvailableMigrationAudio()
         try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport(); state.lastError = nil; publishCurrent(); persist()
+    }
+
+    private func requireAvailableMigrationAudio() throws {
+        guard activeContextKind == "migrationPlaylist" else { return }
+        guard let id = state.currentTrackID, let storage else { throw AudioPlaybackError.trackNotFound }
+        let resolved = try resolver.resolve(trackID: id)
+        guard MigrationLocalAudio.isAvailable(resolved.track, paths: storage.paths) else { throw AudioPlaybackError.missingFile }
     }
 
     func playFromRemote() async { do { try await play() } catch { handleTransitionFailure(error) } }
@@ -253,6 +287,13 @@ final class AudioPlayerService: ObservableObject {
 
     func refreshContext() {
         let currentID = state.currentTrackID
+        if activeContextKind == "migrationPlaylist", let id = activeContextSourceID, let storage {
+            do {
+                let occurrences = try storage.playlistMigrations.hybridPlaybackOccurrences(playlistID: id)
+                queue.refreshMigrationOccurrences(occurrences)
+                activeContextTrackIDs = occurrences.map(\.trackID)
+            } catch { state.lastError = "Playlist occurrences could not be refreshed."; return }
+        }
         let tracks: [StoredTrack]
         do { tracks = try storage?.tracks.all() ?? [] }
         catch { state.lastError = "The playback library could not be read."; return }
@@ -318,6 +359,8 @@ final class AudioPlayerService: ObservableObject {
         defer { endCommand() }
         guard state.currentTrackID == trackID, item == nil else { return }
         guard let resolved = try? resolver.resolve(trackID: trackID) else { fail("The saved track is no longer available"); return }
+        do { try requireAvailableMigrationAudio() }
+        catch { fail("The saved track is no longer available"); return }
         let revision = intentRevision
         let localDuration = await storage?.downloadPlaybackDuration(track: resolved.track, url: resolved.url)
         guard revision == intentRevision, state.currentTrackID == trackID, item == nil else { return }
@@ -613,7 +656,7 @@ final class AudioPlayerService: ObservableObject {
             let value = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let shouldResume = AVAudioSession.InterruptionOptions(rawValue: value).contains(.shouldResume)
             if wasPlayingBeforeInterruption && shouldResume && !userPausedDuringInterruption && reconcileSleepTimer() {
-                do { try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport() }
+                do { try requireAvailableMigrationAudio(); try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport() }
                 catch { handleTransitionFailure(error) }
             } else if state.currentTrackID != nil {
                 wantsPlayback = false; state.status = .paused

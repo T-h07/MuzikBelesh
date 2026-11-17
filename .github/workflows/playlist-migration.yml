@@ -1,0 +1,237 @@
+
+name: Playlist migration verification
+
+# Level B (feature verification) for the playlist migration / matching phase.
+#   matching_only=true  : matching, review queue and persistence unit contracts only.
+#   matching_only=false : (default, and every pull request) foundation persistence,
+#                         the same matching suites, and the migration UI tests.
+#   acquisition_only=true : Phase 10.5 audio acquisition plus the download/persistence
+#                         suites it extends (no UI tests). Always run otherwise too.
+#   coordinator_only=true : Phase 10.6 persistent migration coordinator plus the matching
+#                         lifecycle, acquisition, download and schema suites it touches
+#                         (no UI tests). The coordinator suite always runs otherwise too.
+#   issues_only=true    : Phase 10.7 issue reporting plus the coordinator, acquisition,
+#                         download, schema and playback suites it touches (no UI tests).
+#                         The issue-reporting suites always run otherwise too.
+#   release_only=true   : Phase 10.9 release-integrity suites (import stress, corrupt files,
+#                         canceled 10.8 upgrade, share inbox downgrade) plus every suite
+#                         whose path they exercise (no UI tests). The release-integrity
+#                         suites always run otherwise too.
+# Every xcodebuild step is followed by Scripts/check-test-results.py, which fails the job
+# when a required suite executed zero tests, any test was skipped, or a test never
+# reached a final result. See Docs/TESTING_RELIABILITY.md.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      matching_only:
+        description: Run only Phase 10.4 matching and existing persistence unit contracts
+        type: boolean
+        default: false
+      acquisition_only:
+        description: Run only Phase 10.5 audio acquisition and affected download/persistence unit tests
+        type: boolean
+        default: false
+      coordinator_only:
+        description: Run only the Phase 10.6 coordinator and affected matching/acquisition/persistence unit tests
+        type: boolean
+        default: false
+      issues_only:
+        description: Run only Phase 10.7 issue reporting and affected coordinator/acquisition/persistence/playback unit tests
+        type: boolean
+        default: false
+      release_only:
+        description: Run only Phase 10.9 release-integrity suites and the import/persistence/recovery/sharing suites they exercise
+        type: boolean
+        default: false
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playlist-migration-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  persistence:
+    runs-on: macos-15
+    timeout-minutes: 60 # Phase 10.7 added three unit suites and three UI tests to this job.
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      MATCHING_ONLY: ${{ inputs.matching_only == true }}
+      GITHUB_SHA_TESTED: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Static test hygiene
+        run: python3 Scripts/check-test-hygiene.py
+
+      - name: Portable foundation contracts
+        run: bash Scripts/test-playlist-migration-foundation.sh
+
+      - name: Build application and all test products
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          git rev-parse HEAD | tee build/migration-source.txt
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA_TESTED"
+          brew install xcodegen
+          xcodegen generate
+          ID=$(xcrun simctl create "Migration-$GITHUB_RUN_ID" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max com.apple.CoreSimulator.SimRuntime.iOS-26-2)
+          echo "SIMULATOR_ID=$ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$ID"
+          xcrun simctl bootstatus "$ID" -b
+          xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$ID" -derivedDataPath build/Products build-for-testing CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/migration-build.log
+
+      - name: Foundation persistence and affected regression tests
+        if: inputs.matching_only != true && inputs.acquisition_only != true && inputs.coordinator_only != true && inputs.issues_only != true && inputs.release_only != true
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(PlaylistMigrationFoundationTests PlaylistMigrationPersistenceTests Phase2StorageTests Phase4LibraryMigrationTests
+                  PlaylistManagementTests LibraryDeletionTests FullLocalLibraryIntegrationTests Phase4PlaybackTests
+                  PlaybackPreviousPolicyTests PlaybackServiceAuditTests)
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUnits.xcresult \
+            "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-units.log
+          python3 Scripts/check-test-results.py MigrationUnits build/MigrationUnits.xcresult "${REQUIRE[@]}"
+
+      - name: Song matching, review queue and import unit tests
+        if: inputs.acquisition_only != true && inputs.coordinator_only != true && inputs.issues_only != true && inputs.release_only != true
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(SongMatchingPolicyTests MatchingDiscoveryTests PlaylistMatchingIntegrationTests MatchingCorrectionTests
+                  MatchingReliabilityTests MatchingFailureIsolationTests YouTubeDiscoveryReliabilityTests FinalDiscoveryReliabilityTests
+                  ManualYouTubeSelectionTests MatchingCompletionTests MatchingIndependentSearchTests SearXNGDiscoveryTests
+                  InvidiousDiscoveryTests MatchingPauseResumeTests MatchingReviewQueueTests YouTubeProviderTests
+                  MatchingLifecycleTests MatchingArtworkTests HybridPlaylistTests MigrationPresentationTests
+                  PlaylistImportIntegrationTests PlaylistImportParserTests PlaylistImportPresentationTests PlaylistImportZIPTests)
+          # The full run already executes PlaylistMigrationPersistenceTests in the foundation step.
+          if [[ "$MATCHING_ONLY" == true ]]; then SUITES+=(PlaylistMigrationPersistenceTests); fi
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MatchingUnits.xcresult \
+            "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-matching.log
+          python3 Scripts/check-test-results.py MatchingUnits build/MatchingUnits.xcresult "${REQUIRE[@]}"
+
+      - name: Phase 10.5 playlist audio acquisition unit tests
+        if: inputs.coordinator_only != true && inputs.issues_only != true && inputs.release_only != true
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(PlaylistAcquisitionTests PlaylistAcquisitionSchedulingTests PlaylistAcquisitionRecoveryTests
+                  PlaylistAcquisitionDeviceRecoveryTests PlaylistAcquisitionNotificationTests PlaylistAcquisitionQueueStallTests
+                  BackgroundDownloadTests DownloadTests)
+          # Schema-count contracts live in the persistence suites; a focused run includes them.
+          if [[ "${{ inputs.acquisition_only == true }}" == true ]]; then SUITES+=(PlaylistMigrationPersistenceTests HybridPlaylistTests Phase2StorageTests Phase4LibraryMigrationTests PlaylistImportIntegrationTests ReleaseReliabilityTests YouTubeAudioTests YouTubeProviderTests); fi
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/AcquisitionUnits.xcresult             "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-acquisition.log
+          python3 Scripts/check-test-results.py AcquisitionUnits build/AcquisitionUnits.xcresult "${REQUIRE[@]}"
+
+      - name: Phase 10.6 persistent migration coordinator unit tests
+        if: inputs.issues_only != true && inputs.release_only != true
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(PlaylistMigrationCoordinatorTests)
+          # A focused run adds every suite whose code path the coordinator changed or drives.
+          if [[ "${{ inputs.coordinator_only == true }}" == true ]]; then
+            SUITES+=(MatchingLifecycleTests MatchingPauseResumeTests MatchingReliabilityTests FinalDiscoveryReliabilityTests
+                     YouTubeDiscoveryReliabilityTests MatchingIndependentSearchTests PlaylistMatchingIntegrationTests
+                     PlaylistAcquisitionTests PlaylistAcquisitionSchedulingTests PlaylistAcquisitionRecoveryTests
+                     PlaylistAcquisitionDeviceRecoveryTests PlaylistAcquisitionNotificationTests PlaylistAcquisitionQueueStallTests
+                     BackgroundDownloadTests DownloadTests PlaylistMigrationPersistenceTests HybridPlaylistTests Phase2StorageTests
+                     Phase4LibraryMigrationTests PlaylistImportIntegrationTests)
+          fi
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/CoordinatorUnits.xcresult             "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-coordinator.log
+          python3 Scripts/check-test-results.py CoordinatorUnits build/CoordinatorUnits.xcresult "${REQUIRE[@]}"
+
+      - name: Phase 10.7 migration issue reporting unit tests
+        if: inputs.release_only != true
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(MigrationIssueClassifierTests MigrationIssuePersistenceTests MigrationIssueRecoveryTests
+                  MigrationCompletionSummaryTests MigrationIssueNotificationTests RecordingReplacementTests PlaylistOccurrenceRemovalTests PlaylistLinkDownloadTests PlaylistSearchTests)
+          # A focused run adds every suite whose code path Phase 10.7 touches or extends.
+          if [[ "${{ inputs.issues_only == true }}" == true ]]; then
+            SUITES+=(PlaylistMigrationCoordinatorTests PlaylistAcquisitionTests PlaylistAcquisitionNotificationTests
+                     PlaylistAcquisitionRecoveryTests BackgroundDownloadTests DownloadTests PlaylistMigrationPersistenceTests
+                     HybridPlaylistTests Phase2StorageTests Phase4LibraryMigrationTests PlaylistImportIntegrationTests
+                     MatchingReviewQueueTests ManualYouTubeSelectionTests Phase4PlaybackTests)
+          fi
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/IssueUnits.xcresult \
+            "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-issues.log
+          python3 Scripts/check-test-results.py IssueUnits build/IssueUnits.xcresult "${REQUIRE[@]}"
+
+      - name: Phase 10.9 release integrity unit tests
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(ReleaseImportStressTests ReleaseCorruptImportTests CanceledPhase108UpgradeTests SharedLinkInboxTests ShareURLValidationTests ReleaseHardeningTests)
+          # A focused run adds every suite whose import, persistence, recovery, association,
+          # playback-queue or sharing path the release gates depend on.
+          if [[ "${{ inputs.release_only == true }}" == true ]]; then
+            SUITES+=(PlaylistImportIntegrationTests PlaylistImportParserTests PlaylistImportZIPTests PlaylistMigrationPersistenceTests
+                     PlaylistMigrationFoundationTests PlaylistMigrationCoordinatorTests PlaylistAcquisitionTests PlaylistAcquisitionRecoveryTests
+                     PlaylistAcquisitionQueueStallTests MigrationIssueRecoveryTests MigrationIssuePersistenceTests RecordingReplacementTests
+                     PlaylistOccurrenceRemovalTests PlaylistLinkDownloadTests PlaylistSearchTests MatchingCorrectionTests SongMatchingPolicyTests
+                     MatchingPauseResumeTests DownloadTests BackgroundDownloadTests Phase2StorageTests Phase4LibraryMigrationTests
+                     Phase4PlaybackTests HybridPlaylistTests)
+          fi
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINETests/$suite"); REQUIRE+=(--require "OFFLINETests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/ReleaseUnits.xcresult             "${ONLY[@]}" -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-release.log
+          python3 Scripts/check-test-results.py ReleaseUnits build/ReleaseUnits.xcresult "${REQUIRE[@]}"
+
+      - name: Migration playlist, review queue and import UI
+        if: inputs.matching_only != true && inputs.acquisition_only != true && inputs.coordinator_only != true && inputs.issues_only != true && inputs.release_only != true
+        run: |
+          set -euo pipefail
+          RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
+          SUITES=(PlaylistMigrationUITests ReviewQueueUITests PlaylistFileImportUITests)
+          ONLY=(); REQUIRE=()
+          for suite in "${SUITES[@]}"; do ONLY+=("-only-testing:OFFLINEUITests/$suite"); REQUIRE+=(--require "OFFLINEUITests/$suite"); done
+          xcodebuild -xctestrun "$RUN" -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath build/MigrationUI.xcresult \
+            "${ONLY[@]}" \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 60 \
+            -maximum-test-execution-time-allowance 120 test-without-building 2>&1 | tee build/migration-ui.log
+          python3 Scripts/check-test-results.py MigrationUI build/MigrationUI.xcresult "${REQUIRE[@]}"
+
+      - name: Test counts for every result bundle
+        if: always()
+        run: python3 Scripts/check-test-results.py --report build/*.xcresult
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playlist-migration-evidence
+          path: |
+            build/migration-*.txt
+            build/migration-*.log
+            build/FoundationContracts*
+            build/*.xcresult
+          retention-days: 14
+
+      - name: Remove isolated simulator
+        if: always() && env.SIMULATOR_ID != ''
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          xcrun simctl delete "$SIMULATOR_ID" || true

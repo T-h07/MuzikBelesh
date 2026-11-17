@@ -9,6 +9,39 @@ struct AudioMetadata: Equatable {
     var album: String?
     var durationMs: Int64?
     var artworkData: Data?
+
+    /// Embedded tags and provider titles are untrusted file/network content. Library rows
+    /// keep the same bounds as metadata editing (300 characters), and control characters
+    /// are replaced. Before this, an artist or album tag over 300 characters made
+    /// `LibraryRepository.resolveArtist/resolveAlbum` reject an otherwise playable file,
+    /// and an unbounded title was stored as-is.
+    static let libraryTextLimit = 300
+
+    func sanitizedForLibrary(fallbackTitle: String) -> AudioMetadata {
+        var result = self
+        result.title = Self.libraryTitle(title) ?? Self.libraryTitle(fallbackTitle) ?? "Untitled"
+        result.artist = artist.flatMap(Self.libraryName)
+        result.album = album.flatMap(Self.libraryName)
+        return result
+    }
+
+    private static func withoutControlCharacters(_ value: String) -> String {
+        value.components(separatedBy: .controlCharacters).joined(separator: " ")
+    }
+
+    /// Titles keep their inner spacing (as before); only the ends are trimmed.
+    static func libraryTitle(_ value: String) -> String? {
+        let text = withoutControlCharacters(value).trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
+        guard !text.isEmpty else { return nil }
+        return String(text.prefix(libraryTextLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Artist/album names use the library's display form, which is what resolution stores.
+    static func libraryName(_ value: String) -> String? {
+        let text = LibraryIdentity.display(withoutControlCharacters(value))
+        guard !text.isEmpty else { return nil }
+        return LibraryIdentity.display(String(text.prefix(libraryTextLimit)))
+    }
 }
 
 enum SupportedAudioFormat {
