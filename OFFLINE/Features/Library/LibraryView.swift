@@ -8,6 +8,7 @@ struct LibraryView: View {
     @FocusState.Binding var searchFocus: LibrarySearchField?
     @State private var showingImporter = false
     @State private var showingPlaylistEditor = false
+    @State private var showingPlaylistImporter = false
     @State private var showingAlbumEditor = false
     @State private var importMessage: String?
     @State private var query = ""
@@ -36,6 +37,9 @@ struct LibraryView: View {
         .onDisappear { searchFocus = nil }
         .onChange(of: coordinator.libraryFilter) { _, _ in searchFocus = nil }
         .sheet(isPresented: $showingPlaylistEditor) { PlaylistEditorView() }
+        .sheet(isPresented: $showingPlaylistImporter, onDismiss: { container.playlistImport?.presentationClosed() }) {
+            if let model = container.playlistImport { PlaylistImportView(model: model) }
+        }
         .sheet(isPresented: $showingAlbumEditor) { AlbumEditorView() }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.audio, .supportedAudio], allowsMultipleSelection: true) { result in
             Task { @MainActor in
@@ -68,6 +72,8 @@ struct LibraryView: View {
                 .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-album")
         }
         if coordinator.libraryFilter == "Playlists" {
+            Button { searchFocus = nil; showingPlaylistImporter = true } label: { Label("Import Playlist", systemImage: "square.and.arrow.down") }
+                .tint(AppColors.accentPrimary).disabled(container.storage == nil).accessibilityIdentifier("import-spotify-playlist")
             Button { searchFocus = nil; showingPlaylistEditor = true } label: { Label("Create Playlist", systemImage: "plus.circle.fill") }
                 .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-playlist")
         }
@@ -100,7 +106,7 @@ struct PlaylistLibraryRow: View {
             ManagedArtworkView(path: playlist.artworkRelativePath, fallbackID: playlist.id, size: 60)
             VStack(alignment: .leading, spacing: 4) {
                 Text(playlist.name).font(.headline).foregroundStyle(AppColors.textPrimary).lineLimit(1)
-                Text("\(library.playlistTracks(playlist.id).count) songs").font(.caption).foregroundStyle(AppColors.textSecondary)
+                Text("\(library.playlistEntryCount(playlist.id)) songs").font(.caption).foregroundStyle(AppColors.textSecondary)
                 if let description = playlist.description, !description.isEmpty { Text(description).font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1) }
             }
             Spacer(); Image(systemName: "chevron.right").foregroundStyle(AppColors.textTertiary)
@@ -133,6 +139,7 @@ struct StoredTrackRow: View {
     var onInteraction: () -> Void = { }
     @State private var showingEditor = false
     @State private var showingPlaylists = false
+    @State private var showingDetails = false
     @State private var confirmingDeletion = false
     @State private var exporting = false
     @State private var exportDocument: PreparedAudioExport?
@@ -148,6 +155,7 @@ struct StoredTrackRow: View {
         .padding(.vertical, AppSpacing.xs).contextMenu { actions }
         .sheet(isPresented: $showingEditor) { TrackEditorView(trackID: track.id) }
         .sheet(isPresented: $showingPlaylists) { AddToPlaylistView(trackIDs: [track.id]) }
+        .sheet(isPresented: $showingDetails) { SongOptionsView(context: .library(trackID: track.id, playlistID: playlistID, contextIDs: ids, kind: contextKind)) }
         .onChange(of: showingEditor) { _, shown in if shown { onInteraction() } }
         .onChange(of: showingPlaylists) { _, shown in if shown { onInteraction() } }
         .onChange(of: confirmingDeletion) { _, shown in if shown { onInteraction() } }
@@ -175,11 +183,12 @@ struct StoredTrackRow: View {
         Button { play() } label: { Label("Play Now", systemImage: "play.fill") }.disabled(track.availability != .available)
         Button { container.audioPlayer.queue.playNext(trackID: track.id) } label: { Label("Play Next", systemImage: "text.insert") }.disabled(track.availability != .available)
         Button { container.audioPlayer.queue.addToQueue(trackID: track.id) } label: { Label("Add to Queue", systemImage: "text.badge.plus") }.disabled(track.availability != .available)
+        Button { showingDetails = true } label: { Label("Song Details", systemImage: "info.circle") }
         Button { showingPlaylists = true } label: { Label("Add to Playlist", systemImage: "rectangle.stack.badge.plus") }
         Button { library.perform { try library.setLiked(!library.snapshot.likedIDs.contains(track.id), trackID: track.id) } } label: { Label(library.snapshot.likedIDs.contains(track.id) ? "Unlike Song" : "Like Song", systemImage: "heart") }
         Button { showingEditor = true } label: { Label("Edit Metadata", systemImage: "pencil") }
         Button { export() } label: { Label("Export Audio", systemImage: "square.and.arrow.up") }.disabled(track.availability != .available)
-        if let playlistID { Button { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } label: { Label("Remove from Playlist", systemImage: "minus.circle") } }
+        if let playlistID { Button { library.removeFromOrdinaryPlaylist(track.id, playlistID: playlistID) } label: { Label("Remove from Playlist", systemImage: "minus.circle") } }
         if let albumID { Button { library.perform { try library.removeAlbumTrack(track.id, albumID: albumID) } } label: { Label("Remove from Album", systemImage: "minus.circle") } }
         Button(role: .destructive) { confirmingDeletion = true } label: { Label(track.availability == .missing ? "Remove Missing Entry" : "Delete Song", systemImage: "trash") }
     }

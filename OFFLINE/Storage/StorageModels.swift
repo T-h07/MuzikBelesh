@@ -84,6 +84,7 @@ struct StoredPlaybackState: Codable, FetchableRecord, PersistableRecord, Sendabl
     var contextKind: String? = nil
     var contextSourceID: String? = nil
     var dateModified: Date
+    var migrationContextJSON: String? = nil
 }
 
 struct StoredQueueEntry: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {

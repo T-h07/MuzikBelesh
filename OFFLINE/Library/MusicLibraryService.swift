@@ -21,27 +21,128 @@ import SwiftUI
         self.storage = storage; self.player = player
         guard let storage else { error = "Local library storage is unavailable."; return }
         error = storage.lastError
-        observation = ValueObservation.tracking { db in try LibraryRepository.snapshot(db) }.start(in: storage.database.dbQueue, scheduling: .immediate, onError: { [weak self] _ in
+        observation = ValueObservation.tracking { db in try LibraryRepository.observedSnapshot(db, paths: storage.paths) }.start(in: storage.database.dbQueue, scheduling: .immediate, onError: { [weak self] _ in
             self?.error = "Library updates could not be read. Try refreshing."
         }, onChange: { [weak self] value in self?.apply(value) })
     }
     private func apply(_ value: LibrarySnapshot) {
         guard value != snapshot else { return }
+        func associated(_ entries: [PlaylistMigrationEntry]) -> [MigrationPlaybackOccurrence] {
+            entries.compactMap { entry in
+                guard entry.status == .ready, let id = entry.localTrackID else { return nil }
+                return MigrationPlaybackOccurrence(id: entry.id.uuidString, trackID: id)
+            }
+        }
+        let playbackChanged = value.tracks != snapshot.tracks || value.artists != snapshot.artists || value.albums != snapshot.albums
+            || value.memberships != snapshot.memberships || value.localOccurrences != snapshot.localOccurrences
+            || associated(value.migrationEntries) != associated(snapshot.migrationEntries)
         tracksByID = value.trackByID
         playlistTrackIDs = Dictionary(grouping: value.memberships, by: \.playlistID).mapValues { $0.sorted { $0.position < $1.position }.map(\.trackID) }
         artistNames = Dictionary(uniqueKeysWithValues: value.artists.map { ($0.id, $0.name) })
         albumNames = Dictionary(uniqueKeysWithValues: value.albums.map { ($0.id, $0.title) })
         artistGroups = value.artistGroups; albumGroups = value.albumGroups
         snapshot = value; revision += 1
-        player?.libraryDidChange()
+        // Candidate/status-only writes do not rescan a playing hybrid playlist.
+        if playbackChanged { player?.libraryDidChange() }
     }
     func track(_ id: String?) -> StoredTrack? { id.flatMap { tracksByID[$0] } }
     func artistName(_ id: String?) -> String { id.flatMap { artistNames[$0] } ?? "Unknown Artist" }
     func albumTitle(_ id: String?) -> String { id.flatMap { albumNames[$0] } ?? "Unknown Album" }
     func tracks(_ ids: [String]) -> [StoredTrack] { ids.compactMap { tracksByID[$0] } }
-    func playlistTracks(_ id: String) -> [StoredTrack] { tracks(playlistTrackIDs[id] ?? []) }
+    func playlistTracks(_ id: String) -> [StoredTrack] {
+        if isMigrationPlaylist(id) { return migrationRows(id).compactMap(\.playableTrack) + manualRows(id).filter(\.available).map(\.track) }
+        return tracks(playlistTrackIDs[id] ?? [])
+    }
+    func isMigrationPlaylist(_ id: String) -> Bool { snapshot.migrationPresentations[id] != nil }
+    /// Every song occurrence in the playlist: imported entries, songs added from the
+    /// library and songs added by YouTube link (including ones still downloading).
+    func playlistEntryCount(_ id: String) -> Int {
+        let pending = pendingLinks(id).count
+        if let presentation = snapshot.migrationPresentations[id] {
+            return presentation.rows.count + manualRows(id).count + pending
+        }
+        return (playlistTrackIDs[id]?.count ?? 0) + pending
+    }
+    func pendingLinks(_ id: String) -> [PlaylistLinkDownloadRecord] { snapshot.pendingLinks[id] ?? [] }
+    func migrationRows(_ id: String) -> [MigrationPlaylistRow] {
+        snapshot.migrationPresentations[id]?.rows ?? []
+    }
+    func manualRows(_ id: String) -> [LocalPlaylistRow] { snapshot.localPlaylistRows[id] ?? [] }
+    func removeManualOccurrence(_ id: String, playlistID: String) throws {
+        try requiredRepository().removeManualOccurrence(id, playlistID: playlistID)
+    }
+
+    // MARK: Remove from Playlist (occurrence-level, with Undo)
+
+    /// The last removal, offered as Undo by the playlist screen.
+    @Published var pendingUndo: PlaylistRemovalUndo?
+
+    /// An imported (Spotify) occurrence. Only this occurrence leaves the playlist; its
+    /// audio, other occurrences and other playlists are untouched.
+    func removeImportedOccurrence(_ entryID: UUID, title: String, playlistID: String) async {
+        guard let storage else { return }
+        do {
+            try await storage.playlistMigrations.removeOccurrence(entryID: entryID, playlistID: playlistID)
+            pendingUndo = PlaylistRemovalUndo(playlistID: playlistID, title: title, kind: .imported(entryID)); error = nil
+        } catch { report(error) }
+    }
+    /// A song added manually to an imported playlist (one occurrence; duplicates stay).
+    func removeManualRow(_ row: LocalPlaylistRow, playlistID: String) {
+        perform {
+            try removeManualOccurrence(row.id, playlistID: playlistID)
+            pendingUndo = PlaylistRemovalUndo(playlistID: playlistID, title: row.track.title, kind: .manual(row.occurrence))
+        }
+    }
+    /// A song in an ordinary playlist (set semantics: one membership per song).
+    func removeFromOrdinaryPlaylist(_ trackID: String, playlistID: String) {
+        let index = playlistTrackIDs[playlistID]?.firstIndex(of: trackID) ?? 0
+        let title = tracksByID[trackID]?.title ?? "Song"
+        perform {
+            try removeTrack(trackID, playlistID: playlistID)
+            pendingUndo = PlaylistRemovalUndo(playlistID: playlistID, title: title, kind: .ordinary(trackID: trackID, index: index))
+        }
+    }
+    func undoRemoval() async {
+        guard let undo = pendingUndo else { return }
+        pendingUndo = nil
+        do {
+            switch undo.kind {
+            case .imported(let entryID):
+                guard let storage else { return }
+                try await storage.playlistMigrations.restoreOccurrence(entryID: entryID, playlistID: undo.playlistID)
+            case .manual(let occurrence): try requiredRepository().restoreManualOccurrence(occurrence)
+            case .ordinary(let trackID, let index): try requiredRepository().insertTrack(trackID, at: index, playlistID: undo.playlistID)
+            }
+            error = nil
+        } catch { report(error) }
+    }
+
+    /// Playlists (ordinary memberships and manual occurrences in imported playlists) that
+    /// would lose this song if its audio were deleted from the library.
+    func playlistUses(of trackID: String) -> Int {
+        Set(snapshot.memberships.filter { $0.trackID == trackID }.map(\.playlistID))
+            .union(snapshot.localOccurrences.filter { $0.trackID == trackID }.map(\.playlistID)).count
+    }
+    /// Imported occurrences (any playlist) that play this recording.
+    func importedUses(of trackID: String) -> Int { snapshot.migrationEntries.filter { $0.localTrackID == trackID }.count }
+    /// Plays an imported/hybrid playlist. The queue is always the *full* playlist (never a
+    /// filtered or searched subset), and the selection is the exact occurrence ID, so
+    /// duplicates resolve to the tapped position. `shuffle == nil` (tapping a song) keeps
+    /// the user's shuffle setting; Play and Shuffle pass an explicit value.
+    func playMigration(playlistID: String, occurrenceID: String? = nil, shuffle: Bool? = nil) async {
+        guard let storage, let player else { return }
+        do {
+            // Re-read immediately before playback, rather than trusting a rendered row.
+            let occurrences = try storage.playlistMigrations.hybridPlaybackOccurrences(playlistID: playlistID)
+            let selection: MigrationPlaybackOccurrence?
+            if let occurrenceID { selection = occurrences.first { $0.id == occurrenceID } }
+            else { selection = shuffle == true ? occurrences.randomElement() : occurrences.first }
+            guard let selected = selection else { return }
+            try await player.playMigration(occurrences: occurrences, selected: selected.id, playlistID: playlistID, shuffle: shuffle)
+        } catch { report(error) }
+    }
     func report(_ error: Error) { self.error = Self.message(error) }
-    static func message(_ error: Error) -> String { (error as? LibraryError)?.localizedDescription ?? (error as? StorageError)?.localizedDescription ?? (error as? AudioPlaybackError)?.localizedDescription ?? LibraryError.operationFailed.localizedDescription }
+    static func message(_ error: Error) -> String { (error as? PlaylistMigrationStorageError)?.localizedDescription ?? (error as? LibraryError)?.localizedDescription ?? (error as? StorageError)?.localizedDescription ?? (error as? AudioPlaybackError)?.localizedDescription ?? LibraryError.operationFailed.localizedDescription }
     func perform(_ operation: () throws -> Void) { do { try operation(); error = nil } catch { report(error) } }
     private func requiredRepository() throws -> LibraryRepository { guard let repository else { throw LibraryError.operationFailed }; return repository }
     func setSort(_ sort: LibrarySort) throws { try requiredRepository().setSort(sort) }

@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import GRDB
 import SwiftUI
 import UniformTypeIdentifiers
@@ -14,6 +13,7 @@ final class StorageCoordinator: ObservableObject {
     let settings: GRDBSettingsRepository
     let playback: GRDBPlaybackRepository
     let downloads: GRDBDownloadJobRepository
+    let playlistMigrations: GRDBPlaylistMigrationRepository
     let audio = AudioFileService()
     let mutations = LibraryMutationGate()
     @Published private(set) var library: [StoredTrack] = []
@@ -27,11 +27,13 @@ final class StorageCoordinator: ObservableObject {
         settings = GRDBSettingsRepository(db: database.dbQueue)
         playback = GRDBPlaybackRepository(db: database.dbQueue)
         downloads = GRDBDownloadJobRepository(db: database.dbQueue)
+        playlistMigrations = GRDBPlaylistMigrationRepository(db: database.dbQueue, paths: paths)
         try downloads.markInterrupted()
         try? PreparedAudioExport.cleanupAbandoned(in: paths.exports)
         do { try ManagedLibraryFiles.recover(paths: paths, db: database.dbQueue) }
         catch { lastError = "A pending file operation needs recovery. Existing recovery copies were retained." }
         try reconcileMissingFiles()
+        try playlistMigrations.recover()
         reload()
     }
 
@@ -49,8 +51,10 @@ final class StorageCoordinator: ObservableObject {
         try? database.dbQueue.write { try $0.execute(sql: "UPDATE import_operations SET state = ?, dateUpdated = ? WHERE id = ?", arguments: [state, Date(), id]) }
     }
     private func performImport(from source: URL, sourceType: String?, sourceIdentifier: String?, video: YouTubeVideo?, artwork: Data?) async throws -> ImportResult {
-        guard source.startAccessingSecurityScopedResource() || source.isFileURL else { throw StorageError.invalidPath }
-        defer { source.stopAccessingSecurityScopedResource() }
+        // Balance security-scoped access: stop only what this call started.
+        let scoped = source.startAccessingSecurityScopedResource()
+        guard scoped || source.isFileURL else { throw StorageError.invalidPath }
+        defer { if scoped { source.stopAccessingSecurityScopedResource() } }
         guard SupportedAudioFormat.isSupported(source) else { throw StorageError.unsupportedAudio }
         let id = UUID().uuidString
         let stagingName = "\(id).\(source.pathExtension.lowercased())"
@@ -70,7 +74,9 @@ final class StorageCoordinator: ObservableObject {
                 metadata.artist = metadata.artist ?? video.channel
                 metadata.artworkData = metadata.artworkData ?? artwork
             }
-            if metadata.title == id { metadata.title = source.deletingPathExtension().lastPathComponent }
+            let sourceTitle = source.deletingPathExtension().lastPathComponent
+            if metadata.title == id { metadata.title = sourceTitle }
+            metadata = metadata.sanitizedForLibrary(fallbackTitle: sourceTitle)
             try Task.checkCancellation()
             let result = try commitImport(operation: operation, staging: staging, metadata: metadata, sourceType: sourceType, sourceIdentifier: sourceIdentifier)
             try? FileManager.default.removeItem(at: staging)
@@ -186,15 +192,6 @@ final class StorageCoordinator: ObservableObject {
         }
     }
 
-    func exportData(trackID: String) async throws -> Data {
-        try await Task.detached(priority: .userInitiated) { [self] in
-            guard let track = try tracks.find(id: trackID), track.availability == .available else { throw StorageError.missingFile }
-            let url = try paths.musicURL(relativePath: track.fileRelativePath)
-            guard try audio.sha256(url: url) == track.contentSHA256 else { throw StorageError.exportFailed }
-            return try Data(contentsOf: url, options: .mappedIfSafe)
-        }.value
-    }
-
     func exportAudio(track: StoredTrack, to destination: URL) throws {
         let source = try paths.musicURL(relativePath: track.fileRelativePath)
         guard FileManager.default.fileExists(atPath: source.path) else { throw StorageError.missingFile }
@@ -222,13 +219,6 @@ final class StorageCoordinator: ObservableObject {
         for file in (try? FileManager.default.contentsOfDirectory(at: paths.imports, includingPropertiesForKeys: nil)) ?? [] { try? FileManager.default.removeItem(at: file) }
     }
 
-    private func stableID(prefix: String, value: String) -> String { "\(prefix)-" + SHA256.hash(data: Data(normalized(value).utf8)).map { String(format: "%02x", $0) }.joined() }
-    private func normalized(_ value: String) -> String { value.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: .diacriticInsensitive, locale: .current).lowercased() }
-    private func normalizedOptional(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let result = normalized(value)
-        return result.isEmpty ? nil : result
-    }
     private func safeFilename(_ title: String, fileExtension: String) -> String { let clean = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "\\", with: "-"); return "\(clean).\(fileExtension)" }
 }
 

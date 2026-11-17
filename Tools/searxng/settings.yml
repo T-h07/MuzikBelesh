@@ -1,0 +1,20 @@
+# Minimal private instance: video engines only, JSON output enabled.
+use_default_settings:
+  engines:
+    keep_only:
+      - bing videos
+      - google videos
+      - brave.videos
+
+server:
+  # Overridden by the SEARXNG_SECRET environment variable in docker-compose.yml.
+  secret_key: "replace-with-a-long-random-string"
+  limiter: false      # Private LAN instance; no public exposure.
+  image_proxy: false
+  public_instance: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json            # Required: the app calls /search?format=json

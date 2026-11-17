@@ -113,11 +113,3 @@ private struct StoredQueueRow: View {
     let origin: QueueEntryOrigin
     var body: some View { HStack(spacing: AppSpacing.md) { StoredArtworkView(track: track, size: 48); VStack(alignment: .leading) { Text(track.title).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(origin == .playNext ? "Play Next" : "Queued").font(.caption).foregroundStyle(AppColors.textSecondary) }; Spacer() } }
 }
-
-private struct LegacySleepTimerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var container: AppContainer
-    let options = [0, 5, 10, 15, 30, 45, 60]
-    var body: some View { NavigationStack { List { ForEach(options, id: \.self) { minutes in Button { if minutes == 0 { container.audioPlayer.sleepTimer.cancel() } else { container.audioPlayer.sleepTimer.start(minutes: minutes) }; dismiss() } label: { HStack { Text(minutes == 0 ? "Off" : "\(minutes) minutes").foregroundStyle(AppColors.textPrimary); Spacer(); if (minutes == 0 && !container.audioPlayer.sleepTimer.isActive) || (minutes > 0 && container.audioPlayer.sleepTimer.remaining > TimeInterval(minutes * 60 - 5)) { Image(systemName: "checkmark").foregroundStyle(AppColors.accentPrimary) } } } } }.scrollContentBackground(.hidden).background(AppColors.backgroundPrimary).navigationTitle("Sleep Timer").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } } } }
-}
-

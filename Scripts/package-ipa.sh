@@ -49,7 +49,7 @@ import os, pathlib, plistlib, sys
 app = pathlib.Path(sys.argv[1])
 main = plistlib.loads((app / "Info.plist").read_bytes())
 extension = plistlib.loads((app / "PlugIns/OFFLINEShareExtension.appex/Info.plist").read_bytes())
-assert main["CFBundleShortVersionString"] == extension["CFBundleShortVersionString"] == "1.0.0"
+assert main["CFBundleShortVersionString"] == extension["CFBundleShortVersionString"] == "1.1.0"
 assert main["CFBundleVersion"] == extension["CFBundleVersion"]
 assert extension["CFBundleIdentifier"] == "com.th07.muzikbelesh.share"
 point = extension["NSExtension"]
@@ -84,7 +84,7 @@ manifest = {"version": info["CFBundleShortVersionString"], "build": info["CFBund
             "bundleID": info["CFBundleIdentifier"], "extensionID": "com.th07.muzikbelesh.share",
             "requestedGroupBothExecutables": "group.com.th07.muzikbelesh.inbox",
             "signing": "ad-hoc entitlement metadata only; requires device signing",
-            "candidate": "v1.0.0 release candidate; physical acceptance pending", "sha256": hashlib.sha256((output / "OFFLINE-unsigned.ipa").read_bytes()).hexdigest()}
+            "candidate": "v1.1.0 release candidate; physical acceptance pending", "sha256": hashlib.sha256((output / "OFFLINE-unsigned.ipa").read_bytes()).hexdigest()}
 (output / "OFFLINE-build-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print(json.dumps(manifest, indent=2))
 PY

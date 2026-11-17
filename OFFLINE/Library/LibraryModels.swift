@@ -100,6 +100,15 @@ struct LibrarySnapshot: Equatable, Sendable {
     var albums: [StoredAlbum] = []
     var playlists: [StoredPlaylist] = []
     var memberships: [PlaylistMembership] = []
+    var localOccurrences: [LocalPlaylistOccurrence] = []
+    var localPlaylistRows: [String: [LocalPlaylistRow]] = [:]
+    var migrationSessions: [PlaylistMigrationSession] = []
+    var migrationEntries: [PlaylistMigrationEntry] = []
+    var migrationIssues: [PlaylistMigrationIssue] = []
+    var migrationPresentations: [String: MigrationPlaylistPresentation] = [:]
+    /// Songs added by YouTube link whose audio is not in the library yet, per playlist,
+    /// in submission order (they are playlist entries already).
+    var pendingLinks: [String: [PlaylistLinkDownloadRecord]] = [:]
     var likedIDs: Set<String> = []
     var recentIDs: [String] = []
     var sort: LibrarySort = .newest
@@ -108,6 +117,11 @@ struct LibrarySnapshot: Equatable, Sendable {
     func albumTitle(_ id: String?) -> String { albums.first { $0.id == id }?.title ?? "Unknown Album" }
     func playlistTracks(_ id: String) -> [StoredTrack] {
         let lookup = trackByID
+        if let session = migrationSessions.first(where: { $0.destinationPlaylistID == id }) {
+            let imported = migrationEntries.filter { $0.migrationID == session.id && $0.status == .ready }
+                .sorted { $0.position < $1.position }.compactMap { $0.localTrackID.flatMap { lookup[$0] } }
+            return imported + localOccurrences.filter { $0.playlistID == id }.sorted { $0.position < $1.position }.compactMap { lookup[$0.trackID] }
+        }
         return memberships.filter { $0.playlistID == id }.sorted { $0.position < $1.position }.compactMap { lookup[$0.trackID] }
     }
     var artistGroups: [LibraryGroup] {

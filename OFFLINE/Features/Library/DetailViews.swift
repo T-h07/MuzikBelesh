@@ -9,8 +9,40 @@ struct PlaylistDetailView: View {
     @State private var showingTracks = false
     @State private var confirmingDelete = false
     @State private var editMode: EditMode = .inactive
+    @State private var songOptions: SongOptionsContext?
+    @State private var choosingSource = false
+    @State private var showingLinks = false
+    @State private var showingMigrationDetails = false
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
+    private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
+    @EnvironmentObject private var container: AppContainer
+    @State private var query = ""
+
+    // MARK: Playlist search (a filtered view; never a new queue or order)
+
+    private var searching: Bool { !PlaylistSearch.terms(query).isEmpty }
+    private var visibleImported: [MigrationPlaylistRow] {
+        PlaylistSearch.filter(library.migrationRows(playlistID), query: query) { row -> [String?] in
+            var fields: [String?] = [row.entry.source.title, row.entry.source.primaryArtist]
+            fields += row.entry.source.additionalArtists.map { Optional($0) }
+            if let track = row.playableTrack { fields += [track.title, library.artistName(track.artistID)] }
+            return fields
+        }
+    }
+    private var visibleManual: [LocalPlaylistRow] {
+        PlaylistSearch.filter(library.manualRows(playlistID), query: query) { [$0.track.title, library.artistName($0.track.artistID)] }
+    }
+    private var visibleSongs: [StoredTrack] {
+        PlaylistSearch.filter(songs, query: query) { [$0.title, library.artistName($0.artistID)] }
+    }
+    private var visibleLinks: [PlaylistLinkDownloadRecord] {
+        PlaylistSearch.filter(library.pendingLinks(playlistID), query: query) { [container.downloads.job(for: $0.videoID)?.title] }
+    }
+    private var visibleCount: Int {
+        (migrationManaged ? visibleImported.count + visibleManual.count : visibleSongs.count) + visibleLinks.count
+    }
+
     var body: some View {
         List {
             if let playlist {
@@ -19,14 +51,62 @@ struct PlaylistDetailView: View {
                         ManagedArtworkView(path: playlist.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first, fallbackID: playlist.id, size: 220).frame(maxWidth: .infinity)
                         Text(playlist.name).font(.title.bold()).foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("playlist-detail-name")
                         if let description = playlist.description, !description.isEmpty { Text(description).foregroundStyle(AppColors.textSecondary) }
-                        Text("\(songs.count) songs • \(formatDuration(songs))").font(.caption).foregroundStyle(AppColors.textSecondary)
-                        CollectionPlaybackButtons(tracks: songs, kind: "playlist", sourceID: playlist.id)
-                        Button { showingTracks = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
+                        if migrationManaged {
+                            MigrationPlaylistPlaybackHeader(playlistID: playlistID)
+                            Button { choosingSource = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
+                        } else {
+                            let total = library.playlistEntryCount(playlistID)
+                            Text((total == 1 ? "1 song" : "\(total) songs") + " • " + formatDuration(songs)).font(.caption).foregroundStyle(AppColors.textSecondary)
+                                .accessibilityIdentifier("playlist-song-count")
+                            CollectionPlaybackButtons(tracks: songs, kind: "playlist", sourceID: playlist.id)
+                            Button { choosingSource = true } label: { Label("Add Songs", systemImage: "plus.circle") }.accessibilityIdentifier("playlist-add-songs")
+                        }
                     }.padding(.vertical, AppSpacing.md)
                 }.listRowBackground(AppColors.backgroundPrimary)
                 Section {
-                    if songs.isEmpty { Text("This playlist is empty. Add songs from your Library.").foregroundStyle(AppColors.textSecondary) }
-                    ForEach(songs) { track in
+                    PlaylistSearchField(text: $query)
+                }.listRowBackground(AppColors.backgroundPrimary)
+                if searching && visibleCount == 0 {
+                    Section {
+                        Text("No songs in this playlist match “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”.")
+                            .foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("playlist-search-empty")
+                    }.listRowBackground(AppColors.backgroundPrimary)
+                }
+                // Search only filters what is shown. Every row still plays through the full
+                // playlist (exact occurrence, then the rest of the playlist), and order and
+                // membership never change.
+                Section {
+                    if migrationManaged {
+                        ForEach(visibleImported) { row in
+                            MigrationPlaylistOccurrenceRow(row: row, playlistID: playlistID)
+                                .listRowBackground(AppColors.backgroundPrimary)
+                        }
+                        ForEach(visibleManual) { row in
+                            HStack {
+                                Button { Task { await library.playMigration(playlistID: playlistID, occurrenceID: row.occurrence.playbackID) } } label: {
+                                    HStack {
+                                        StoredArtworkView(track: row.track, size: 44)
+                                        VStack(alignment: .leading) {
+                                            Text(row.track.title)
+                                            Text("Manually added • " + library.artistName(row.track.artistID)).font(.caption)
+                                        }
+                                        Spacer()
+                                    }.contentShape(Rectangle())
+                                }.buttonStyle(.plain).disabled(!row.available).accessibilityLabel("Play " + row.track.title)
+                                    .accessibilityIdentifier("manual-occurrence-" + row.id)
+                                Button { songOptions = .manual(row: row, playlistID: playlistID) } label: {
+                                    Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 44, height: 44)
+                                }.buttonStyle(.borderless).accessibilityLabel("Options for \(row.track.title)")
+                                    .accessibilityIdentifier("occurrence-options-" + row.id)
+                            }.listRowBackground(AppColors.backgroundPrimary)
+                                .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeManualRow(row, playlistID: playlistID) } }
+                        }
+                    } else {
+                    // Resolved once per render: every row plays within the full playlist, and
+                    // rebuilding it per row made scrolling an n-song playlist O(n) per row.
+                    let contextTrackIDs: [String] = songs.map(\.id)
+                    if contextTrackIDs.isEmpty && library.pendingLinks(playlistID).isEmpty { Text("This playlist is empty. Tap Add Songs to add music.").foregroundStyle(AppColors.textSecondary) }
+                    ForEach(visibleSongs) { track in
                         Group {
                             if editMode == .active {
                                 HStack {
@@ -35,23 +115,40 @@ struct PlaylistDetailView: View {
                                     Button { move(track.id, delta: 1) } label: { Image(systemName: "arrow.down").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel("Move down \(track.title)").accessibilityIdentifier("move-down-" + track.id)
                                 }
                             } else {
-                                StoredTrackRow(track: track, contextTrackIDs: songs.map(\.id), contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
-                                    .swipeActions { Button("Remove from Playlist", role: .destructive) { library.perform { try library.removeTrack(track.id, playlistID: playlistID) } } }
+                                StoredTrackRow(track: track, contextTrackIDs: contextTrackIDs, contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
+                                    .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeFromOrdinaryPlaylist(track.id, playlistID: playlistID) } }
                             }
                         }.listRowBackground(AppColors.backgroundPrimary)
-                    }.onMove { source, destination in
-                        var order = songs.map(\.id); order.move(fromOffsets: source, toOffset: destination)
-                        library.perform { try library.reorder(order, playlistID: playlistID) }
+                    }.onMove(perform: searching ? nil : reorderSongs) // Drag indices refer to the full list.
+                    }
+                    // Songs added by YouTube link that are still downloading (or failed):
+                    // already playlist entries, shown in submitted order after the songs.
+                    ForEach(visibleLinks) { link in
+                        PlaylistLinkDownloadRow(link: link).listRowBackground(AppColors.backgroundPrimary)
                     }
                 }
             } else { Text("This playlist was removed.").foregroundStyle(AppColors.textSecondary) }
         }
         .environment(\.editMode, $editMode)
+        .sheet(item: $songOptions) { SongOptionsView(context: $0) }
+        .safeAreaInset(edge: .bottom) {
+            if let undo = library.pendingUndo, undo.playlistID == playlistID {
+                PlaylistRemovalUndoBanner(undo: undo)
+            }
+        }
         .scrollContentBackground(.hidden).screenBackground().navigationTitle("Playlist").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }.accessibilityIdentifier("playlist-reorder")
+                if !migrationManaged {
+                    Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }
+                        .disabled(searching && editMode != .active).accessibilityIdentifier("playlist-reorder")
+                }
                 Menu {
+                    if migrationManaged {
+                        // Import diagnostics are an internal workflow, available on request.
+                        Button { showingMigrationDetails = true } label: { Label("Migration Details", systemImage: "list.bullet.clipboard") }
+                            .accessibilityIdentifier("playlist-migration-details")
+                    }
                     Button("Edit Playlist") { showingEditor = true }
                     Button("Delete Playlist", role: .destructive) { confirmingDelete = true }
                 } label: { Label("Playlist Actions", systemImage: "ellipsis.circle") }
@@ -60,10 +157,21 @@ struct PlaylistDetailView: View {
         }
         .sheet(isPresented: $showingEditor) { PlaylistEditorView(playlistID: playlistID) }
         .sheet(isPresented: $showingTracks) { AddTracksToPlaylistView(playlistID: playlistID) }
+        .sheet(isPresented: $showingLinks) { AddYouTubeLinksView(playlistID: playlistID) }
+        .sheet(isPresented: $showingMigrationDetails) { MigrationDetailsSheet(playlistID: playlistID) }
+        .confirmationDialog("Add Songs", isPresented: $choosingSource, titleVisibility: .visible) {
+            Button("From Your Library") { showingTracks = true }.accessibilityIdentifier("playlist-add-from-library")
+            Button("From YouTube Links") { showingLinks = true }.accessibilityIdentifier("playlist-add-from-youtube")
+            Button("Cancel", role: .cancel) { }
+        } message: { Text("Add songs you already have, or paste one or more YouTube links to download them.") }
         .confirmationDialog("Delete Playlist?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Playlist", role: .destructive) { Task { do { try await library.deletePlaylist(id: playlistID, confirmed: true); dismiss() } catch { library.report(error) } } }.accessibilityIdentifier("confirm-delete-playlist")
             Button("Cancel", role: .cancel) { }
         } message: { Text("This removes the playlist and its organization. Your music files, liked songs and other playlists are preserved.") }
+    }
+    private func reorderSongs(_ source: IndexSet, _ destination: Int) {
+        var order = songs.map(\.id); order.move(fromOffsets: source, toOffset: destination)
+        library.perform { try library.reorder(order, playlistID: playlistID) }
     }
     private func move(_ id: String, delta: Int) {
         var order = songs.map(\.id)
@@ -128,7 +236,7 @@ struct AddTracksToPlaylistView: View {
     @State private var selected: Set<String> = []
     @State private var error: String?
     private var existing: Set<String> {
-        if let playlistID { return Set(library.playlistTracks(playlistID).map(\.id)) }
+        if let playlistID { return library.isMigrationPlaylist(playlistID) ? [] : Set(library.playlistTracks(playlistID).map(\.id)) }
         if let albumID { return Set(library.albumGroups.first { $0.id == albumID }?.trackIDs ?? []) }
         return []
     }
@@ -136,6 +244,9 @@ struct AddTracksToPlaylistView: View {
         NavigationStack {
             List {
                 TextField("Search title, artist or album", text: $query).accessibilityIdentifier("playlist-track-search")
+                if let playlistID, library.isMigrationPlaylist(playlistID) {
+                    Text("Add independent local occurrences after the imported entries. Adding a song again creates another occurrence; it does not resolve a Spotify placeholder.").font(.caption)
+                }
                 if albumID != nil || onSelection != nil { Text("Songs can have one primary album. Adding a song moves it from its previous album; playlists and audio files stay intact.").font(.caption).foregroundStyle(AppColors.textSecondary) }
                 if let error { Text(error).foregroundStyle(AppColors.error) }
                 ForEach(query.isEmpty ? library.snapshot.tracks : results) { track in
@@ -299,4 +410,33 @@ struct ArtworkDraftPicker: View {
 func formatDuration(_ tracks: [StoredTrack]) -> String {
     let seconds = tracks.compactMap(\.durationMs).reduce(Int64(0), +) / 1000
     return "\(seconds / 60) min \(seconds % 60) sec"
+}
+
+/// Search inside the open playlist only (title and artist). Purely local and immediate;
+/// it never reaches global search, YouTube or any remote service.
+struct PlaylistSearchField: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+    var body: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "magnifyingglass").foregroundStyle(AppColors.textSecondary).accessibilityHidden(true)
+            TextField("Search in playlist", text: $text)
+                .focused($focused)
+                .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
+                .onSubmit { focused = false }
+                .foregroundStyle(AppColors.textPrimary)
+                .accessibilityLabel("Search in this playlist")
+                .accessibilityIdentifier("playlist-search-field")
+            if !text.isEmpty {
+                Button { text = ""; focused = false } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.textSecondary)
+                }
+                .buttonStyle(.borderless).frame(minWidth: 32, minHeight: 32)
+                .accessibilityLabel("Clear search").accessibilityIdentifier("playlist-search-clear")
+            }
+        }
+        .padding(.horizontal, AppSpacing.md).frame(minHeight: 44)
+        .background(AppColors.backgroundSecondary, in: RoundedRectangle(cornerRadius: 10))
+        .tint(AppColors.accentPrimary)
+    }
 }

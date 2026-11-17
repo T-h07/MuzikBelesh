@@ -24,3 +24,7 @@ xcuserdata/
 *.privatekey
 Secrets/
 
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
