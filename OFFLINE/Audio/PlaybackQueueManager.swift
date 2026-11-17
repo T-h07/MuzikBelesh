@@ -140,6 +140,12 @@ import SwiftUI
         normalizeAndPersist()
     }
     func removeUnavailableEntries() { cancelCandidate(); entries.removeAll { !isAvailable($0.trackID) }; normalizeAndPersist() }
+    /// True while `trackID` is being started from the manual queue (Play Next / Add to Queue),
+    /// between `nextID` and `didStart`. Listening analytics attributes such plays to the queue.
+    func isStartingQueuedEntry(_ trackID: String) -> Bool {
+        guard let pendingQueueEntryID else { return false }
+        return entries.first { $0.id == pendingQueueEntryID }?.trackID == trackID
+    }
     func cancelCandidate() { pendingNavigator = nil; pendingQueueEntryID = nil; pendingOccurrenceID = nil; pendingResumeOccurrenceID = nil }
     func previousID() -> String? {
         let identity = migrationContext?.resumeOccurrenceID ?? navigator.previous()
