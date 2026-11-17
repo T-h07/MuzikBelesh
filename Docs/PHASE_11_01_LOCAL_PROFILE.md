@@ -1,6 +1,6 @@
 # Phase 11.1 — Local Account System, Profile Onboarding & Profile Management
 
-**Status:** implemented on `feature/phase-11-01-profile`; **12/12 developer-reported physical-device checks PASS**. Native CI verification remains pending before final merge assessment.
+**Status:** **12/12 developer-reported physical-device checks PASS**; owner explicitly approved merging into `develop` without waiting for the complete native CI run. This approval does not imply the pending suite passed.
 Not released: the public release remains v1.1.0 until all Phase 11 work is accepted.
 
 Muzik Belesh now asks for a local profile (a username and an optional photo) on first
@@ -302,4 +302,4 @@ The developer confirmed the Phase 11.1 IPA was installed on a physical iPhone an
 - Build workflow for the tested Phase 11.1 source: [44138530250](https://github.com/T-h07/MuzikBelesh/actions/runs/44138530250) — **SUCCESS** (source `b0f381c3d0ff16c9729e95a281fd247b5393ba29`).
 - Latest full CI verification: [44137722813](https://github.com/T-h07/MuzikBelesh/actions/runs/44137722813) — **PENDING at the time of recording**. A successful IPA build does not establish that native XCTest passed.
 - Feature branch is ahead of `develop` with no divergence as checked before recording these results.
-- **No merge authorized or performed by recording the results.** Merge into `develop` after checking native CI and identifying any blocking regressions. Do not promote Phase 11.1 into `release` or `main` until the larger v1.2.0 release is approved.
+- **Owner-approved merge exception:** On 2026-11-17, after 12/12 device checks passed, the developer explicitly requested merging Phase 11.1 into `develop` without waiting hours for the still-running native CI suite. This waives waiting for the CI result; it does **not** convert unexecuted or incomplete tests to PASS. Any failures must be triaged separately. Do not promote Phase 11.1 into `release` or `main` until v1.2.0 release authorization.
