@@ -1,7 +1,7 @@
 # Phase 11.3: Custom themes, accent colours and the reactive appearance system
 
 Branch: `feature/phase-11-03-themes`, from `develop` at `f1d4e78` (Phase 11.2 merged).
-Status: implemented; awaiting native CI and physical acceptance (P01–P20). Not merged, not released.
+Status: implemented; **10/10 developer-reported physical-device checks PASS** on 2026-11-17. Native CI not green (canceled regression shards); not merged, not released.
 
 ## 1. Architecture
 
@@ -138,3 +138,33 @@ tested, and the drag itself is physical check P08–P10.
 | P18 | VoiceOver announces preset names and "Selected" |
 | P19 | Reduce Motion: theme changes apply without animation |
 | P20 | Large Dynamic Type: swatch grid and labels remain usable |
+
+## 9. Developer-reported physical acceptance — 2026-11-17
+
+Developer confirmed Phase 11.3 installed on a physical iPhone and reported all ten tests in the **conversation's user-facing acceptance checklist** as PASS.
+
+| User-facing ID | Reported check | Result |
+| --- | --- | --- |
+| P01 | All eight preset colors work | **PASS** |
+| P02 | Custom color picker works | **PASS** |
+| P03 | Colors update immediately throughout the app | **PASS** |
+| P04 | Now Playing controls and sliders update | **PASS** |
+| P05 | Analytics charts and highlights update | **PASS** |
+| P06 | Selected theme survives force-closing and reopening | **PASS** |
+| P07 | Reset restores original lime green | **PASS** |
+| P08 | Music continues playing while changing themes | **PASS** |
+| P09 | Profile, playlists, downloads and analytics remain intact | **PASS** |
+| P10 | No visual glitches, clipping or unreadable text | **PASS** |
+
+**Outcome: 10 PASS, 0 FAIL, 0 skipped (developer-reported, not independently observed).**
+
+**Mapping caution:** These are *not* the same ID-to-condition mappings as the repository's more detailed P01–P20 checklist in §8. The user results do not independently certify unreported checks, including VoiceOver, Reduce Motion, Dynamic Type, or every specific persistence/contrast edge case.
+
+### Integration-readiness evidence
+
+- **Physical acceptance:** PASS (10/10).
+- **Branch:** `feature/phase-11-03-themes`, at source `7a09328d2a843c3d8b874d07d28fd7e0dfddf17b`, initially ahead of `develop` by one commit, behind by zero.
+- **Unsigned IPA builds:** [run #104](https://github.com/T-h07/MuzikBelesh/actions/runs/44162507202) and [run #105](https://github.com/T-h07/MuzikBelesh/actions/runs/44177503542) SUCCESS, both sourced from the feature SHA above.
+- **CI:** [run #291](https://github.com/T-h07/MuzikBelesh/actions/runs/44162445256) CANCELLED. Static checks passed. Four regression shards were canceled and did **not** establish pass/fail. The build-and-test gate failed because it required `SHARDS=success` but received `SHARDS=cancelled` (not a demonstrated compiler or test assertion failure).
+- **Assessment:** Device-accepted and structurally non-divergent; appropriate for an explicitly owner-approved integration into `develop` if the owner accepts incomplete native regression verification. If full native CI is mandatory, do not mark that gate passed.
+- **No merge authorized by this documentation update.** Keep `release`, `main` and public tags unchanged pending separate approval.
