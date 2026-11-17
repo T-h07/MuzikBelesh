@@ -65,3 +65,13 @@ unchanged four-tab interface. App lifecycle forwarding lives in that always-moun
 The profile owns no library data, has no foreign keys and makes no network requests;
 avatars live in `Application Support/MuzikBelesh/Profile`. See
 [Phase 11.1](PHASE_11_01_LOCAL_PROFILE.md).
+
+## Phase 11.2 listening analytics
+
+`AudioPlayerService` owns a `ListeningSessionTracker` that observes playback (periodic time
+observer, transport changes, seeks, pauses, interruptions, end of item) and never controls it.
+The tracker credits only progressing audio and writes through `ListeningAnalyticsRepository`
+with guarded, synchronous checkpoints; a failure is recorded and never reaches playback.
+`AppContainer` creates a `ListeningStatsService` that runs aggregate SQL off the main thread
+for the Profile preview and the "Your Listening" dashboard. Everything stays on the device.
+See [Phase 11.2](PHASE_11_02_LISTENING_ANALYTICS.md).

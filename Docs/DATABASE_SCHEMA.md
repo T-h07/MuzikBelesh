@@ -36,3 +36,16 @@ Phase 10.8 build) adds `local_user_profile`: `slot INTEGER PRIMARY KEY CHECK(slo
 `id TEXT UNIQUE`, `username`, nullable `avatarRelativePath` (a bare file name, no `/`),
 `createdAt`, `updatedAt`. The `slot` key allows exactly one row. No table references it
 and it references none. See [Phase 11.1](PHASE_11_01_LOCAL_PROFILE.md).
+
+## Phase 11.2 listening analytics
+
+`v025_listening_analytics` (appended after v024) adds three tables. `listening_sessions` holds
+one row per playback that actually produced audio: `trackID` (`REFERENCES tracks ON DELETE SET
+NULL`), `startedAt`, `startDay` (local `yyyy-MM-dd`), `lastCheckpointAt`, `endedAt`,
+`listenedMs`, `durationMs`, `contextKind`, `contextSourceID`, `qualified`, `completed`,
+`state` (`active`, `finished`, `recovered`) and `endReason`. `listening_session_days`
+(`sessionID` cascade, `day`, `listenedMs`, primary key `(sessionID, day)`) splits each
+session's time across local calendar days. `listening_analytics_state` is a single row with
+`trackingStartedAt`. Indexes cover `startDay`, `trackID`, `(contextKind, contextSourceID)`,
+active sessions and `(day, sessionID, listenedMs)`. `playback_history` is unchanged and is
+not used for listening time. See [Phase 11.2](PHASE_11_02_LISTENING_ANALYTICS.md).

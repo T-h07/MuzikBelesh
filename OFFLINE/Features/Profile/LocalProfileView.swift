@@ -19,9 +19,11 @@ struct LocalProfileView: View {
                             row("Change Profile Picture", icon: "photo.on.rectangle", identifier: "profile-change-photo") { editing = .photo }
                         }
                     } else { unavailable }
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                        Text("LISTENING ACTIVITY").font(.caption.weight(.semibold)).foregroundStyle(AppColors.textSecondary).accessibilityAddTraits(.isHeader)
+                        ListeningPreviewCard()
+                    }
                     section("Coming Later") {
-                        planned("Listening Activity", icon: "chart.bar", detail: "Listening statistics")
-                        Divider().overlay(AppColors.divider)
                         planned("Appearance", icon: "paintpalette", detail: "Custom themes")
                         Divider().overlay(AppColors.divider)
                         planned("Music Sharing", icon: "square.and.arrow.up.on.square", detail: "Library export and import")

@@ -63,7 +63,7 @@ enum ProfileTestImages {
 /// Every user table except the profile itself, as sorted row descriptions.
 func librarySnapshot(_ db: DatabaseQueue) throws -> [String: [String]] {
     try db.read { db in
-        let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('grdb_migrations', 'local_user_profile') ORDER BY name")
+        let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('grdb_migrations', 'local_user_profile', 'listening_sessions', 'listening_session_days', 'listening_analytics_state') ORDER BY name")
         var result: [String: [String]] = [:]
         for table in tables { result[table] = try Row.fetchAll(db, sql: "SELECT * FROM \"\(table)\"").map(\.description).sorted() }
         return result
@@ -454,7 +454,8 @@ final class LocalProfileUpgradeTests: XCTestCase {
         try fixture.repository.setLiked(true, trackID: fixture.ids[2])
         try fixture.storage.database.dbQueue.write { db in
             try db.execute(sql: "DROP TABLE local_user_profile")
-            try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = ?", arguments: [LocalProfileSchema.version])
+            try db.execute(sql: "DROP TABLE listening_session_days; DROP TABLE listening_sessions; DROP TABLE listening_analytics_state")
+            try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN (?, ?)", arguments: [LocalProfileSchema.version, ListeningAnalyticsSchema.version])
         }
         let last = try fixture.storage.database.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier").last }
         XCTAssertEqual(last, PlaylistLinkDownloadSchema.version, "v1.1.0 ends at v022")

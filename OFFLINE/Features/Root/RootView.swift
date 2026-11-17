@@ -13,7 +13,8 @@ struct RootView: View {
             .environmentObject(coordinator)
             .environmentObject(container.audioPlayer)
             .environmentObject(container.library)
-            .environmentObject(container.profile))
+            .environmentObject(container.profile)
+            .environmentObject(container.listening))
             .ignoresSafeArea().preferredColorScheme(.dark)
     }
 }

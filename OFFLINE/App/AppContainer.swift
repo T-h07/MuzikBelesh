@@ -35,6 +35,8 @@ final class AppContainer: ObservableObject {
     let audioPlayer: AudioPlayerService
     /// Phase 11.1 device-local profile. Owns no library data and no network access.
     let profile: LocalProfileService
+    /// Phase 11.2 device-local listening statistics. Read-only; never uploads anything.
+    let listening: ListeningStatsService
     init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil, profileStore: (any LocalProfileStoring)? = nil) {
         self.resources = resourceMonitor ?? ResourceMonitor()
         self.configuration = configuration
@@ -60,6 +62,8 @@ final class AppContainer: ObservableObject {
         self.profile = LocalProfileService(store: profileStore ?? self.storage.map { LocalProfileRepository(db: $0.database.dbQueue, paths: $0.paths) })
         self.profile.load()
         self.audioPlayer = AudioPlayerService(storage: self.storage)
+        self.listening = ListeningStatsService(database: self.storage?.database.dbQueue)
+        self.listening.beforeLoad = { [weak player = self.audioPlayer] in player?.listening.checkpoint() }
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
         var matchingService: PlaylistMigrationMatchingService?

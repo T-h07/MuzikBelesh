@@ -19,6 +19,7 @@ import Foundation
                     _ = try LocalProfileRepository(db: storage.database.dbQueue, paths: storage.paths).create(username: "UI Listener", avatar: nil)
                 }
                 if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--migration-fixtures") { try seedMigrations(storage) }
+                if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--listening-fixture") { try ListeningFixtureSeeder.seed(storage: storage) }
                 if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--review-queue-fixture") { try seedReviewQueue(storage) }
                 if process.arguments.contains("--youtube-fixtures") {
                     let fixtures = YouTubeUITestFixtures()
