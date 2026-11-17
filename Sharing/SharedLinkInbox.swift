@@ -66,12 +66,19 @@ struct SharedLinkInbox {
         NSFileCoordinator().coordinate(writingItemAt: file, options: [], error: &coordinationError) { url in
             outcome = Result {
                 var queue = Queue()
+                var restored = false
                 do {
                     let props = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
                     guard props.isRegularFile == true, props.isSymbolicLink != true,
-                          let size = props.fileSize, size <= 8192 else { throw Failure.invalid }
+                          let size = props.fileSize, size <= Self.canceledVersion2Bytes else { throw Failure.invalid }
                     let data = try Data(contentsOf: url)
-                    queue = try JSONDecoder().decode(Queue.self, from: data)
+                    if let downgraded = try Self.restoreCanceledVersion2(data, directory: directory) {
+                        queue = downgraded
+                        restored = true
+                    } else {
+                        guard data.count <= 8192 else { throw Failure.invalid }
+                        queue = try JSONDecoder().decode(Queue.self, from: data)
+                    }
                     guard queue.version == 1, queue.pending.count <= Self.capacity,
                           Set(queue.pending.map(\.id)).count == queue.pending.count,
                           queue.pending.allSatisfy({ YouTubeURLValidator.isValidID($0.videoID) }) else { throw Failure.invalid }
@@ -80,7 +87,7 @@ struct SharedLinkInbox {
                 }
                 let previous = queue.pending
                 let result = try change(&queue.pending)
-                if queue.pending != previous {
+                if queue.pending != previous || restored {
                     try JSONEncoder().encode(queue).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
                 }
                 return result
@@ -89,5 +96,42 @@ struct SharedLinkInbox {
         if let coordinationError { throw coordinationError }
         guard let outcome else { throw Failure.unavailable }
         return try outcome.get()
+    }
+
+    // MARK: Phase 10.8 (canceled) downgrade compatibility
+
+    /// Phase 10.8 test builds (canceled; never merged) rewrote this file as a version 2
+    /// queue of `{id, kind, value, created}` records, which this version would otherwise
+    /// reject forever, blocking YouTube sharing. Such a queue is read once: YouTube shares
+    /// keep their IDs, timestamps and order; Spotify playlist shares belonged only to the
+    /// canceled feature and are dropped. The original bytes are first copied aside, then
+    /// the caller rewrites the file as version 1. Anything else (an unknown version, kind
+    /// or invalid record) is still rejected and left untouched.
+    private struct CanceledVersion2: Decodable {
+        struct Record: Decodable { let id: UUID; let kind: String; let value: String; let created: Date }
+        let version: Int
+        let pending: [Record]
+    }
+    static let canceledVersion2Bytes = 16 * 1024
+    static let canceledVersion2BackupPrefix = "PendingSharedLinks-v2-backup-"
+
+    private static func restoreCanceledVersion2(_ data: Data, directory: URL) throws -> Queue? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (object["version"] as? Int) == 2 else { return nil }
+        let legacy = try JSONDecoder().decode(CanceledVersion2.self, from: data)
+        guard legacy.pending.count <= capacity, Set(legacy.pending.map(\.id)).count == legacy.pending.count,
+              legacy.pending.allSatisfy({ record in
+                  switch record.kind {
+                  case "youtubeVideo": return YouTubeURLValidator.isValidID(record.value)
+                  case "spotifyPlaylist": return true
+                  default: return false
+                  }
+              }) else { throw Failure.invalid }
+        let backup = directory.appendingPathComponent(canceledVersion2BackupPrefix + UUID().uuidString + ".json")
+        try data.write(to: backup, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        var queue = Queue()
+        queue.pending = legacy.pending.filter { $0.kind == "youtubeVideo" }
+            .map { PendingShare(id: $0.id, videoID: $0.value, created: $0.created) }
+        return queue
     }
 }

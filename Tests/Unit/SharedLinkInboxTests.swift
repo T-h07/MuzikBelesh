@@ -62,6 +62,56 @@ final class SharedLinkInboxTests: XCTestCase {
         }
     }
 
+    /// A phone that ran a canceled Phase 10.8 test IPA holds a version 2 queue. YouTube
+    /// shares survive with their identity and order; Spotify shares are dropped; the original
+    /// is copied aside; the file returns to version 1 and sharing keeps working.
+    func testCanceledPhase108VersionTwoQueueIsRestoredOnce() throws {
+        let file = root.appendingPathComponent("PendingYouTubeLinks-v1.json")
+        let a = UUID(), spotify = UUID(), b = UUID()
+        // Exactly the format the Phase 10.8 build encoded.
+        let v2 = """
+            {"version":2,"pending":[{"id":"\(a.uuidString)","kind":"youtubeVideo","value":"dQw4w9WgXcQ","created":100},\
+            {"id":"\(spotify.uuidString)","kind":"spotifyPlaylist","value":"37i9dQZF1DXcBWIGoYBM5M","created":150},\
+            {"id":"\(b.uuidString)","kind":"youtubeVideo","value":"9bZkp7q19f0","created":200.5}]}
+            """
+        try Data(v2.utf8).write(to: file)
+        let first = try XCTUnwrap(inbox.first())
+        XCTAssertEqual(first, PendingShare(id: a, videoID: "dQw4w9WgXcQ", created: Date(timeIntervalSinceReferenceDate: 100)))
+        let stored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        XCTAssertEqual(stored["version"] as? Int, 1)
+        let backups = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.hasPrefix(SharedLinkInbox.canceledVersion2BackupPrefix) }
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(backups[0])), Data(v2.utf8), "Original bytes are kept")
+
+        try inbox.acknowledge(a)
+        XCTAssertEqual(try inbox.first(), PendingShare(id: b, videoID: "9bZkp7q19f0", created: Date(timeIntervalSinceReferenceDate: 200.5)))
+        try inbox.acknowledge(b)
+        XCTAssertNil(try inbox.first(), "The Spotify share is not delivered")
+        try inbox.save("dQw4w9WgXcQ")
+        XCTAssertEqual(try inbox.first()?.videoID, "dQw4w9WgXcQ")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.hasPrefix(SharedLinkInbox.canceledVersion2BackupPrefix) }.count, 1,
+                       "Restored once")
+
+        // An emptied 10.8 queue (every share acknowledged) is also accepted.
+        try Data(#"{"version":2,"pending":[]}"#.utf8).write(to: file, options: .atomic)
+        XCTAssertNil(try inbox.first())
+        try inbox.save("9bZkp7q19f0")
+        XCTAssertEqual(try inbox.first()?.videoID, "9bZkp7q19f0")
+    }
+
+    func testUnknownVersionTwoContentStaysRejectedAndUntouched() throws {
+        let file = root.appendingPathComponent("PendingYouTubeLinks-v1.json")
+        for bytes in [#"{"version":2,"pending":[{"id":"\#(UUID().uuidString)","kind":"appleMusic","value":"x","created":1}]}"#,
+                      #"{"version":2,"pending":[{"id":"\#(UUID().uuidString)","kind":"youtubeVideo","value":"../outside","created":1}]}"#,
+                      #"{"version":3,"pending":[]}"#].map({ Data($0.utf8) }) {
+            try bytes.write(to: file, options: .atomic)
+            XCTAssertThrowsError(try inbox.first())
+            XCTAssertThrowsError(try inbox.save("9bZkp7q19f0"))
+            XCTAssertEqual(try Data(contentsOf: file), bytes)
+        }
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasPrefix(SharedLinkInbox.canceledVersion2BackupPrefix) })
+    }
+
     func testUnavailableOrUnwritableStorageAndInvalidID() throws {
         XCTAssertThrowsError(try SharedLinkInbox(directory: nil).save("9bZkp7q19f0"))
         let path = root.appendingPathComponent("file")
