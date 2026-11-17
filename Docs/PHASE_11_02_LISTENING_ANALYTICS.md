@@ -1,7 +1,7 @@
 # Phase 11.2: Listening statistics, playback analytics and the activity dashboard
 
 Branch: `feature/phase-11-02-analytics` (from `develop` after Phase 11.1).
-Status: implemented, awaiting physical-device acceptance (P01–P18). Not merged and not released.
+Status: implemented; developer-reported physical acceptance **18/18 PASS** on 2026-11-17. Native CI incomplete (some regression jobs canceled, one running); not merged and not released.
 
 ## 1. Audit of the existing playback history
 
@@ -201,3 +201,40 @@ tables, so a Phase 11.4 export can include or exclude them explicitly.
 | P16 | Deleting a ranked song keeps the total and removes it from rankings |
 | P17 | Large text and VoiceOver read the hero, chart and rankings |
 | P18 | Playback never stutters or stops because of the dashboard or analytics |
+
+## 12. Physical iPhone acceptance report — 2026-11-17
+
+The developer confirmed installing the Phase 11.2 IPA and reported all **18/18** checks in the *conversation's user-facing acceptance checklist* as **PASS**. No failures or skips were reported.
+
+| ID | User-facing test | Developer result |
+| --- | --- | --- |
+| P01 | Upgrade safety | **PASS** |
+| P02 | Analytics navigation | **PASS** |
+| P03 | Listening duration | **PASS** |
+| P04 | Paused time | **PASS** |
+| P05 | Seeking | **PASS** |
+| P06 | Background listening | **PASS** |
+| P07 | AirPods/Bluetooth | **PASS** |
+| P08 | Top songs | **PASS** |
+| P09 | Artist and album rankings | **PASS** |
+| P10 | Playlist attribution | **PASS** |
+| P11 | Spotify migration playlists | **PASS** |
+| P12 | Date filters | **PASS** |
+| P13 | Interactive chart | **PASS** |
+| P14 | Persistence | **PASS** |
+| P15 | Shuffle and repeat | **PASS** |
+| P16 | Empty and historical states | **PASS** |
+| P17 | Visual design | **PASS** |
+| P18 | Regression | **PASS** |
+
+**Test interpretation:** These results apply specifically to the user-facing checklist identified above. The detailed repository checklist in §11 has different ID-to-scenario mappings; no unreported edge case (such as VoiceOver, midnight-crossing, song deletion, or phone calls) should be marked independently tested solely because its number matches.
+
+### Merge-readiness assessment
+
+- **Physical device acceptance:** PASS — 18 reported PASS, 0 reported FAIL.
+- **Unsigned IPA build:** [44154149357](https://github.com/T-h07/MuzikBelesh/actions/runs/44154149357) SUCCESS, source `70db001a3ba6fbfa816d86679f51fbd972ac7ddc`.
+- **Static CI checks:** SUCCESS on [44153899214](https://github.com/T-h07/MuzikBelesh/actions/runs/44153899214).
+- **Full CI:** NOT GREEN as of recording; the unit/accessibility job was in progress, and regression compact, library, and other-UI jobs were canceled. Canceled tests are **not** treated as passing or as confirmed regressions.
+- **Branch compatibility:** Phase 11.2 branch ahead of `develop` by two commits, behind by zero before the acceptance documentation commit.
+- **Assessment:** Functionally accepted by the physical-device tester and eligible for owner-approved integration into `develop`. If full native CI is a mandatory merge gate, final automated clearance remains outstanding. Explicitly document any decision to merge without it.
+- **No merge performed during acceptance recording.** Do not promote to `release` or `main` or publish v1.2.0.
