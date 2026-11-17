@@ -2,8 +2,8 @@
 
 `AppContainer` owns one StorageCoordinator, AudioPlayerService and MusicLibraryService.
 GRDB/SQLite is authoritative. Existing StoredTrack/Artist/Album/Playlist/LikedTrack
-models and repository tables are reused. MockMusicStore is retained for fixtures,
-not production Library, Home, albums, artists, playlists or local Search.
+models and repository tables are reused. The Phase 1 MockMusicStore fixtures were removed
+in the Phase 10.9 final hardening; every screen reads the GRDB library.
 
 LibraryRepository implements transactional validation, membership, likes, metadata
 relationships and parameterized queries. MusicLibraryService projects one GRDB
