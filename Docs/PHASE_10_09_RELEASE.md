@@ -313,3 +313,101 @@ Verified independently after download (ZIP integrity, both bundles, Info.plists,
 
 Nothing has been merged into `develop`, `main` or `release`; no `v1.1.0` tag or GitHub
 Release exists.
+
+## 16. Final hardening pass and replacement candidate (build 99)
+
+The final security/performance/cleanup pass is documented in
+`Docs/PHASE_10_09_SECURITY_PERFORMANCE.md`. It **supersedes §12, §13 and §15**: build 98
+(`3c18885`) is replaced by build 99 because production source changed.
+
+### Source
+
+| Commit | Change |
+|---|---|
+| `e0633e9` | CI: `prebuilt_run_id` passed through a validated env var (script-injection fix) |
+| `77e4cd8` | Import: bound untrusted audio metadata (an artist/album tag over 300 characters failed the whole import); balanced security-scoped access; `ReleaseHardeningTests` |
+| `a66de73` | Remove dead code and the DEBUG-only Phase 1 mock layer (212 lines, 13 files) |
+| `d5551d5` | Ordinary playlist rows share one playback-context array per render (was O(n) per row) |
+| `a146c34`, `e9430c8`, this commit | Docs; test-only fix (synchronous GRDB reads in an async test) |
+
+**Release-candidate source: `d5551d54198a75af6dafac7af109dbc2e5b31e29`.** `e9430c8` differs from
+it only in `Tests/` and `Docs/` (`git diff d5551d5 e9430c8 -- OFFLINE OFFLINEShareExtension Sharing project.yml`
+is empty), so the IPA built from `d5551d5` is the tested product.
+
+### Automated results
+
+| Stage | Run | Source | Result |
+|---|---|---|---|
+| A — static | local | `e9430c8` | **PASS** — hygiene 86 classes / 3 workflows / 0 problems; `git diff --check` clean |
+| B — focused (`release_only`) | [44093023206](https://github.com/T-h07/MuzikBelesh/actions/runs/44093023206) | `d5551d5` | **FAIL — test target did not compile** (`ReleaseHardeningTests`: GRDB async `read` overload in an async test). No test executed. Fixed in `e9430c8` (test-only) |
+| B — focused (`release_only`) | [44096490155](https://github.com/T-h07/MuzikBelesh/actions/runs/44096490155) | `e9430c8` | **PASS — 261 executed, 0 failed** (includes `ReleaseHardeningTests` 3/3, all Phase 10.9 release suites, import/persistence/acquisition/recovery/download/playback suites, T18 within its 120 s allowance) |
+| C — complete | [44093028800](https://github.com/T-h07/MuzikBelesh/actions/runs/44093028800) | `d5551d5` | **FAIL — same compile error**; no test executed |
+| C — complete | [44096495656](https://github.com/T-h07/MuzikBelesh/actions/runs/44096495656) | `e9430c8` | **FAIL — baseline failures only** (below) |
+
+Stage C shard comparison with the build-98 candidate (§5):
+
+| Shard | `3c18885` (build 98) | `e9430c8` (build 99 source + test fix) |
+|---|---|---|
+| Units (+ accessibility) | 598 run, 597 passed, 1 failed | **595 run, 594 passed, 1 failed** (−6 removed `Phase1StoreTests`, +3 `ReleaseHardeningTests`; opt-in `YouTubeLiveTests` not selected, as before) |
+| Library UI (iPhone 16 Pro Max) | 16/16 | **16/16 PASS** |
+| Compact (iPhone SE) | 4/5 (timing flake) | **5/5 PASS** |
+| Other UI | 25 run, 6 failed | 24 run, 18 passed, **the same 6 failed** |
+
+Failures, all pre-existing and unchanged:
+
+| Test | Classification |
+|---|---|
+| `PlaylistMigrationCoordinatorTests.testT18ThousandEntryMigrationUsesBoundedWorkersQueriesAndUpdates` | Baseline timing (exceeds the shard's 60 s allowance; passes in Stage B with 120 s) |
+| `PlaylistFileImportUITests.testMultipleSelectionRenamePreviewAndInvalidCandidate` | Baseline UI failure (§5) |
+| `PlaylistFileImportUITests.testThousandEntryScrollDashboardInspectionAndRestartSmoke` | Baseline UI failure (§5) |
+| `PlaylistMigrationUITests.testPlaylistSearchFiltersAndClearRestoresAllSongs` | Baseline UI failure (§5) |
+| `ReviewQueueUITests.testLastAndFirstCandidatesConfirmAndAdvance` | Baseline UI failure (§5) |
+| `ReviewQueueUITests.testMiddleCandidateConfirmsAdvancesAndPersistsAcrossRelaunch` | Baseline UI timeout (§5) |
+| `ReviewQueueUITests.testNavigationResetsScrollAndNeverSelects` | Baseline UI failure (§5) |
+
+The hardening pass changed no migration-import, review-queue or migration-playlist UI code
+(the only view change is the ordinary-playlist row branch of `PlaylistDetailView`, covered by
+the passing Library UI shard). These six UI tests and T18 remain **unresolved baseline test
+failures**, not disabled and not reported as passing.
+
+Stress observations from Stage B (CI simulator, wall clock, stage+parse / commit): CSV 100 →
+16/16 ms, 500 → 73/59 ms, 1,000 → 95/98 ms, 2,000 → 224/224 ms, 10,000 → 1,228/905 ms; JSON
+2,000 → 238/217 ms. Same order as build 98 (§6); import code was not changed.
+
+### IPA (build 99)
+
+| Field | Value |
+|---|---|
+| Workflow run | [44093034975](https://github.com/T-h07/MuzikBelesh/actions/runs/44093034975) (`build-ipa.yml`, `build_number=99`) |
+| Artifact | `OFFLINE-unsigned-IPA` (id 14332838313, expires 2027-02-15) |
+| File | `OFFLINE-unsigned.ipa`, 6,339,852 bytes |
+| SHA-256 | `2358a7bdd6da6dafa3d309501464c4fc53163c99f46e732bd64b90c6b530984f` (manifest and independent re-hash agree) |
+| Version / build | 1.1.0 / 99, app and extension |
+| Embedded commit | `d5551d5` = source SHA |
+| Main app | `com.th07.muzikbelesh`; `UIBackgroundModes` audio, processing; BGTask `com.th07.muzikbelesh.matching.*`; ATS arbitrary loads off, local networking on |
+| Share extension | `com.th07.muzikbelesh.share`, `com.apple.share-services`, in `PlugIns/` |
+| App Group requested by both executables | `group.com.th07.muzikbelesh.inbox` |
+| Signing | Unsigned; no `_CodeSignature` or provisioning profile |
+| Release binary content | No `accounts.spotify.com`/`api.spotify.com`/`spotify_pending_imports`; no mock-store, `--ui-testing`, `--reset-ui-library` or UI-test fixture strings |
+| Archive | ZIP integrity OK; no absolute or `..` entries |
+
+### Physical retest (targeted)
+
+Reused acceptance: P01–P08 (upgrade and CSV import paths unchanged). Required on build 99:
+
+| ID | Why |
+|---|---|
+| P01 (quick) | Install build 99 over build 98 with the same SideStore identity; library intact |
+| P10, P12 | Every download ends in the changed import step |
+| P15, P16, P18 | Ordinary/imported playlist rows and playback context |
+| P22 | Local audio import (changed metadata handling) and offline playback |
+| P24 | Share extension smoke (no source change; one share confirms the build) |
+
+Other rows keep their earlier status; any still NOT RUN remain required as listed in §11.
+
+### Release-readiness decision (build 99)
+
+**READY FOR TARGETED DEVICE ACCEPTANCE** — not released. No Critical/High security issue,
+no known data-loss, corruption, traversal, download-integrity or association defect. Open
+items: the seven baseline test failures above, and device rows. G12 (user approval) NOT
+GIVEN. Nothing merged into `develop`, `main` or `release`; no `v1.1.0` tag or GitHub Release.

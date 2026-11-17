@@ -61,6 +61,9 @@ YouTube Share extension) is unchanged.
   shares ("Could not save the link") and saw "Could not read the shared link inbox" on every
   launch. v1.1.0 converts that inbox once, keeps every pending YouTube share in order and
   keeps a backup copy of the original file.
+- Importing an audio file (or finishing a YouTube download) no longer fails when the file's
+  artist or album tag is unusually long; very long titles are shortened to 300 characters
+  and control characters are removed.
 
 ## Not included
 

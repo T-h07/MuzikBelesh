@@ -167,7 +167,12 @@ No code-quality metric beyond the line/file counts above is claimed.
 Stage A (local, Windows host): `Scripts/check-test-hygiene.py` — 86 test classes,
 3 workflows, 0 problems — **PASS**. `git diff --check` — **PASS**.
 
-Stage B, Stage C and the IPA results are recorded in `Docs/PHASE_10_09_RELEASE.md` §16.
+Stage B (`e9430c8`): **PASS**, 261 executed, 0 failed, including `ReleaseHardeningTests` 3/3.
+Stage C (`e9430c8`): Library UI 16/16 and Compact 5/5 **PASS**; Units 594/595 and Other UI
+18/24 **FAIL**, every failure one of the seven baseline failures from build 98 (T18 timing;
+six migration/review UI tests). The first runs on `d5551d5` did not compile the test target
+(fixed test-only in `e9430c8`). Details, run links and the build-99 IPA:
+`Docs/PHASE_10_09_RELEASE.md` §16.
 
 ## Physical retest scope
 
