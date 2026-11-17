@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import GRDB
 import SwiftUI
 import UniformTypeIdentifiers
@@ -193,15 +192,6 @@ final class StorageCoordinator: ObservableObject {
         }
     }
 
-    func exportData(trackID: String) async throws -> Data {
-        try await Task.detached(priority: .userInitiated) { [self] in
-            guard let track = try tracks.find(id: trackID), track.availability == .available else { throw StorageError.missingFile }
-            let url = try paths.musicURL(relativePath: track.fileRelativePath)
-            guard try audio.sha256(url: url) == track.contentSHA256 else { throw StorageError.exportFailed }
-            return try Data(contentsOf: url, options: .mappedIfSafe)
-        }.value
-    }
-
     func exportAudio(track: StoredTrack, to destination: URL) throws {
         let source = try paths.musicURL(relativePath: track.fileRelativePath)
         guard FileManager.default.fileExists(atPath: source.path) else { throw StorageError.missingFile }
@@ -229,13 +219,6 @@ final class StorageCoordinator: ObservableObject {
         for file in (try? FileManager.default.contentsOfDirectory(at: paths.imports, includingPropertiesForKeys: nil)) ?? [] { try? FileManager.default.removeItem(at: file) }
     }
 
-    private func stableID(prefix: String, value: String) -> String { "\(prefix)-" + SHA256.hash(data: Data(normalized(value).utf8)).map { String(format: "%02x", $0) }.joined() }
-    private func normalized(_ value: String) -> String { value.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: .diacriticInsensitive, locale: .current).lowercased() }
-    private func normalizedOptional(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let result = normalized(value)
-        return result.isEmpty ? nil : result
-    }
     private func safeFilename(_ title: String, fileExtension: String) -> String { let clean = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "\\", with: "-"); return "\(clean).\(fileExtension)" }
 }
 

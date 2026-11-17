@@ -8,10 +8,6 @@ final class AppContainer: ObservableObject {
     private var maintenanceFinished = false
     let configuration: AppConfiguration
     let youtubeProbe: YouTubeProbe
-    #if DEBUG
-    let music = MockMusicStore()
-    let playback = MockPlaybackStore()
-    #endif
     let downloads: DownloadManager
     let storage: StorageCoordinator?
     let library: MusicLibraryService

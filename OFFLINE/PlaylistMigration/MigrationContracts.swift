@@ -37,16 +37,3 @@ protocol PlaylistMigrationFileImporting {
 protocol PlaylistMigrationMatching {
     func candidates(for entry: PlaylistMigrationEntry) async throws -> [PlaylistMigrationCandidate]
 }
-
-/// Audio acquisition requires source authorization and an explicit verified match (Phase 10.5).
-protocol PlaylistMigrationAcquiring {
-    /// Returns the actual stored local track ID; never fabricate a track for a placeholder.
-    func acquire(candidate: PlaylistMigrationCandidate, for entry: PlaylistMigrationEntry) async throws -> String
-}
-
-/// Scheduler implementation and durable retry policies belong to Phase 10.6.
-protocol PlaylistMigrationCoordinating {
-    func resume(migrationID: UUID) async throws
-    func pause(migrationID: UUID) async throws
-    func cancel(migrationID: UUID) async throws
-}

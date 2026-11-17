@@ -13,11 +13,6 @@ struct PlaybackQueueEntry: Identifiable, Equatable {
     let origin: QueueEntryOrigin
 }
 
-struct ShuffleCycle: Equatable {
-    var order: [String]
-    var position: Int
-}
-
 final class PlaybackHistoryService {
     private let storage: StorageCoordinator?
     private var activeID: String?
