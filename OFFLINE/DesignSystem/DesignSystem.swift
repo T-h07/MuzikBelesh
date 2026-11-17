@@ -119,17 +119,9 @@ struct EmptyState: View {
     var body: some View { VStack(spacing: AppSpacing.md) { Image(systemName: icon).font(.system(size: 34)).foregroundStyle(AppColors.accentPrimary); Text(title).font(.headline).foregroundStyle(AppColors.textPrimary); Text(message).font(.subheadline).multilineTextAlignment(.center).foregroundStyle(AppColors.textSecondary); if let actionTitle, let action { Button(actionTitle, action: action).buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black) } }.frame(maxWidth: .infinity).padding(.vertical, 48) }
 }
 
-struct ErrorState: View {
-    let title: String
-    let message: String
-    var retry: (() -> Void)?
-    var body: some View { VStack(spacing: AppSpacing.md) { Image(systemName: "exclamationmark.triangle").foregroundStyle(AppColors.error); Text(title).font(.headline).foregroundStyle(AppColors.textPrimary); Text(message).font(.subheadline).foregroundStyle(AppColors.textSecondary).multilineTextAlignment(.center); if let retry { Button("Try Again", action: retry).foregroundStyle(AppColors.accentPrimary) } }.frame(maxWidth: .infinity).padding(.vertical, 40) }
-}
-
 struct FilterChip: View {
     let title: String
     let selected: Bool
     let action: () -> Void
     var body: some View { Button(action: action) { Text(title).font(.subheadline.weight(.medium)).foregroundStyle(selected ? .black : AppColors.textSecondary).padding(.horizontal, 14).padding(.vertical, 8).background(selected ? AppColors.accentPrimary : AppColors.backgroundSecondary).clipShape(Capsule()) }.accessibilityAddTraits(selected ? .isSelected : []) }
 }
-

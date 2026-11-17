@@ -384,8 +384,13 @@ jobs:
           xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE -configuration Debug -destination "id=$SIMULATOR_ID" -derivedDataPath build/TestProducts build-for-testing CODE_SIGNING_ALLOWED=NO GIT_COMMIT_SHORT="$GIT_COMMIT_SHORT" BUILD_DATE="$BUILD_DATE" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
           git rev-parse HEAD > build/product-source.txt
       - name: Locate and verify compiled test products
+        env:
+          # Free-text input: passed through the environment and validated, never
+          # interpolated into the script (prevents workflow script injection).
+          PREBUILT_RUN_ID: ${{ inputs.prebuilt_run_id }}
         run: |
-          if [[ -n "${{ inputs.prebuilt_run_id }}" ]]; then
+          if [[ -n "$PREBUILT_RUN_ID" ]]; then
+            [[ "$PREBUILT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             test "$(cat build/prebuilt/product-source.txt)" = "$(git rev-parse HEAD)"
             mkdir -p build/TestProducts/Build
             tar -xzf build/prebuilt/test-products.tar.gz -C build/TestProducts/Build

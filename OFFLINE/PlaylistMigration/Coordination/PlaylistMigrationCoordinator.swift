@@ -162,8 +162,6 @@ import GRDB
         scheduleWake()
     }
 
-    func reconcileMigration(_ migrationID: UUID) async { await reconcileAll() }
-
     func status(for migrationID: UUID) -> MigrationCoordinatorStatus? { statuses[migrationID] }
 
     // MARK: Lifecycle, network and resources

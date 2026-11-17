@@ -161,52 +161,6 @@ private struct TabContent<Content: View>: View {
     }
 }
 
-// Retained only for the original Phase 1 fixture tests.
-#if DEBUG
-struct TrackRow: View {
-    @EnvironmentObject private var container: AppContainer
-    let track: MockTrack
-    var showDuration = true
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            ArtworkView(name: track.artwork, size: 52)
-            VStack(alignment: .leading, spacing: 3) { Text(track.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(track.artist).font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1) }
-            Spacer()
-            if container.music.likedTrackIDs.contains(track.id) { Image(systemName: "heart.fill").foregroundStyle(AppColors.accentPrimary).font(.caption) }
-            if showDuration { Text(format(track.duration)).font(.caption).foregroundStyle(AppColors.textTertiary) }
-            Menu { TrackContextMenu(track: track) } label: { Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 32, height: 40) }.accessibilityLabel("More actions for \(track.title)")
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { }
-        .contextMenu { TrackContextMenu(track: track) }
-        .accessibilityIdentifier("track-row-\(track.id)")
-    }
-    private func format(_ seconds: TimeInterval) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
-}
-
-struct TrackContextMenu: View {
-    @EnvironmentObject private var container: AppContainer
-    let track: MockTrack
-    var body: some View {
-        Button {} label: { Label("Demo track Â· import local audio to play", systemImage: "waveform") }.disabled(true)
-        Button { container.playback.addToQueue(track.id) } label: { Label("Add to Demo Queue", systemImage: "text.badge.plus") }
-        Button { container.music.toggleLiked(track.id) } label: { Label(container.music.likedTrackIDs.contains(track.id) ? "Unlike" : "Like", systemImage: "heart") }
-        Button { container.music.add(track.id, to: "playlist-drive") } label: { Label("Add to Demo Playlist", systemImage: "text.badge.plus") }
-    }
-}
-
-struct AlbumCard: View {
-    let album: MockAlbum
-    var body: some View { VStack(alignment: .leading, spacing: AppSpacing.sm) { ArtworkView(name: album.artwork, size: 148); Text(album.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(album.artist).font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1) }.frame(width: 148, alignment: .leading) }
-}
-
-struct PlaylistCard: View {
-    let playlist: MockPlaylist
-    var body: some View { VStack(alignment: .leading, spacing: AppSpacing.sm) { ArtworkView(name: playlist.id, size: 148); Text(playlist.name).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text("\(playlist.trackIDs.count) tracks").font(.caption).foregroundStyle(AppColors.textSecondary) }.frame(width: 148, alignment: .leading) }
-}
-
-#endif
-
 struct SearchBar: View {
     @Binding var text: String
     let placeholder: String
@@ -242,11 +196,3 @@ struct MiniPlayer: View {
         Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").foregroundStyle(AppColors.textPrimary).frame(width: 44, height: 44) }.buttonStyle(.plain).disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")
     }.padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AppRadius.medium)).accessibilityIdentifier("mini-player") } }
 }
-
-#if DEBUG
-struct ProgressRow: View {
-    let job: MockDownloadJob
-    var body: some View { HStack(spacing: AppSpacing.md) { ArtworkView(name: job.video.artwork, size: 58); VStack(alignment: .leading, spacing: 5) { Text(job.video.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(1); Text(job.state.rawValue.capitalized).font(.caption).foregroundStyle(job.state == .failed ? AppColors.error : AppColors.textSecondary); ProgressView(value: job.progress).tint(AppColors.accentPrimary) }; Spacer(); Text("\(Int(job.progress * 100))%").font(.caption).foregroundStyle(AppColors.textSecondary) }.padding(.vertical, 6) }
-}
-
-#endif

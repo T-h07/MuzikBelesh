@@ -131,10 +131,6 @@ enum MigrationIssueProvenance: String, Codable, CaseIterable, Sendable {
     case downloadResolution, networkTransfer, audioValidation, storageImport, playlistAssociation, migrationLifecycle
 }
 
-enum MigrationIssueSeverityLevel: Sendable {
-    case blocking, waiting
-}
-
 /// Recovery actions. Only actions valid for the occurrence's actual state are offered.
 enum MigrationIssueAction: String, Codable, CaseIterable, Sendable, Identifiable {
     case reviewCandidates

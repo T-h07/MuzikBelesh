@@ -11,5 +11,5 @@ Phase 1 uses a locked dark SwiftUI appearance. `AppColors`, `AppSpacing`, and `A
 - Radii: 8, 12, 16, and 18 points; capsules for chips.
 - Artwork: square, deterministic fixture artwork with consistent rounded corners.
 
-Reusable components include `ArtworkView`, `TrackRow`, `AlbumCard`, `PlaylistCard`, `MiniPlayer`, `SearchBar`, `ProgressRow`, `EmptyState`, `ErrorState`, `FilterChip`, and `SectionHeader`. Controls use SF Symbols, native buttons, context menus, accessibility labels, and identifiers. The app remains dark even when the device uses light appearance.
+Reusable components include `ArtworkView`, `StoredArtworkView`, `MiniPlayer`, `SearchBar`, `EmptyState`, `FilterChip`, and `SectionHeader`. (The Phase 1 mock-data rows and cards were removed in the Phase 10.9 final hardening.) Controls use SF Symbols, native buttons, context menus, accessibility labels, and identifiers. The app remains dark even when the device uses light appearance.
 

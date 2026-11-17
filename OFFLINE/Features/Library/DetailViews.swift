@@ -102,7 +102,10 @@ struct PlaylistDetailView: View {
                                 .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeManualRow(row, playlistID: playlistID) } }
                         }
                     } else {
-                    if songs.isEmpty && library.pendingLinks(playlistID).isEmpty { Text("This playlist is empty. Tap Add Songs to add music.").foregroundStyle(AppColors.textSecondary) }
+                    // Resolved once per render: every row plays within the full playlist, and
+                    // rebuilding it per row made scrolling an n-song playlist O(n) per row.
+                    let contextTrackIDs: [String] = songs.map(\.id)
+                    if contextTrackIDs.isEmpty && library.pendingLinks(playlistID).isEmpty { Text("This playlist is empty. Tap Add Songs to add music.").foregroundStyle(AppColors.textSecondary) }
                     ForEach(visibleSongs) { track in
                         Group {
                             if editMode == .active {
@@ -112,7 +115,7 @@ struct PlaylistDetailView: View {
                                     Button { move(track.id, delta: 1) } label: { Image(systemName: "arrow.down").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel("Move down \(track.title)").accessibilityIdentifier("move-down-" + track.id)
                                 }
                             } else {
-                                StoredTrackRow(track: track, contextTrackIDs: songs.map(\.id), contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
+                                StoredTrackRow(track: track, contextTrackIDs: contextTrackIDs, contextKind: "playlist", contextSourceID: playlistID, playlistID: playlistID)
                                     .swipeActions { Button("Remove from Playlist", role: .destructive) { library.removeFromOrdinaryPlaylist(track.id, playlistID: playlistID) } }
                             }
                         }.listRowBackground(AppColors.backgroundPrimary)

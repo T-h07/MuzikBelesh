@@ -23,7 +23,7 @@ settings:
     CODE_SIGNING_REQUIRED: NO
     CODE_SIGN_IDENTITY: ''
     CURRENT_PROJECT_VERSION: '3'
-    MARKETING_VERSION: '1.0.0'
+    MARKETING_VERSION: '1.1.0'
 targets:
   OFFLINE:
     type: application
@@ -39,7 +39,7 @@ targets:
       path: OFFLINE/Resources/Info.plist
       properties:
         CFBundleDisplayName: Muzik Belesh
-        CFBundleShortVersionString: '1.0.0'
+        CFBundleShortVersionString: '1.1.0'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         MBBuildCommit: '$(GIT_COMMIT_SHORT)'
         MBBuildDate: '$(BUILD_DATE)'
@@ -108,7 +108,7 @@ targets:
       properties:
         CFBundleDisplayName: Muzik Belesh
         CFBundlePackageType: 'XPC!'
-        CFBundleShortVersionString: '1.0.0'
+        CFBundleShortVersionString: '1.1.0'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
