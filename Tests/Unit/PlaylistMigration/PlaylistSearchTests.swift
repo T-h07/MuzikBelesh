@@ -122,7 +122,9 @@ import XCTest
     func testDuplicateOccurrencesResolveToTheTappedPosition() async throws {
         let f = try LibraryFixture(count: 7)
         let titles = ["Song A", "Song X", "Song Y", "Song Z", "Song W", "Song A", "Song V"]
-        let p = try await imported(f, titles: titles, recordings: [0, 1, 2, 3, 4, 0, 6])
+        // Search matches substrings of titles *and* artists; the default "Artist N" names all
+        // contain "a", so this fixture uses artist names without that letter.
+        let p = try await imported(f, titles: titles, recordings: [0, 1, 2, 3, 4, 0, 6], artists: (0..<7).map { "Performer \($0)" })
         let (player, _, library) = f.services()
         let results = try search(f, p.playlistID, "song a")
         XCTAssertEqual(results.map(\.entry.position), [0, 5], "Both occurrences are listed separately")
