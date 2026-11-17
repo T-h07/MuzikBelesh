@@ -70,6 +70,15 @@ func librarySnapshot(_ db: DatabaseQueue) throws -> [String: [String]] {
     }
 }
 
+// Synchronous helpers: inside an async test, an inline `dbQueue.read { }` resolves to
+// GRDB's async overload.
+func profileRowCount(_ db: DatabaseQueue) throws -> Int {
+    try db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM local_user_profile") ?? 0 }
+}
+func appliedMigrations(_ db: DatabaseQueue) throws -> [String] {
+    try db.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations") }
+}
+
 // MARK: - Username policy
 
 final class UsernamePolicyTests: XCTestCase {
@@ -462,7 +471,7 @@ final class LocalProfileUpgradeTests: XCTestCase {
         let before = try librarySnapshot(fixture.storage.database.dbQueue)
         // Next launch of the Phase 11.1 build.
         let upgraded = try StorageCoordinator(paths: fixture.paths)
-        let applied = try upgraded.database.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations") }
+        let applied = try appliedMigrations(upgraded.database.dbQueue)
         XCTAssertTrue(applied.contains(LocalProfileSchema.version))
         XCTAssertEqual(try librarySnapshot(upgraded.database.dbQueue), before, "Migration changed no library rows")
 
@@ -535,7 +544,7 @@ final class LocalProfileServiceTests: XCTestCase {
         let results = try await [first, second]
         // The overlapping tap is ignored (nil) or, if it arrived after the commit, adopts it.
         XCTAssertEqual(Set(results.compactMap { $0?.id }).count, 1)
-        XCTAssertEqual(try fixture.storage.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM local_user_profile") }, 1)
+        XCTAssertEqual(try profileRowCount(fixture.storage.database.dbQueue), 1)
         // A later stray submission adopts, never replaces, the stored profile.
         let stored = try XCTUnwrap(service.profile)
         let late = try await service.createProfile(username: "Late", avatar: nil)
