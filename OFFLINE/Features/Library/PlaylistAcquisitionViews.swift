@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 /// Offline-download controls for one imported playlist. Every number is derived from
 /// persisted occurrences, acquisition links and shared download jobs.
 struct PlaylistAcquisitionControls: View {
+    @Environment(\.themePalette) private var palette
     @ObservedObject var acquisition: PlaylistAcquisitionCoordinator
     let presentation: MigrationPlaylistPresentation
     let playlistID: String
@@ -13,10 +14,10 @@ struct PlaylistAcquisitionControls: View {
         let migrationID = presentation.session.id.uuidString
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Offline Downloads").font(.headline)
-            Text(headline(summary)).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.accentPrimary)
+            Text(headline(summary)).font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
                 .accessibilityIdentifier("acquisition-status")
             if summary.total > 0 {
-                ProgressView(value: Double(summary.availableOffline), total: Double(summary.total)).tint(AppColors.accentPrimary)
+                ProgressView(value: Double(summary.availableOffline), total: Double(summary.total)).tint(palette.accent)
                     .accessibilityLabel("Available offline").accessibilityValue("\(summary.availableOffline) of \(summary.total)")
             }
             let active = [count(summary.downloading, "downloading"), count(summary.queued, "queued"),
@@ -124,6 +125,7 @@ struct PlaylistAcquisitionQueueView: View {
 }
 
 private struct AcquisitionQueueRow: View {
+    @Environment(\.themePalette) private var palette
     let row: MigrationPlaylistRow
     let state: AcquisitionDisplayState
     let retry: () -> Void
@@ -138,10 +140,10 @@ private struct AcquisitionQueueRow: View {
                 }
             }
             Text(state.label).font(.caption.weight(.semibold))
-                .foregroundStyle(state.needsAttention ? AppColors.error : AppColors.accentPrimary)
+                .foregroundStyle(state.needsAttention ? AppColors.error : palette.accent)
                 .accessibilityIdentifier("acquisition-entry-state-" + row.id.uuidString)
             if case .downloading(let progress?) = state {
-                ProgressView(value: progress).tint(AppColors.accentPrimary)
+                ProgressView(value: progress).tint(palette.accent)
             }
             if let detail = state.detail { Text(detail).font(.caption).foregroundStyle(AppColors.textSecondary) }
             if state.needsAttention {
@@ -181,6 +183,7 @@ struct MigrationOccurrenceStatusText: View, Equatable {
 
 /// Acquisition details and fallback actions in the occurrence inspector.
 struct AcquisitionOccurrenceSection: View {
+    @Environment(\.themePalette) private var palette
     @ObservedObject var acquisition: PlaylistAcquisitionCoordinator
     let row: MigrationPlaylistRow
     @State private var importing: PlaylistMigrationEntry?
@@ -191,7 +194,7 @@ struct AcquisitionOccurrenceSection: View {
             Section("Offline Audio") {
                 if let state {
                     Text(state.label).accessibilityIdentifier("acquisition-inspector-state")
-                    if case .downloading(let progress?) = state { ProgressView(value: progress).tint(AppColors.accentPrimary) }
+                    if case .downloading(let progress?) = state { ProgressView(value: progress).tint(palette.accent) }
                     if let detail = state.detail { Text(detail).font(.caption).foregroundStyle(AppColors.textSecondary) }
                     if case .failed(_, true) = state {
                         Button("Retry Download") { Task { await acquisition.retry(entryID: row.id) } }
@@ -213,6 +216,7 @@ struct AcquisitionOccurrenceSection: View {
 /// show both sets of metadata, then require explicit confirmation before associating it
 /// with the existing occurrence (no new playlist entry is created).
 struct AcquisitionLocalImportView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     @Environment(\.dismiss) private var dismiss
     let entry: PlaylistMigrationEntry
@@ -230,7 +234,7 @@ struct AcquisitionLocalImportView: View {
                         .font(.caption).foregroundStyle(AppColors.textSecondary)
                     Button { showingFiles = true } label: { Label(imported == nil ? "Choose Audio File" : "Choose a Different File", systemImage: "folder") }
                         .buttonStyle(.matchingPrimaryWide).disabled(working).accessibilityIdentifier("acquisition-choose-file")
-                    if working { ProgressView().tint(AppColors.accentPrimary) }
+                    if working { ProgressView().tint(palette.accent) }
                     if let error { Text(error).foregroundStyle(AppColors.error) }
                 }
                 if let track = imported?.track {

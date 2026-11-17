@@ -4,6 +4,7 @@ import SwiftUI
 /// The existing library is not read or written here; the tab interface opens once SQLite has
 /// committed the profile.
 struct LocalProfileOnboardingView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var profile: LocalProfileService
     @State private var username = ""
     @State private var avatar: PreparedAvatar?
@@ -40,12 +41,12 @@ struct LocalProfileOnboardingView: View {
                     .onChange(of: username) { _, _ in interacted = true }
                 Button(action: submit) {
                     HStack(spacing: AppSpacing.sm) {
-                        if profile.isSaving { ProgressView().tint(.black) }
+                        if profile.isSaving { ProgressView().tint(palette.onAccent) }
                         Text(profile.isSaving ? "Creating Profile…" : "Create Profile").font(.headline)
                     }
                     .frame(maxWidth: .infinity, minHeight: 52)
-                    .foregroundStyle(.black)
-                    .background(canSubmit || profile.isSaving ? AppColors.accentPrimary : AppColors.accentPrimary.opacity(0.35))
+                    .foregroundStyle(palette.onAccent)
+                    .background(canSubmit || profile.isSaving ? palette.accent : palette.accent.opacity(0.35))
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
                 }
                 .buttonStyle(.plain)
@@ -78,6 +79,7 @@ struct LocalProfileOnboardingView: View {
 
 /// Shown when the profile can't be read. Nothing is created or overwritten from here.
 struct ProfileStorageErrorView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var profile: LocalProfileService
     let message: String
     var body: some View {
@@ -87,11 +89,11 @@ struct ProfileStorageErrorView: View {
             Text(message).font(.subheadline).foregroundStyle(AppColors.textSecondary).multilineTextAlignment(.center)
                 .accessibilityIdentifier("profile-error-message")
             Button { profile.load() } label: {
-                Text("Try Again").font(.headline).frame(maxWidth: .infinity, minHeight: 52).foregroundStyle(.black)
-                    .background(AppColors.accentPrimary).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+                Text("Try Again").font(.headline).frame(maxWidth: .infinity, minHeight: 52).foregroundStyle(palette.onAccent)
+                    .background(palette.accent).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
             }.buttonStyle(.plain).accessibilityIdentifier("profile-error-retry")
             Button("Continue to Library") { profile.continueWithoutProfile() }
-                .font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.accentPrimary).frame(minHeight: 44)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent).frame(minHeight: 44)
                 .accessibilityIdentifier("profile-error-continue")
         }
         .padding(.horizontal, AppSpacing.xxl).frame(maxWidth: 520).frame(maxWidth: .infinity, maxHeight: .infinity)

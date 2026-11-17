@@ -3,6 +3,7 @@ import SwiftUI
 /// "Your Listening": device-local listening statistics opened from the Profile page.
 /// Every value comes from `ListeningStatsService`; nothing is sampled, estimated or invented.
 struct ListeningDashboardView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var stats: ListeningStatsService
     @EnvironmentObject private var profile: LocalProfileService
     @EnvironmentObject private var library: MusicLibraryService
@@ -61,8 +62,8 @@ struct ListeningDashboardView: View {
                 Text("Something went wrong").font(.title3.weight(.semibold)).foregroundStyle(AppColors.textPrimary)
                 Text(failure).font(.subheadline).foregroundStyle(AppColors.textSecondary).accessibilityIdentifier("listening-error")
                 Button("Try Again") { stats.load(range) }
-                    .font(.headline).foregroundStyle(.black).padding(.horizontal, AppSpacing.xl).frame(minHeight: 44)
-                    .background(Capsule().fill(ListeningStyle.accent)).accessibilityIdentifier("listening-retry")
+                    .font(.headline).foregroundStyle(palette.onAccent).padding(.horizontal, AppSpacing.xl).frame(minHeight: 44)
+                    .background(Capsule().fill(palette.accent)).accessibilityIdentifier("listening-retry")
             }
         } else {
             skeleton
@@ -76,7 +77,7 @@ struct ListeningDashboardView: View {
             VStack(spacing: AppSpacing.lg) {
                 ZStack {
                     ForEach(0..<3) { index in Circle().stroke(ListeningStyle.track, lineWidth: 3).padding(CGFloat(index) * 16) }
-                    Image(systemName: "waveform").font(.system(size: 38, weight: .light)).foregroundStyle(ListeningStyle.accent)
+                    Image(systemName: "waveform").font(.system(size: 38, weight: .light)).foregroundStyle(palette.accent)
                 }
                 .frame(width: 180, height: 180).accessibilityHidden(true)
                 Text("Your listening story starts here.").font(.title2.weight(.bold)).foregroundStyle(AppColors.textPrimary)
@@ -175,7 +176,7 @@ struct ListeningDashboardView: View {
 
     private func highlight(_ title: String, value: String, detail: String, identifier: String) -> some View {
         HStack(alignment: .top, spacing: AppSpacing.md) {
-            Capsule().fill(ListeningStyle.accent).frame(width: 3).frame(maxHeight: .infinity)
+            Capsule().fill(palette.accent).frame(width: 3).frame(maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.caption.weight(.semibold)).foregroundStyle(AppColors.textTertiary)
                 Text(value).font(.title3.weight(.semibold)).foregroundStyle(AppColors.textPrimary).lineLimit(2)

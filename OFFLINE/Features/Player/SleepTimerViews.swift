@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SleepTimerSheet: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var timer: SleepTimerService
     @State private var customMinutes = ""
@@ -11,9 +12,9 @@ struct SleepTimerSheet: View {
             Text(timer.isActive ? "Stops in \(format(timer.remaining))" : "Stop music after...").font(.subheadline).foregroundStyle(AppColors.textSecondary)
             if timer.isActive, let deadline = timer.deadline { Text("Stops at \(deadline.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(AppColors.textTertiary) }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: AppSpacing.sm) {
-                ForEach(options, id: \.self) { minutes in Button("\(minutes) min") { timer.start(minutes: minutes); dismiss() }.buttonStyle(.bordered).tint(AppColors.accentPrimary).frame(minHeight: 44) }
+                ForEach(options, id: \.self) { minutes in Button("\(minutes) min") { timer.start(minutes: minutes); dismiss() }.buttonStyle(.bordered).tint(palette.accent).frame(minHeight: 44) }
             }
-            HStack { TextField("Custom minutes", text: $customMinutes).keyboardType(.numberPad).textFieldStyle(.roundedBorder); Button("Set") { if let minutes = Int(customMinutes), minutes >= 1 { timer.start(minutes: minutes); dismiss() } }.buttonStyle(.borderedProminent).tint(AppColors.accentPrimary) }
+            HStack { TextField("Custom minutes", text: $customMinutes).keyboardType(.numberPad).textFieldStyle(.roundedBorder); Button("Set") { if let minutes = Int(customMinutes), minutes >= 1 { timer.start(minutes: minutes); dismiss() } }.buttonStyle(.borderedProminent).tint(palette.accent) }
             HStack(spacing: AppSpacing.sm) { if timer.isActive { Button("Reset Timer") { timer.reset() }.buttonStyle(.bordered); Button("Cancel Timer") { timer.cancel(); dismiss() }.buttonStyle(.bordered).tint(AppColors.error) }; Button("Done") { dismiss() }.buttonStyle(.bordered) }
         }.padding(AppSpacing.xl).frame(maxWidth: .infinity).background(AppColors.backgroundPrimary).preferredColorScheme(.dark).accessibilityIdentifier("sleep-timer-sheet")
     }
@@ -21,6 +22,7 @@ struct SleepTimerSheet: View {
 }
 
 struct SleepTimerStatusIndicator: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var timer: SleepTimerService
     var showsLabel = false
@@ -35,7 +37,7 @@ struct SleepTimerStatusIndicator: View {
     private var control: some View {
         Button(action: onTap) {
             Label(showsLabel ? "Sleep Timer · \(format(timer.remaining))" : format(timer.remaining), systemImage: "moon.fill")
-                .font(.caption.weight(.semibold)).foregroundStyle(AppColors.accentPrimary)
+                .font(.caption.weight(.semibold)).foregroundStyle(palette.accent)
                 .padding(.horizontal, AppSpacing.sm).padding(.vertical, 6)
                 .background(AppColors.backgroundSecondary, in: Capsule())
         }.buttonStyle(.plain).accessibilityIdentifier("sleep-timer-indicator")

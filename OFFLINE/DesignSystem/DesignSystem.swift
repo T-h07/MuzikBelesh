@@ -3,6 +3,8 @@ import ImageIO
 import UIKit
 import UIKit
 
+/// Fixed colours: backgrounds, text, dividers and status. The user-selectable accent lives in
+/// `ThemePalette` (read with `@Environment(\.themePalette)`), never here.
 enum AppColors {
     static let backgroundPrimary = Color.black
     static let backgroundSecondary = Color(hex: "111111")
@@ -10,7 +12,6 @@ enum AppColors {
     static let textPrimary = Color(hex: "F5F5F5")
     static let textSecondary = Color(hex: "A0A0A0")
     static let textTertiary = Color(hex: "777777")
-    static let accentPrimary = Color(hex: "D6EEA3")
     static let divider = Color(hex: "292929")
     static let success = Color(hex: "78C49A")
     static let warning = Color(hex: "E9BF76")
@@ -51,10 +52,11 @@ extension View {
 }
 
 struct SectionHeader: View {
+    @Environment(\.themePalette) private var palette
     let title: String
     var actionTitle: String?
     var action: (() -> Void)?
-    var body: some View { HStack { Text(title).font(.system(size: 19, weight: .semibold)).foregroundStyle(AppColors.textPrimary); Spacer(); if let actionTitle, let action { Button(actionTitle, action: action).font(.caption).foregroundStyle(AppColors.accentPrimary) } } }
+    var body: some View { HStack { Text(title).font(.system(size: 19, weight: .semibold)).foregroundStyle(AppColors.textPrimary); Spacer(); if let actionTitle, let action { Button(actionTitle, action: action).font(.caption).foregroundStyle(palette.accent) } } }
 }
 
 struct ArtworkView: View {
@@ -111,17 +113,19 @@ struct ManagedArtworkView: View {
 }
 
 struct EmptyState: View {
+    @Environment(\.themePalette) private var palette
     let icon: String
     let title: String
     let message: String
     var actionTitle: String?
     var action: (() -> Void)?
-    var body: some View { VStack(spacing: AppSpacing.md) { Image(systemName: icon).font(.system(size: 34)).foregroundStyle(AppColors.accentPrimary); Text(title).font(.headline).foregroundStyle(AppColors.textPrimary); Text(message).font(.subheadline).multilineTextAlignment(.center).foregroundStyle(AppColors.textSecondary); if let actionTitle, let action { Button(actionTitle, action: action).buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black) } }.frame(maxWidth: .infinity).padding(.vertical, 48) }
+    var body: some View { VStack(spacing: AppSpacing.md) { Image(systemName: icon).font(.system(size: 34)).foregroundStyle(palette.accent); Text(title).font(.headline).foregroundStyle(AppColors.textPrimary); Text(message).font(.subheadline).multilineTextAlignment(.center).foregroundStyle(AppColors.textSecondary); if let actionTitle, let action { Button(actionTitle, action: action).buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(.black) } }.frame(maxWidth: .infinity).padding(.vertical, 48) }
 }
 
 struct FilterChip: View {
+    @Environment(\.themePalette) private var palette
     let title: String
     let selected: Bool
     let action: () -> Void
-    var body: some View { Button(action: action) { Text(title).font(.subheadline.weight(.medium)).foregroundStyle(selected ? .black : AppColors.textSecondary).padding(.horizontal, 14).padding(.vertical, 8).background(selected ? AppColors.accentPrimary : AppColors.backgroundSecondary).clipShape(Capsule()) }.accessibilityAddTraits(selected ? .isSelected : []) }
+    var body: some View { Button(action: action) { Text(title).font(.subheadline.weight(.medium)).foregroundStyle(selected ? palette.onAccent : AppColors.textSecondary).padding(.horizontal, 14).padding(.vertical, 8).background(selected ? palette.accent : AppColors.backgroundSecondary).clipShape(Capsule()) }.accessibilityAddTraits(selected ? .isSelected : []) }
 }

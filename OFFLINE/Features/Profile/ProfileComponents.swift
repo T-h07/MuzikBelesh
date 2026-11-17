@@ -5,6 +5,7 @@ import UIKit
 
 /// Circular avatar: a managed image, or the default avatar when there is none.
 struct AvatarCircle: View {
+    @Environment(\.themePalette) private var palette
     let image: UIImage?
     let size: CGFloat
     var body: some View {
@@ -12,7 +13,7 @@ struct AvatarCircle: View {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
             else {
                 Circle().fill(AppColors.backgroundTertiary)
-                    .overlay(Image(systemName: "person.fill").font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(AppColors.accentPrimary))
+                    .overlay(Image(systemName: "person.fill").font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(palette.accent))
             }
         }
         .frame(width: size, height: size).clipShape(Circle())
@@ -127,6 +128,7 @@ struct UsernameField: View {
 /// Photo selection through the system picker, which needs no photo-library permission.
 /// The picked image is validated and downsampled in memory; nothing is written until Save.
 struct ProfilePhotoControls: View {
+    @Environment(\.themePalette) private var palette
     let hasPhoto: Bool
     let onPrepared: (PreparedAvatar) -> Void
     let onRemove: () -> Void
@@ -141,7 +143,7 @@ struct ProfilePhotoControls: View {
                     .font(.subheadline.weight(.semibold)).frame(minHeight: 44).padding(.horizontal, AppSpacing.md)
                     .background(AppColors.backgroundSecondary).clipShape(Capsule())
             }
-            .foregroundStyle(AppColors.accentPrimary)
+            .foregroundStyle(palette.accent)
             .disabled(isProcessing)
             .accessibilityIdentifier("profile-photo-picker")
             if hasPhoto {

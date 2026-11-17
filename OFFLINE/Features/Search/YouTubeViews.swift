@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct YouTubeSearchResultsView: View {
+    @Environment(\.themePalette) private var palette
     @StateObject private var model: YouTubeSearchViewModel
     @EnvironmentObject private var container: AppContainer
     let query: String
@@ -12,7 +13,7 @@ struct YouTubeSearchResultsView: View {
     }
     var body: some View {
         LazyVStack(alignment: .leading, spacing: AppSpacing.md) {
-            Button("Paste a Video Link", action: onPaste).foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("youtube-paste-link")
+            Button("Paste a Video Link", action: onPaste).foregroundStyle(palette.accent).accessibilityIdentifier("youtube-paste-link")
             switch model.state {
             case .idle: EmptyState(icon: "magnifyingglass", title: "Search YouTube", message: "Find videos by song title, artist, channel or keywords.")
             case .loading: ProgressView("Searching YouTube…").accessibilityIdentifier("youtube-search-loading")
@@ -57,6 +58,7 @@ private struct YouTubeVideoRow: View {
 }
 
 struct VideoDetailView: View {
+    @Environment(\.themePalette) private var palette
     @StateObject private var model: VideoDetailsViewModel
     @EnvironmentObject private var coordinator: AppCoordinator
     @EnvironmentObject private var library: MusicLibraryService
@@ -82,7 +84,7 @@ struct VideoDetailView: View {
                 if localTrack == nil {
                 Picker("Audio Quality", selection: $preferences.quality) {
                     ForEach(AudioQuality.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.tint(AppColors.accentPrimary).disabled(model.busy).accessibilityIdentifier("youtube-quality")
+                }.tint(palette.accent).disabled(model.busy).accessibilityIdentifier("youtube-quality")
                 status
                 }
                 if case .downloaded(let id) = model.libraryStatus, library.track(id)?.availability == .available {
@@ -96,7 +98,7 @@ struct VideoDetailView: View {
                 } else if localTrack == nil {
                     Button { downloads.enqueue(model.video, quality: preferences.quality) } label: {
                         Label("Download Audio", systemImage: "arrow.down.circle.fill")
-                            .frame(maxWidth: .infinity).padding().background(AppColors.accentPrimary).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+                            .frame(maxWidth: .infinity).padding().background(palette.accent).foregroundStyle(palette.onAccent).clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
                     }.disabled(model.stream == nil).accessibilityIdentifier("youtube-prepare")
                 }
                 if let issue = downloads.issue { Text(issue).foregroundStyle(AppColors.error) }
@@ -135,7 +137,7 @@ struct VideoDetailView: View {
         case .resolvingStreams: ProgressView("Resolving compatible audio…")
         case .ready:
             if let stream = model.stream {
-                Text("Audio available · \(stream.selected.container.uppercased()) · \(stream.selected.codec ?? "Unknown codec")").foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("youtube-stream-ready")
+                Text("Audio available · \(stream.selected.container.uppercased()) · \(stream.selected.codec ?? "Unknown codec")").foregroundStyle(palette.accent).accessibilityIdentifier("youtube-stream-ready")
                 if let bitrate = stream.selected.bitrate { Text("\(bitrate / 1000) kbps").foregroundStyle(AppColors.textSecondary) }
             }
         case .failed(let error), .unavailable(let error):
@@ -146,6 +148,7 @@ struct VideoDetailView: View {
 }
 
 struct ImportLinkView: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     @State private var urlText: String
@@ -163,7 +166,7 @@ struct ImportLinkView: View {
                 PasteButton(payloadType: String.self) { values in if let value = values.first { urlText = value; message = nil } }
                     .accessibilityIdentifier("youtube-clipboard-paste")
                 if let message { Text(message).font(.subheadline).foregroundStyle(AppColors.error).accessibilityIdentifier("youtube-link-error") }
-                Button("Inspect Link", action: inspect).buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("youtube-inspect-link")
+                Button("Inspect Link", action: inspect).buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("youtube-inspect-link")
                 Spacer()
             }.padding(AppSpacing.xl).navigationTitle("Import Link")
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }.screenBackground()

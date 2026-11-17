@@ -20,6 +20,7 @@ struct MigrationResolutionSummaryLink: View {
 }
 
 struct MigrationResolutionListView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     let playlistID: String
     let migrationID: UUID
@@ -59,7 +60,7 @@ struct MigrationResolutionListView: View {
                     }
                 }
             } else if let error { Text(error) } else { ProgressView() }
-        }.scrollContentBackground(.hidden).screenBackground().tint(AppColors.accentPrimary)
+        }.scrollContentBackground(.hidden).screenBackground().tint(palette.accent)
             .navigationTitle("Song Resolution").navigationBarTitleDisplayMode(.inline)
             .task(id: library.snapshot.migrationPresentations[playlistID]?.session.updatedAt) { await load() }
             .refreshable { await load() }

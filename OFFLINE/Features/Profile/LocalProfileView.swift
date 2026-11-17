@@ -2,6 +2,7 @@ import SwiftUI
 
 /// The Profile page, opened from the Home header avatar.
 struct LocalProfileView: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var profile: LocalProfileService
     @State private var editing: ProfileEditFocus?
@@ -23,9 +24,18 @@ struct LocalProfileView: View {
                         Text("LISTENING ACTIVITY").font(.caption.weight(.semibold)).foregroundStyle(AppColors.textSecondary).accessibilityAddTraits(.isHeader)
                         ListeningPreviewCard()
                     }
+                    section("Personalization") {
+                        NavigationLink { AppearanceSettingsView() } label: {
+                            HStack(spacing: AppSpacing.md) {
+                                Image(systemName: "paintpalette").foregroundStyle(palette.accent).frame(width: 24)
+                                Text("Appearance").foregroundStyle(AppColors.textPrimary)
+                                Spacer()
+                                Circle().fill(palette.accent).frame(width: 14, height: 14).accessibilityHidden(true)
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(AppColors.textTertiary)
+                            }.frame(minHeight: 52).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityIdentifier("profile-appearance")
+                    }
                     section("Coming Later") {
-                        planned("Appearance", icon: "paintpalette", detail: "Custom themes")
-                        Divider().overlay(AppColors.divider)
                         planned("Music Sharing", icon: "square.and.arrow.up.on.square", detail: "Library export and import")
                     }
                     section("Settings") {
@@ -55,9 +65,9 @@ struct LocalProfileView: View {
             Text(current.username).font(.system(size: 26, weight: .bold)).foregroundStyle(AppColors.textPrimary)
                 .multilineTextAlignment(.center).accessibilityIdentifier("profile-username")
             Button { editing = .username } label: {
-                Text("Edit Profile").font(.subheadline.weight(.semibold)).foregroundStyle(.black)
+                Text("Edit Profile").font(.subheadline.weight(.semibold)).foregroundStyle(palette.onAccent)
                     .padding(.horizontal, AppSpacing.xl).frame(minHeight: 40)
-                    .background(AppColors.accentPrimary).clipShape(Capsule())
+                    .background(palette.accent).clipShape(Capsule())
             }.buttonStyle(.plain).accessibilityIdentifier("profile-edit")
         }.frame(maxWidth: .infinity).padding(.top, AppSpacing.md)
     }
@@ -66,7 +76,7 @@ struct LocalProfileView: View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
             Text("Profile unavailable").font(.headline).foregroundStyle(AppColors.textPrimary)
             if case .failed(let message) = profile.state { Text(message).font(.subheadline).foregroundStyle(AppColors.textSecondary) }
-            Button("Try Again") { profile.load() }.foregroundStyle(AppColors.accentPrimary).frame(minHeight: 44)
+            Button("Try Again") { profile.load() }.foregroundStyle(palette.accent).frame(minHeight: 44)
                 .accessibilityIdentifier("profile-retry")
         }.frame(maxWidth: .infinity, alignment: .leading).cardSurface()
     }
@@ -83,7 +93,7 @@ struct LocalProfileView: View {
     private func row(_ title: String, icon: String, identifier: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: AppSpacing.md) {
-                Image(systemName: icon).foregroundStyle(AppColors.accentPrimary).frame(width: 24)
+                Image(systemName: icon).foregroundStyle(palette.accent).frame(width: 24)
                 Text(title).foregroundStyle(AppColors.textPrimary)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(AppColors.textTertiary)
