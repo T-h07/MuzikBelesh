@@ -1,7 +1,6 @@
-# Muzik Belesh v1.1.0 — Draft release notes
+# Muzik Belesh v1.1.0 — Release notes
 
-> **Draft.** Not published. v1.1.0 is a release candidate until physical-device acceptance
-> is recorded and the release is explicitly approved (see `Docs/PHASE_10_09_RELEASE.md`).
+**Release candidate:** unsigned IPA build **99**, built from product source `d5551d5`. The developer reported successful in-place installation and targeted iPhone acceptance. The release was approved after acceptance; see [Phase 10.9 release evidence](PHASE_10_09_RELEASE.md).
 
 v1.1.0 adds **playlist migration**: bring a Spotify playlist into Muzik Belesh from an
 exported file, match each song to audio, download it, and play the playlist offline in its
@@ -75,3 +74,22 @@ YouTube Share extension) is unchanged.
 Install over the existing app with the **same SideStore signing identity** so the app keeps
 its data container and App Group. Library, playlists, downloads and queue carry over; the
 database is upgraded in place and never reset.
+
+## Security, performance and code quality
+
+- Validates long embedded artist/album tags and YouTube metadata before import so unusual metadata doesn't abort an otherwise valid audio import.
+- Tightens handling of security-scoped local-file access and validates free-text CI workflow input.
+- Reduces repeated playback-context calculations when displaying ordinary playlists.
+- Removes obsolete Phase 1 debug mocks and unused types; no playback or migration engine rewrite.
+
+## Verification and artifact
+
+- Focused native verification: **261 tests passed, none failed** ([run](https://github.com/T-h07/MuzikBelesh/actions/runs/44096490155)).
+- Complete regression: library UI **16/16**, compact UI **5/5**; seven documented pre-existing failures remain in other suites, including six migration/review UI cases and one coordinator timing case ([run](https://github.com/T-h07/MuzikBelesh/actions/runs/44096495656)). This full run was **not green**.
+- The developer reported passing in-place preservation and playlist-import device checks on build 98, followed by the targeted build-99 regression checks.
+- IPA build: [GitHub Actions run 44093034975](https://github.com/T-h07/MuzikBelesh/actions/runs/44093034975), `OFFLINE-unsigned.ipa`, v1.1.0 build 99.
+- IPA SHA-256: `2358a7bdd6da6dafa3d309501464c4fc53163c99f46e732bd64b90c6b530984f`.
+
+The IPA is **unsigned** and must be signed by SideStore. Use the same signing identity when upgrading, and **do not uninstall** the existing app.
+
+[Final hardening audit](PHASE_10_09_SECURITY_PERFORMANCE.md) · [Release acceptance and known risks](PHASE_10_09_RELEASE.md)
