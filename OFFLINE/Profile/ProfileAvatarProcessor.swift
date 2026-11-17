@@ -23,7 +23,7 @@ enum ProfileAvatarProcessor {
     /// Validates `data` as a decodable image and produces centre-cropped square JPEGs.
     /// ImageIO's thumbnailer decodes at reduced size, so the full-resolution bitmap is never
     /// materialized.
-    static func prepare(_ data: Data) throws -> PreparedAvatar {
+    static func prepare(_ data: Data, maximumSourceSide: Int = maximumSourceSide, maximumSourcePixels: Int = maximumSourcePixels) throws -> PreparedAvatar {
         guard !data.isEmpty else { throw LocalProfileError.invalidImage }
         guard data.count <= maximumInputBytes else { throw LocalProfileError.imageTooLarge }
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -44,12 +44,13 @@ enum ProfileAvatarProcessor {
     private static func square(_ source: CGImageSource, width: Int, height: Int, side: Int) throws -> Data {
         // Downsample so the shorter edge is at least `side`, then centre-crop to a square.
         let shorter = max(1, min(width, height)), longer = max(width, height)
-        let target = max(side, Int((Double(side) * Double(longer) / Double(shorter)).rounded(.up)))
+        // One extra pixel so rounding never leaves the shorter edge below `side`.
+        let target = max(side, Int((Double(side) * Double(longer) / Double(shorter)).rounded(.up)) + 1)
         guard let scaled = CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: min(target, maximumSourceSide)
+            kCGImageSourceThumbnailMaxPixelSize: min(target, Self.maximumSourceSide)
         ] as CFDictionary) else { throw LocalProfileError.invalidImage }
         let edge = min(scaled.width, scaled.height)
         guard edge > 0, let cropped = scaled.cropping(to: CGRect(x: (scaled.width - edge) / 2, y: (scaled.height - edge) / 2, width: edge, height: edge))
