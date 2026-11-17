@@ -63,7 +63,7 @@ enum UsernamePolicy {
     /// Hard bound on Unicode scalars, so 30 heavily stacked combining marks cannot grow unbounded.
     static let maximumScalars = 120
 
-    enum Violation: Equatable, Sendable {
+    enum Violation: Error, Equatable, Sendable {
         case empty, tooLong, invalidCharacters
         var message: String {
             switch self {

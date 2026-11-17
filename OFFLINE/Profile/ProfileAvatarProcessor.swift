@@ -23,7 +23,7 @@ enum ProfileAvatarProcessor {
     /// Validates `data` as a decodable image and produces centre-cropped square JPEGs.
     /// ImageIO's thumbnailer decodes at reduced size, so the full-resolution bitmap is never
     /// materialized.
-    static func prepare(_ data: Data, maximumSourceSide: Int = maximumSourceSide, maximumSourcePixels: Int = maximumSourcePixels) throws -> PreparedAvatar {
+    static func prepare(_ data: Data, maximumSourceSide: Int = ProfileAvatarProcessor.maximumSourceSide, maximumSourcePixels: Int = ProfileAvatarProcessor.maximumSourcePixels) throws -> PreparedAvatar {
         guard !data.isEmpty else { throw LocalProfileError.invalidImage }
         guard data.count <= maximumInputBytes else { throw LocalProfileError.imageTooLarge }
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
