@@ -52,8 +52,10 @@ final class StorageCoordinator: ObservableObject {
         try? database.dbQueue.write { try $0.execute(sql: "UPDATE import_operations SET state = ?, dateUpdated = ? WHERE id = ?", arguments: [state, Date(), id]) }
     }
     private func performImport(from source: URL, sourceType: String?, sourceIdentifier: String?, video: YouTubeVideo?, artwork: Data?) async throws -> ImportResult {
-        guard source.startAccessingSecurityScopedResource() || source.isFileURL else { throw StorageError.invalidPath }
-        defer { source.stopAccessingSecurityScopedResource() }
+        // Balance security-scoped access: stop only what this call started.
+        let scoped = source.startAccessingSecurityScopedResource()
+        guard scoped || source.isFileURL else { throw StorageError.invalidPath }
+        defer { if scoped { source.stopAccessingSecurityScopedResource() } }
         guard SupportedAudioFormat.isSupported(source) else { throw StorageError.unsupportedAudio }
         let id = UUID().uuidString
         let stagingName = "\(id).\(source.pathExtension.lowercased())"
@@ -73,7 +75,9 @@ final class StorageCoordinator: ObservableObject {
                 metadata.artist = metadata.artist ?? video.channel
                 metadata.artworkData = metadata.artworkData ?? artwork
             }
-            if metadata.title == id { metadata.title = source.deletingPathExtension().lastPathComponent }
+            let sourceTitle = source.deletingPathExtension().lastPathComponent
+            if metadata.title == id { metadata.title = sourceTitle }
+            metadata = metadata.sanitizedForLibrary(fallbackTitle: sourceTitle)
             try Task.checkCancellation()
             let result = try commitImport(operation: operation, staging: staging, metadata: metadata, sourceType: sourceType, sourceIdentifier: sourceIdentifier)
             try? FileManager.default.removeItem(at: staging)

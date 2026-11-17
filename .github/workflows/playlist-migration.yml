@@ -184,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           RUN=$(find build/Products/Build/Products -name '*.xctestrun' -print -quit)
-          SUITES=(ReleaseImportStressTests ReleaseCorruptImportTests CanceledPhase108UpgradeTests SharedLinkInboxTests ShareURLValidationTests)
+          SUITES=(ReleaseImportStressTests ReleaseCorruptImportTests CanceledPhase108UpgradeTests SharedLinkInboxTests ShareURLValidationTests ReleaseHardeningTests)
           # A focused run adds every suite whose import, persistence, recovery, association,
           # playback-queue or sharing path the release gates depend on.
           if [[ "${{ inputs.release_only == true }}" == true ]]; then
