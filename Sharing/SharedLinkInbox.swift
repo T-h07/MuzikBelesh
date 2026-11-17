@@ -85,9 +85,15 @@ struct SharedLinkInbox {
                 } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
                     // First use.
                 }
+                if restored {
+                    // Commit the conversion before the requested change: a change that throws
+                    // (for example a full queue) must not leave the version 2 file in place
+                    // to be converted, and backed up, again on every later attempt.
+                    try JSONEncoder().encode(queue).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                }
                 let previous = queue.pending
                 let result = try change(&queue.pending)
-                if queue.pending != previous || restored {
+                if queue.pending != previous {
                     try JSONEncoder().encode(queue).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
                 }
                 return result
@@ -127,8 +133,14 @@ struct SharedLinkInbox {
                   default: return false
                   }
               }) else { throw Failure.invalid }
-        let backup = directory.appendingPathComponent(canceledVersion2BackupPrefix + UUID().uuidString + ".json")
-        try data.write(to: backup, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        // A conversion whose rewrite failed is retried later; keep one copy of identical bytes.
+        let existing = ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
+            .filter { $0.hasPrefix(canceledVersion2BackupPrefix) }
+            .contains { (try? Data(contentsOf: directory.appendingPathComponent($0))) == data }
+        if !existing {
+            let backup = directory.appendingPathComponent(canceledVersion2BackupPrefix + UUID().uuidString + ".json")
+            try data.write(to: backup, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
         var queue = Queue()
         queue.pending = legacy.pending.filter { $0.kind == "youtubeVideo" }
             .map { PendingShare(id: $0.id, videoID: $0.value, created: $0.created) }

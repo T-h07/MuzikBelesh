@@ -99,6 +99,65 @@ final class SharedLinkInboxTests: XCTestCase {
         XCTAssertEqual(try inbox.first()?.videoID, "9bZkp7q19f0")
     }
 
+    private var backups: [String] {
+        get throws { try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.hasPrefix(SharedLinkInbox.canceledVersion2BackupPrefix) } }
+    }
+
+    /// Phase 10.9: a full 10.8 queue whose first request after the upgrade is refused (the
+    /// queue is full) is still converted exactly once, and nothing in it is lost.
+    func testCanceledPhase108ConversionIsCommittedEvenWhenTheFirstChangeFails() throws {
+        let file = root.appendingPathComponent("PendingYouTubeLinks-v1.json")
+        let records = (0..<SharedLinkInbox.capacity).map { index in
+            #"{"id":"\#(UUID().uuidString)","kind":"youtubeVideo","value":"\#(String(format: "fixture%04d", index))","created":\#(index)}"#
+        }
+        let v2 = Data(#"{"version":2,"pending":[\#(records.joined(separator: ","))]}"#.utf8)
+        try v2.write(to: file)
+        XCTAssertThrowsError(try inbox.save("dQw4w9WgXcQ"), "The converted queue is full")
+        let stored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        XCTAssertEqual(stored["version"] as? Int, 1, "The conversion was committed although the change failed")
+        XCTAssertEqual((stored["pending"] as? [Any])?.count, SharedLinkInbox.capacity)
+        XCTAssertEqual(try backups.count, 1)
+        XCTAssertEqual(try inbox.first()?.videoID, "fixture0000")
+        XCTAssertEqual(try backups.count, 1, "A converted queue is not backed up again")
+
+        // If identical version 2 bytes reappear (an earlier rewrite failed after the backup),
+        // the existing backup is reused rather than duplicated.
+        try v2.write(to: file, options: .atomic)
+        XCTAssertEqual(try inbox.first()?.videoID, "fixture0000")
+        XCTAssertEqual(try backups.count, 1)
+        var delivered: [String] = []
+        while let item = try inbox.first() { delivered.append(item.videoID); try inbox.acknowledge(item.id) }
+        XCTAssertEqual(delivered, (0..<SharedLinkInbox.capacity).map { String(format: "fixture%04d", $0) }, "Order and every link survive")
+    }
+
+    /// The app and the Share extension can both touch the 10.8 queue first. Coordinated
+    /// access converts it once and keeps every YouTube share plus every new one.
+    func testConcurrentFirstAccessToCanceledQueueConvertsOnceAndLosesNothing() async throws {
+        let file = root.appendingPathComponent("PendingYouTubeLinks-v1.json")
+        let a = UUID(), b = UUID()
+        let v2 = """
+            {"version":2,"pending":[{"id":"\(a.uuidString)","kind":"youtubeVideo","value":"dQw4w9WgXcQ","created":1},\
+            {"id":"\(UUID().uuidString)","kind":"spotifyPlaylist","value":"37i9dQZF1DXcBWIGoYBM5M","created":2},\
+            {"id":"\(b.uuidString)","kind":"youtubeVideo","value":"9bZkp7q19f0","created":3}]}
+            """
+        try Data(v2.utf8).write(to: file)
+        let store = inbox
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<8 {
+                group.addTask {
+                    if index.isMultiple(of: 2) { _ = try store.first() } else { try store.save(String(format: "fixture%04d", index)) }
+                }
+            }
+            try await group.waitForAll()
+        }
+        var delivered: [UUID: String] = [:]
+        while let item = try store.first() { delivered[item.id] = item.videoID; try store.acknowledge(item.id) }
+        XCTAssertEqual(delivered.count, 6)
+        XCTAssertEqual(delivered[a], "dQw4w9WgXcQ"); XCTAssertEqual(delivered[b], "9bZkp7q19f0")
+        XCTAssertEqual(Set(delivered.values), ["dQw4w9WgXcQ", "9bZkp7q19f0", "fixture0001", "fixture0003", "fixture0005", "fixture0007"])
+        XCTAssertEqual(try backups.count, 1)
+    }
+
     func testUnknownVersionTwoContentStaysRejectedAndUntouched() throws {
         let file = root.appendingPathComponent("PendingYouTubeLinks-v1.json")
         for bytes in [#"{"version":2,"pending":[{"id":"\#(UUID().uuidString)","kind":"appleMusic","value":"x","created":1}]}"#,
