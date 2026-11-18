@@ -1,5 +1,10 @@
 # Muzik Belesh v1.2.0
 
+**Published:** 18 November 2026 · **Build:** 200 · **[GitHub Release](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)**
+
+[Download the unsigned IPA](https://github.com/T-h07/MuzikBelesh/releases/download/v1.2.0/OFFLINE-unsigned.ipa) · [SHA-256 checksum](https://github.com/T-h07/MuzikBelesh/releases/download/v1.2.0/OFFLINE-unsigned.ipa.sha256) · [Installation guide](SIDELOADING.md)
+
+
 Muzik Belesh v1.2.0 is a free update for everyone on v1.1.0. It adds a local profile,
 listening statistics, custom accent colours, library sharing between iPhones and automatic
 collection artwork, and finishes with a release-hardening pass across playback, storage,
@@ -59,9 +64,7 @@ playlists and settings stay where they are.
 - **Build integrity**: the release pipeline pins its GitHub Actions to exact commits,
   verifies both app and Share extension identities, versions, minimum iOS version and the
   absence of test-only code, and publishes a SHA-256 checksum with the IPA.
-- **Upgrade safety**: new automated checks upgrade databases from v1.1.0 and every Phase 11
-  build to v1.2.0 and verify that no row changes, playlist order and audio files are kept,
-  and SQLite integrity and foreign keys are intact.
+- **Upgrade safety**: new automated upgrade test cases cover databases from v1.1.0 and Phase 11 builds, checking row preservation, playlist order, audio files, SQLite integrity and foreign-key consistency. The final complete CI run was canceled; these tests must not be described as fully green for this release.
 
 ## Install or update
 
@@ -97,3 +100,16 @@ Full details: [Known limitations](KNOWN_LIMITATIONS.md) ·
 [Phase 12 audit](PHASE_12_FINAL_RELEASE_AUDIT.md) ·
 [Security audit](PHASE_12_SECURITY_AUDIT.md) ·
 [Performance report](PHASE_12_PERFORMANCE_REPORT.md)
+
+
+## Published release provenance and verification
+
+The public v1.2.0 IPA was built from source `ab3763cd0a1f9dfec628bd590d3a2627bb34118f` by [GitHub Actions #110](https://github.com/T-h07/MuzikBelesh/actions/runs/44371763077). The build verified version **1.2.0**, build **200**, app and extension identities and packaging.
+
+**Accepted IPA SHA-256:** `a59f7597946dd64d3cc25cbeef675a3cf1f87f09dd0ce8e4b265b2ed73685ea2`
+
+The owner reported **10/10 PASS** on the expedited physical iPhone checks, including in-place data preservation, playback and background controls, YouTube downloads, Spotify migration, local profile, analytics, themes, artwork mosaics and portable library sharing.
+
+**Automated verification limitation:** final CI #307 and the playlist migration verification run were intentionally canceled to prioritize release, and prior Phase 12 CI runs failed. They are **not** represented as passing. The owner approved publication with those documented risks; see [release gates](PHASE_12_RELEASE_CHECKLIST.md) and [physical acceptance](PHASE_12_DEVICE_ACCEPTANCE.md).
+
+The v1.1.0 and v1.0.0 releases remain available as historical versions.
