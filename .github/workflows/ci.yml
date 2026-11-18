@@ -103,6 +103,15 @@ jobs:
           echo "SIMULATOR_ID=$ID" >> "$GITHUB_ENV"
           xcrun simctl boot "$ID"
           xcrun simctl bootstatus "$ID" -b
+          # Phase 12: every 60 s "App animations complete notification not received" stall in
+          # CI #284-#298 happened inside "Type into TextField". Keyboard suggestion, slide-to-type
+          # and onboarding animations keep the app from idling; disable them for typing tests.
+          for key in KeyboardAutocorrection KeyboardPrediction KeyboardContinuousPathEnabled KeyboardShowPredictionBar; do
+            xcrun simctl spawn "$ID" defaults write com.apple.Preferences "$key" -bool NO
+          done
+          for key in DidShowContinuousPathIntroduction DidShowGestureKeyboardIntroduction; do
+            xcrun simctl spawn "$ID" defaults write com.apple.Preferences "$key" -bool YES
+          done
       - name: Build testing products
         run: |
           set -euo pipefail

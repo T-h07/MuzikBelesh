@@ -61,10 +61,18 @@ final class ReviewQueueUITests: XCTestCase {
     /// Taps the exact candidate's Use button and confirms the dialog that names it.
     private func use(song: Int, candidate: Int) {
         let button = useButton(song: song, candidate: candidate)
-        reveal(button); button.tap()
+        reveal(button)
+        // A button revealed at the very bottom edge sits in the system gesture zone, where a
+        // synthesized tap is swallowed (Phase 12 CI evidence: tap at y≈896 of 956, no dialog).
+        if button.frame.maxY > app.frame.maxY - 80 { queueScroll.swipeUp(velocity: .slow) }
+        button.tap()
+        // The candidate's title also appears in the queue itself, so wait for the dialog's
+        // own title before checking that its message names the tapped candidate.
+        XCTAssertTrue(app.staticTexts["Use this recording?"].firstMatch.waitForExistence(timeout: 5), "Tapping Use opens the confirmation")
         let named = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Candidate \(candidate + 1) for song \(song + 1)")).firstMatch
-        XCTAssertTrue(named.waitForExistence(timeout: 3), "The dialog names the tapped candidate")
-        let confirm = app.buttons["review-confirm-use"]
+        XCTAssertTrue(named.exists, "The dialog names the tapped candidate")
+        // iOS 26 exposes a confirmationDialog action more than once under one identifier.
+        let confirm = app.buttons.matching(identifier: "review-confirm-use").firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 3)); confirm.tap()
     }
     /// The queue shows exactly one song, it is the expected one, and it starts at the top.
@@ -79,7 +87,7 @@ final class ReviewQueueUITests: XCTestCase {
         XCTAssertTrue(header.isHittable, "A newly opened song starts at the top", file: file, line: line)
     }
     private func assertNoConfirmation(_ message: String, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertFalse(app.buttons["review-confirm-use"].exists, message, file: file, line: line)
+        XCTAssertFalse(app.buttons.matching(identifier: "review-confirm-use").firstMatch.exists, message, file: file, line: line)
     }
 
     // MARK: Tests

@@ -121,17 +121,20 @@ final class PlaylistFileImportUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
         let start = Date()
         for _ in 0..<12 { app.swipeUp(velocity: .fast) }
-        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "migration-occurrence-"))
-        let visible = rows.allElementsBoundByIndex.filter(\.isHittable)
-        XCTAssertFalse(visible.isEmpty, "Rows must remain usable after rapid scrolling")
+        // Read the rows from one consistent snapshot. Querying element-by-element while a
+        // fast fling is still decelerating races cell reuse ("No matches found" in CI #298).
+        let visibleIDs = settledVisibleOccurrenceIDs()
+        XCTAssertFalse(visibleIDs.isEmpty, "Rows must remain usable after rapid scrolling")
         XCTAssertFalse(app.staticTexts["Synthetic song 0"].isHittable)
-        XCTAssertEqual(Set(visible.map(\.identifier)).count, visible.count)
-        guard let inspected = visible.first else { return }
+        XCTAssertEqual(Set(visibleIDs).count, visibleIDs.count)
+        guard let inspectedID = visibleIDs.first else { return }
+        let inspected = app.buttons[inspectedID]
+        let visible = visibleIDs
         inspected.tap()
         XCTAssertTrue(app.staticTexts["migration-inspector-status"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["migration-inspector-status"].label, "Awaiting local audio")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "migration-occurrence-play-")).firstMatch.exists)
-        let evidence = XCTAttachment(string: "1,000-entry dataset; twelve rapid scrolls and entry inspection elapsed: \(Date().timeIntervalSince(start)) seconds; visible occurrence IDs: \(visible.map(\.identifier)). No latency threshold claimed.")
+        let evidence = XCTAttachment(string: "1,000-entry dataset; twelve rapid scrolls and entry inspection elapsed: \(Date().timeIntervalSince(start)) seconds; visible occurrence IDs: \(visible). No latency threshold claimed.")
         evidence.lifetime = .keepAlways; add(evidence)
         let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.lifetime = .keepAlways; add(screenshot)
         app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
@@ -154,6 +157,33 @@ final class PlaylistFileImportUITests: XCTestCase {
         let item = app.buttons["Migration Details"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), file: file, line: line); item.tap()
         XCTAssertTrue(app.navigationBars["Migration Details"].waitForExistence(timeout: 5), file: file, line: line)
+    }
+
+    /// Occurrence row identifiers fully on screen, from a single accessibility snapshot taken
+    /// once two consecutive snapshots agree (the list has stopped moving). Bounded: 10 tries.
+    private func settledVisibleOccurrenceIDs() -> [String] {
+        func capture() -> [String] {
+            guard let root = try? app.snapshot() else { return [] }
+            let window = app.windows.firstMatch.frame
+            var ids: [String] = []
+            var stack: [XCUIElementSnapshot] = [root]
+            while let node = stack.popLast() {
+                if node.elementType == .button, node.identifier.hasPrefix("migration-occurrence-"),
+                   !node.identifier.hasPrefix("migration-occurrence-play-"),
+                   node.frame.minY >= window.minY + 120, node.frame.maxY <= window.maxY - 100 {
+                    ids.append(node.identifier)
+                }
+                stack.append(contentsOf: node.children.reversed())
+            }
+            return ids
+        }
+        var previous = capture()
+        for _ in 0..<10 {
+            let next = capture()
+            if !next.isEmpty && next == previous { return next }
+            previous = next
+        }
+        return previous
     }
 
     /// Bounded: stops at the first swipe that makes `element` tappable.
