@@ -74,8 +74,13 @@ final class PlaylistFileImportUITests: XCTestCase {
         assertSelected(0)
         let selectAll = app.buttons["playlist-import-select-all"]
         scrollTo(selectAll, down: true); selectAll.tap()
-        let firstSwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
-        scrollTo(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
+        let anySwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
+        scrollTo(anySwitch)
+        // Pin one candidate. A `firstMatch` query re-resolves after scrolling, and once the first
+        // row leaves the lazy list it names the next candidate's switch instead (CI evidence:
+        // the second flip tapped a different identifier, turning an already-selected one off).
+        let firstSwitch = app.switches[anySwitch.identifier]
+        XCTAssertEqual(firstSwitch.value as? String, "1")
         // Flip the switch itself and confirm the selection model changed, not only the control.
         flipSwitch(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "0")
         assertSelected(1)

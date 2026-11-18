@@ -179,6 +179,32 @@ hardening issue with no user-visible effect.
   lime → custom is a real change and is still published.
 - **Decision:** no test or timeout change on a single observation; tracked in G05.
 
+### P12-18 — Multiple-selection import test flipped the wrong playlist (P3, fixed)
+
+- **Component:** `Tests/UITests/PlaylistFileImportUITests.swift`
+  (`testMultipleSelectionRenamePreviewAndInvalidCandidate`, line 83).
+- **Observed:** failed identically in every run inspected (44182165889, 44195714008,
+  44205035981, 44290264115, 44296803454, 44309773242): `"0"` is not equal to `"1"` after the
+  second flip.
+- **Root cause:** the switch was a lazy `firstMatch` query. The CI log shows the first flip
+  tapping `playlist-import-select-A787D7BE…` and, after the scroll, the second flip tapping
+  `playlist-import-select-6C81A088…` — a different, already-selected playlist, which it
+  turned off. The app behaved correctly.
+- **Correction:** pin the switch by its resolved identifier before flipping. Assertions
+  unchanged.
+
+### P12-19 — Two Phase 12 UI-test corrections needed a second pass (P3, fixed)
+
+- **Review queue (P12-06):** the extra swipe addressed the scroll view "containing the song
+  header"; once `reveal` had scrolled, the header was no longer in the hierarchy, so the
+  swipe found no element (run 44309773242). It now swipes the scroll view containing the
+  button being tapped.
+- **Playlist search (P12-01):** with the fix, the test passes the step that failed before
+  (line 76) and reaches "Clear". Clear also ends the search, so the list returns to its top,
+  where the playlist header leaves room for one 131 pt row; the old assertion that
+  "Original song 3" *exists* required a row the lazy List had not created. The test now
+  checks the count is back to 5 and scrolls to song 3.
+
 ### P12-10 — HTTP metadata responses buffered without a limit (P2, security)
 
 See [security audit S01](PHASE_12_SECURITY_AUDIT.md). Fixed with `BoundedHTTPBody`

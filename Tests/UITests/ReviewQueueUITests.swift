@@ -64,7 +64,11 @@ final class ReviewQueueUITests: XCTestCase {
         reveal(button)
         // A button revealed at the very bottom edge sits in the system gesture zone, where a
         // synthesized tap is swallowed (Phase 12 CI evidence: tap at y≈896 of 956, no dialog).
-        if button.frame.maxY > app.frame.maxY - 80 { queueScroll.swipeUp(velocity: .slow) }
+        // Swipe the scroll view that holds this button: after `reveal` has scrolled, the song
+        // header (which `queueScroll` is keyed on) may already have left the hierarchy.
+        if button.frame.maxY > app.frame.maxY - 80 {
+            app.scrollViews.containing(.button, identifier: button.identifier).firstMatch.swipeUp(velocity: .slow)
+        }
         button.tap()
         // The candidate's title also appears in the queue itself, so wait for the dialog's
         // own title before checking that its message names the tapped candidate.
