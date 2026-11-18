@@ -113,4 +113,11 @@ The project owner reports having installed **Muzik Belesh v1.2.0 build 200, IPA 
 
 **Remaining verification limitation:** [CI #307](https://github.com/T-h07/MuzikBelesh/actions/runs/44371494404) and [playlist migration verification](https://github.com/T-h07/MuzikBelesh/actions/runs/44371493723) were intentionally cancelled to prioritize IPA publication. Previous Phase 12 CI runs failed. A passing artifact build and ten manual smoke checks do not constitute complete automated regression. The app was compiled under Swift 5.9 settings and the IPA log also contains Swift 6 language-mode concurrency warnings; they are not build failures under the current toolchain. Any final release proceeds with explicitly documented CI coverage risk.
 
-**Status:** **EXPEDITED PHYSICAL ACCEPTANCE PASS (T01–T10)**. Formal publication is still **PENDING OWNER APPROVAL** and the release workflow's explicit accepted hash/SHA/run fields remain gated; this record is not a publication authorization.
+**Status at physical acceptance:** **EXPEDITED PHYSICAL ACCEPTANCE PASS (T01–T10)**. Formal publication was pending at the time of the initial record; subsequent owner approval and publication are recorded below.
+
+
+## Post-acceptance publication outcome — 18 November 2026
+
+Following the expedited ten-test acceptance, the owner **explicitly approved publication despite incomplete final CI verification**. The application source passed through [PR #30](https://github.com/T-h07/MuzikBelesh/pull/30) to `develop`, [PR #31](https://github.com/T-h07/MuzikBelesh/pull/31) to `release` and [PR #32](https://github.com/T-h07/MuzikBelesh/pull/32) to `main`.
+
+**[Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0) is now published.** It retains the accepted unsigned build 200 IPA, manifest and SHA-256 checksum. The detailed R01–R45 checklist above is a separate verification instrument and remains **not individually attested**; the reported expedited T01–T10 results are unchanged at **10 PASS, 0 FAIL**.

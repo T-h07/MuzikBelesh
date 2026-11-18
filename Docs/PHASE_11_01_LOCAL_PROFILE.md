@@ -1,5 +1,8 @@
 # Phase 11.1 — Local Account System, Profile Onboarding & Profile Management
 
+> **Current status (18 November 2026):** This feature is merged into the stable application and published in [Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0). Historical branch/CI/acceptance status statements below describe the original feature-implementation stage, not the current release state. The final release had 10/10 owner-reported expedited iPhone checks PASS; complete final CI was canceled with known risks accepted.
+
+
 **Status:** **12/12 developer-reported physical-device checks PASS**; owner explicitly approved merging into `develop` without waiting for the complete native CI run. This approval does not imply the pending suite passed.
 Not released: the public release remains v1.1.0 until all Phase 11 work is accepted.
 

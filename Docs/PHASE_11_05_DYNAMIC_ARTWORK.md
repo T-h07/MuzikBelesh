@@ -1,5 +1,8 @@
 # Phase 11.5: Dynamic collection artwork and automatic 2×2 mosaics
 
+> **Current status (18 November 2026):** This feature is merged into the stable application and published in [Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0). Historical branch/CI/acceptance status statements below describe the original feature-implementation stage, not the current release state. The final release had 10/10 owner-reported expedited iPhone checks PASS; complete final CI was canceled with known risks accepted.
+
+
 Branch: `feature/phase-11-05-artwork`, from `develop` at `03fabc8` (Phase 11.4 merged, #28). Target: v1.2.0.
 Status: implemented; **not merged, not released**. Developer-reported physical-device acceptance **15/15 PASS** on 2026-11-18 using the user-facing P01–P15 checklist below. The distinct repository P01–P30 checklist has **not** been individually reported in full.
 

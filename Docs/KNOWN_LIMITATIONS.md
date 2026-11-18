@@ -61,3 +61,8 @@ waived for release; release-risk decisions are recorded in
   [PHASE_12_DEVICE_ACCEPTANCE.md](PHASE_12_DEVICE_ACCEPTANCE.md).
 - Multi-hour soak tests and Instruments (Allocations/Leaks/Time Profiler) sessions were not
   run in Phase 12; see [PHASE_12_PERFORMANCE_REPORT.md](PHASE_12_PERFORMANCE_REPORT.md).
+
+
+## Published v1.2.0 release-testing caveat
+
+Muzik Belesh v1.2.0 build 200 was released following **10/10 developer-reported expedited physical-device checks PASS**, including preservation of the existing library. The owner approved publication with an explicit qualification: final comprehensive CI #307 and playlist migration verification were canceled, and preceding Phase 12 runs had failures. These checks must **not** be represented as a complete green automated regression suite. See [release gates](PHASE_12_RELEASE_CHECKLIST.md) and [physical acceptance](PHASE_12_DEVICE_ACCEPTANCE.md).

@@ -8,10 +8,10 @@ A gate with unknown status is **not** passed.
 | Field | Value |
 | --- | --- |
 | Version / build | 1.2.0 / 200 |
-| Source SHA | FINAL_SOURCE_SHA |
-| CI run | FINAL_CI_RUN |
-| IPA build run / artifact | FINAL_IPA_RUN |
-| IPA SHA-256 | FINAL_IPA_SHA |
+| Source SHA | ab3763cd0a1f9dfec628bd590d3a2627bb34118f |
+| CI run | [#307](https://github.com/T-h07/MuzikBelesh/actions/runs/44371494404) — intentionally cancelled; previous runs failed |
+| IPA build run / artifact | [#110](https://github.com/T-h07/MuzikBelesh/actions/runs/44371763077) — SUCCESS; artifact `OFFLINE-unsigned-IPA` (14461626413) |
+| IPA SHA-256 | `a59f7597946dd64d3cc25cbeef675a3cf1f87f09dd0ce8e4b265b2ed73685ea2` |
 | Signing | Unsigned; SideStore signs with the user's identity |
 
 Preliminary (not for distribution): source 28603dd, run
@@ -21,9 +21,28 @@ upgrade-matrix and documentation commits and is superseded by the candidate abov
 
 ## Gate matrix
 
-GATE_TABLE
+| Gate | Actual verified status | Evidence / limitation |
+| --- | --- | --- |
+| G01 Compilation | **PASS** | Unsigned Release IPA workflow #110 compiled app and extension successfully |
+| G02 Static checks | **PARTIAL PASS** | PR CI #307 static-checks passed; complete workflow cancelled |
+| G03 Unit tests | **INCOMPLETE — accepted risk** | Prior Phase 12 CI runs failed, final CI cancelled |
+| G04 Integration tests | **INCOMPLETE — accepted risk** | Final full suite not completed |
+| G05 UI tests | **INCOMPLETE — accepted risk** | Final regression CI cancelled; 10 developer-reported physical smoke tests passed |
+| G06 Data integrity | **PHYSICAL SMOKE PASS / FULL MATRIX INCOMPLETE** | T02 and T10 pass on the iPhone; full automated coverage not confirmed |
+| G07 Security | **PARTIAL / risk accepted** | Phase 12 security audit exists; not claiming complete green security verification |
+| G08 Privacy | **PARTIAL / risk accepted** | No new reported issue in 10 physical tests; privacy fixture tests not reverified on final SHA |
+| G09 Playback | **PHYSICAL SMOKE PASS** | T03 and T04 |
+| G10 Downloads/migration | **PHYSICAL SMOKE PASS** | T05 and T06; migration CI cancelled |
+| G11 Performance | **PHYSICAL SMOKE PASS / METRICS UNVERIFIED** | User reports functioning UI; no final device-level benchmarks claimed |
+| G12 Memory | **NOT FULLY VERIFIED** | No physical long-duration memory profile reported |
+| G13 Artwork | **PHYSICAL SMOKE PASS** | T09 including rotation and custom priority |
+| G14 IPA packaging | **PASS** | Build #110, version 1.2.0, build 200, source ab3763c, SHA-256 above |
+| G15 In-place update | **PHYSICAL SMOKE PASS** | T02 and T10 preserved data |
+| G16 Developer physical acceptance | **EXPEDITED 10/10 PASS** | T01–T10 in PHASE_12_DEVICE_ACCEPTANCE.md; detailed R01–R45 not individually executed |
+| G17 Owner publication approval | **APPROVED** | Owner explicitly approved release despite the disclosed incomplete CI on 2026-11-18; publication workflow has separate explicit manual authorization |
 
-## Pre-publication checklist (owner)
+
+## Historical pre-publication checklist (completed after owner approval)
 
 1. Install the candidate above over the existing app with SideStore; do not uninstall.
 2. Run R01–R45 in [PHASE_12_DEVICE_ACCEPTANCE.md](PHASE_12_DEVICE_ACCEPTANCE.md) and
@@ -41,3 +60,18 @@ GATE_TABLE
    points at the published `main` commit.
 
 `v1.1.0` artifacts, tag and workflow are never modified.
+
+## Accepted expedited publication decision — 2026-11-18
+
+The owner expressly approved merging and publishing v1.2.0 **with the documented remaining CI limitations** after reporting **10/10 PASS** for the expedited iPhone acceptance. [PR #30](https://github.com/T-h07/MuzikBelesh/pull/30) merged to `develop`, [PR #31](https://github.com/T-h07/MuzikBelesh/pull/31) integrated into `release`, and [PR #32](https://github.com/T-h07/MuzikBelesh/pull/32) integrated into `main`. All changes relative to the accepted source `ab3763c` in the stable branch at verification were documentation or the publication workflow; no `OFFLINE/`, `OFFLINEShareExtension/`, `Sharing/`, `project.yml` or `Scripts/package-ipa.sh` changes.
+
+The manual publisher on `main` is pinned to IPA build 200 from run 44371763077, exact accepted source and SHA-256 above. **Approval and preparation are not evidence of actual publication**; the workflow's run and published release asset checks are required to mark publication successful.
+
+
+## Published release confirmation
+
+**Published successfully on 18 November 2026:** [Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0) contains all three verified assets: `OFFLINE-unsigned.ipa`, `OFFLINE-build-manifest.json` and `OFFLINE-unsigned.ipa.sha256`.
+
+Release version **1.2.0**, build **200**, accepted source `ab3763c`, IPA SHA-256 `a59f7597946dd64d3cc25cbeef675a3cf1f87f09dd0ce8e4b265b2ed73685ea2`. Owner-reported physical acceptance was **10/10 PASS**. The full final CI and playlist-migration verification runs were intentionally canceled; prior failures remain acknowledged rather than represented as green.
+
+No source rebuild or replacement IPA was required for documentation-only release changes. Earlier entries on this page record historical pre-publication conditions and should not be mistaken for the current publication status.
