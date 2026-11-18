@@ -1,7 +1,7 @@
 # Phase 11.4: Portable music library export, import and sharing
 
 Branch: `feature/phase-11-04-sharing`, from `develop` at `86f983e` (Phase 11.3 merged, #27).
-Status: implemented; unsigned IPA built (run 44195714530); awaiting developer physical-device acceptance. **Not merged, not released.**
+Status: implemented; unsigned IPA built (run 44195714530); developer reports installed Phase 11.4 IPA and says the feature works. Detailed P01–P25 device checks **not individually verified**. Owner explicitly approves merging into `develop` with these limitations. **Not merged or released at time of documentation update.**
 
 CI (run 44195714008, commit 8f5ac3e): static checks and the library shard pass; all 29 Phase 11.4 unit tests pass. The run is red only for failures that also fail on `develop` at 86f983e (ReleasePerformanceTests clock count, two ThemeServiceTests, ListeningAnalytics/PlaylistFileImport/PlaylistMigration/ReviewQueue UI tests) plus one simulator "Failed to terminate" flake in `LibraryManagementUITests.testAlbumNameAndArtistSurviveRelaunch` (passed on the previous run of identical app code).
 
@@ -187,7 +187,7 @@ durations (`PERF …` lines in the test log); no timing is claimed here that CI 
 
 ## 10. Physical acceptance checklist (developer)
 
-Not yet run. Do not mark PASS until reported.
+Developer reported the installed IPA works, but did not provide individual P01–P25 results. All specific checks below remain **NOT INDIVIDUALLY VERIFIED**; do not mark any PASS without reported evidence.
 
 | ID | Check |
 | --- | --- |
@@ -216,3 +216,11 @@ Not yet run. Do not mark PASS until reported.
 | P23 | Exported file opened in a text editor shows no name, photo, settings, paths or URLs beyond video IDs |
 | P24 | Theme accent is used throughout the sharing screens (try a non-lime accent) |
 | P25 | Playback, Downloads, Search and Spotify/Exportify import still work |
+
+## 11. Owner device feedback and integration decision — 2026-11-18
+
+- **Developer feedback:** “i have the IPA downloaded” followed by “it works gng we good”. This confirms a positive general physical-device report, **not** execution or passage of every P01–P25 case. No specific song ordering, duplicate-import, privacy, second-device sharing, cross-device acquisition, recovery, or stress checks were individually reported.
+- **Approval:** The project owner answered “yes merge” to the explicit question whether to merge with those remaining physical checks unverified. This is an explicit authorization to integrate Phase 11.4 into `develop` despite incomplete verification.
+- **Build:** [unsigned IPA #107](https://github.com/T-h07/MuzikBelesh/actions/runs/44195714530) succeeded for application source `8f5ac3ea49479b2c66c5e5c8b60df0d97edfb3ce`; the later documentation-only branch head is separate.
+- **CI:** [#294](https://github.com/T-h07/MuzikBelesh/actions/runs/44195714008) **FAILURE**, not green. Static checks and regression-library passed; regression-compact, regression-unit-accessibility and regression-other-ui failed, and aggregate build-and-test failed. The earlier implementation notes discuss pre-existing baseline failures and one flaky simulator test; this acceptance entry does **not** independently reclassify the current failure as harmless.
+- **Decision:** Merge only into `develop` with the above documented waiver; keep `release`, `main`, tags, and published releases unchanged. This is an owner-approved integration decision, not a full test sign-off or claim of all requirements passing.
