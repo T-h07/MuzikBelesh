@@ -129,6 +129,14 @@ for line in shards:
             problems.append(f"ci.yml {label}: selects {name} but does not require it to execute")
     print(f"{label}: {len(chosen)} selected, {len(required)} required{' (whole bundle)' if whole_bundle else ''}")
 
+# 5. Together, the ci.yml shards select every suite that has tests (YouTubeLiveTests is the
+#    opt-in live check with its own step), so splitting a shard cannot silently drop one.
+covered = set()
+for line in shards:
+    covered |= selected_suites(shlex.split(line)[3:])[0]
+for name in sorted(suites_with_tests - covered - {"OFFLINETests/YouTubeLiveTests"}):
+    problems.append(f"ci.yml: no regression shard runs {name}")
+
 for problem in problems:
     print(f"::error::{problem}")
 print(f"{len(classes)} test classes, {len(workflows)} workflows checked; {len(problems)} problem(s)")

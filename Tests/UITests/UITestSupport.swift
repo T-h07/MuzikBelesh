@@ -63,6 +63,14 @@ extension XCTestCase {
         let before = row.value as? String ?? ""
         let width = max(row.frame.width, 1)
         row.coordinate(withNormalizedOffset: CGVector(dx: max(0.5, (width - 30) / width), dy: 0.5)).tap()
+        // A tap that lands while the list is still settling from a scroll can be absorbed by
+        // the scroll view (flaky in CI #294/#298). Retry once on the nested control only when
+        // the value provably did not change; the final assertion is unchanged.
+        let changed = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before), object: row)], timeout: 3) == .completed
+        if !changed {
+            let inner = row.switches.firstMatch
+            if inner.exists && inner.isHittable { inner.tap() } else { row.coordinate(withNormalizedOffset: CGVector(dx: max(0.5, (width - 30) / width), dy: 0.5)).tap() }
+        }
         waitUntil(row, "value != %@", before, timeout: 3, message: "\(row.identifier) did not change from \(before)", file: file, line: line)
     }
 

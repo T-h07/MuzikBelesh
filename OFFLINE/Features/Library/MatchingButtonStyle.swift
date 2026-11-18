@@ -5,12 +5,13 @@ import UIKit
 /// `.primary` is lime text with a lime border; `.secondary` is neutral and never
 /// competes with the primary action.
 struct MatchingButtonStyle: ButtonStyle {
+    @Environment(\.themePalette) private var palette
     enum Kind { case primary, secondary }
     var kind: Kind = .primary
     var fullWidth = false
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
-        let tint = kind == .primary ? AppColors.accentPrimary : AppColors.textSecondary
+        let tint = kind == .primary ? palette.accent : AppColors.textSecondary
         configuration.label
             .font(.subheadline.weight(kind == .primary ? .semibold : .regular))
             .foregroundStyle(tint)

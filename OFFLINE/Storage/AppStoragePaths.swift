@@ -11,6 +11,9 @@ struct AppStoragePaths {
     let exports: URL
     let thumbnails: URL
     let deletions: URL
+    /// Phase 11.1 local profile avatars. Separate from `artwork` so avatar cleanup can never
+    /// touch music or playlist artwork, and outside Documents so it isn't exposed in Files.
+    let profile: URL
     let database: URL
 
     init(fileManager: FileManager = .default) throws {
@@ -25,6 +28,7 @@ struct AppStoragePaths {
         thumbnails = caches.appendingPathComponent("Thumbnails", isDirectory: true)
         database = applicationSupport.appendingPathComponent("muzikbelesh.sqlite")
         deletions = applicationSupport.appendingPathComponent("DeletionStaging", isDirectory: true)
+        profile = applicationSupport.appendingPathComponent("Profile", isDirectory: true)
         try createDirectories()
     }
 
@@ -40,11 +44,12 @@ struct AppStoragePaths {
         thumbnails = caches.appendingPathComponent("Thumbnails", isDirectory: true)
         database = applicationSupport.appendingPathComponent("muzikbelesh.sqlite")
         deletions = applicationSupport.appendingPathComponent("DeletionStaging", isDirectory: true)
+        profile = applicationSupport.appendingPathComponent("Profile", isDirectory: true)
         try createDirectories()
     }
 
     func createDirectories() throws {
-        for url in [documents, music, artwork, applicationSupport, caches, imports, exports, thumbnails, deletions] {
+        for url in [documents, music, artwork, applicationSupport, caches, imports, exports, thumbnails, deletions, profile] {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
@@ -62,4 +67,5 @@ struct AppStoragePaths {
 
     func musicURL(relativePath: String) throws -> URL { try relativeURL(relativePath, in: music) }
     func artworkURL(relativePath: String) throws -> URL { try relativeURL(relativePath, in: artwork) }
+    func profileURL(relativePath: String) throws -> URL { try relativeURL(relativePath, in: profile) }
 }

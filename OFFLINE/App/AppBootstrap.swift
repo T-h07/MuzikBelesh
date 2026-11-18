@@ -12,8 +12,25 @@ import Foundation
                 guard root.path.hasPrefix(parent.path + "/") else { fatalError("Invalid UI test root") }
                 if process.arguments.contains("--reset-ui-library"), FileManager.default.fileExists(atPath: root.path) { try FileManager.default.removeItem(at: root) }
                 let storage = try StorageCoordinator(paths: AppStoragePaths(root: root))
+                // Isolated appearance preferences: UI tests never read or change the real ones.
+                guard let themeDefaults = UserDefaults(suiteName: "ThemeUITests-\(identifier)") else { fatalError("Isolated preferences unavailable") }
+                if process.arguments.contains("--reset-ui-library") { themeDefaults.removePersistentDomain(forName: "ThemeUITests-\(identifier)") }
+                let themeStore = UserDefaultsThemePreferences(defaults: themeDefaults)
+                if let index = process.arguments.firstIndex(of: "--theme-preset"), process.arguments.indices.contains(index + 1),
+                   let data = try? JSONEncoder().encode(StoredTheme(selection: process.arguments[index + 1], custom: ThemeService.defaultCustomColor.hex)) {
+                    try themeStore.save(data)
+                }
                 if process.arguments.contains("--reset-ui-library") { try seed(storage) }
+                if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--artwork-fixtures") { try ArtworkFixtureSeeder.seed(storage) }
+                // The global artwork switch shares the isolated appearance suite (separate key).
+                let artworkStore = UserDefaultsCollectionArtworkDefaults(defaults: themeDefaults)
+                // Historical suites expect Home: a reset library has a profile unless a Phase 11.1
+                // test asks for the first-launch (or v1.1.0-upgrade) onboarding state.
+                if process.arguments.contains("--reset-ui-library"), !process.arguments.contains("--profile-onboarding") {
+                    _ = try LocalProfileRepository(db: storage.database.dbQueue, paths: storage.paths).create(username: "UI Listener", avatar: nil)
+                }
                 if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--migration-fixtures") { try seedMigrations(storage) }
+                if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--listening-fixture") { try ListeningFixtureSeeder.seed(storage: storage) }
                 if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--review-queue-fixture") { try seedReviewQueue(storage) }
                 if process.arguments.contains("--youtube-fixtures") {
                     let fixtures = YouTubeUITestFixtures()
@@ -21,7 +38,7 @@ import Foundation
                     if process.arguments.contains("--reset-ui-library") { defaults.removePersistentDomain(forName: "YouTubeUITests-\(identifier)") }
                     // Automatic acquisition is opt-in for UI tests so historical suites keep
                     // their exact (download-free) behavior; deterministic unit tests cover it.
-                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults, resourceMonitor: ResourceMonitor(observeSystem: false), automaticAcquisition: process.arguments.contains("--automatic-acquisition"))
+                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults, resourceMonitor: ResourceMonitor(observeSystem: false), automaticAcquisition: process.arguments.contains("--automatic-acquisition"), themeStore: themeStore, artworkStore: artworkStore)
                     container.downloads.setPath(connected: true, wifi: !process.arguments.contains("--download-cellular"))
                     if process.arguments.contains("--download-queue-fixtures") {
                         for index in 1...3 {
@@ -31,7 +48,9 @@ import Foundation
                     }
                     return container
                 }
-                return AppContainer(storage: storage, resourceMonitor: ResourceMonitor(observeSystem: false))
+                let profileStore: (any LocalProfileStoring)? = process.arguments.contains("--profile-load-failure")
+                    ? FailingFirstLoadProfileStore(base: LocalProfileRepository(db: storage.database.dbQueue, paths: storage.paths)) : nil
+                return AppContainer(storage: storage, resourceMonitor: ResourceMonitor(observeSystem: false), profileStore: profileStore, themeStore: themeStore, artworkStore: artworkStore)
             } catch { fatalError("Could not create the isolated UI test library") }
         }
         #endif
@@ -102,3 +121,21 @@ import Foundation
     }
     #endif
 }
+
+#if DEBUG
+/// UI-test double: the first profile read fails like an unreadable database, later reads
+/// succeed. Proves a read failure shows a recoverable error and never onboarding.
+final class FailingFirstLoadProfileStore: LocalProfileStoring, @unchecked Sendable {
+    private let base: any LocalProfileStoring
+    private var failed = false
+    init(base: any LocalProfileStoring) { self.base = base }
+    func load() throws -> LocalUserProfile? {
+        if !failed { failed = true; throw LocalProfileError.storageUnavailable }
+        return try base.load()
+    }
+    func create(username: String, avatar: PreparedAvatar?) throws -> LocalUserProfile { try base.create(username: username, avatar: avatar) }
+    func update(profileID: UUID, username: String, avatar: AvatarChange) throws -> LocalUserProfile { try base.update(profileID: profileID, username: username, avatar: avatar) }
+    func removeUnreferencedAvatars() throws { try base.removeUnreferencedAvatars() }
+    func avatarURL(_ relativePath: String, thumbnail: Bool) -> URL? { base.avatarURL(relativePath, thumbnail: thumbnail) }
+}
+#endif

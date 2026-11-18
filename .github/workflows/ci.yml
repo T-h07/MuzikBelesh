@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Test hygiene and workflow selectors
@@ -63,7 +63,11 @@ jobs:
           - {scope: unit-accessibility, device: 'iPhone 16'}
           - {scope: compact, device: 'iPhone SE (3rd generation)'}
           - {scope: library, device: 'iPhone 16 Pro Max'}
+          # Phase 12: one other-ui shard (47 UI tests, ~35 min of tests after a 13-23 min
+          # build) exceeded the 40-minute job limit in every run from #298 on, so its later
+          # suites never reported. Two shards keep every test and the limit unchanged.
           - {scope: other-ui, device: 'iPhone 16 Pro Max'}
+          - {scope: migration-ui, device: 'iPhone 16 Pro Max'}
     defaults:
       run:
         shell: bash
@@ -74,7 +78,7 @@ jobs:
       TEST_SCOPE: ${{ matrix.scope }}
       GITHUB_SHA_TESTED: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify pinned toolchain and runtime
@@ -103,6 +107,15 @@ jobs:
           echo "SIMULATOR_ID=$ID" >> "$GITHUB_ENV"
           xcrun simctl boot "$ID"
           xcrun simctl bootstatus "$ID" -b
+          # Phase 12: every 60 s "App animations complete notification not received" stall in
+          # CI #284-#298 happened inside "Type into TextField". Keyboard suggestion, slide-to-type
+          # and onboarding animations keep the app from idling; disable them for typing tests.
+          for key in KeyboardAutocorrection KeyboardPrediction KeyboardContinuousPathEnabled KeyboardShowPredictionBar; do
+            xcrun simctl spawn "$ID" defaults write com.apple.Preferences "$key" -bool NO
+          done
+          for key in DidShowContinuousPathIntroduction DidShowGestureKeyboardIntroduction; do
+            xcrun simctl spawn "$ID" defaults write com.apple.Preferences "$key" -bool YES
+          done
       - name: Build testing products
         run: |
           set -euo pipefail
@@ -145,8 +158,17 @@ jobs:
               run_suite LibraryUI 60 "--require OFFLINEUITests/LibraryManagementUITests" -only-testing:OFFLINEUITests/LibraryManagementUITests
               ;;
             other-ui)
-              run_suite OtherUI 60 "--expect-suites-in Tests/UITests:OFFLINEUITests --except OFFLINEUITests/LibraryManagementUITests" \
-                -only-testing:OFFLINEUITests -skip-testing:OFFLINEUITests/LibraryManagementUITests
+              # Every UI suite not owned by the library or migration-ui shard, so a new suite is
+              # selected and required here automatically.
+              run_suite OtherUI 60 "--expect-suites-in Tests/UITests:OFFLINEUITests --except OFFLINEUITests/LibraryManagementUITests --except OFFLINEUITests/PlaylistFileImportUITests --except OFFLINEUITests/PlaylistMigrationUITests --except OFFLINEUITests/ReviewQueueUITests --except OFFLINEUITests/YouTubeUITests" \
+                -only-testing:OFFLINEUITests -skip-testing:OFFLINEUITests/LibraryManagementUITests \
+                -skip-testing:OFFLINEUITests/PlaylistFileImportUITests -skip-testing:OFFLINEUITests/PlaylistMigrationUITests \
+                -skip-testing:OFFLINEUITests/ReviewQueueUITests -skip-testing:OFFLINEUITests/YouTubeUITests
+              ;;
+            migration-ui)
+              run_suite MigrationUI 60 "--require OFFLINEUITests/PlaylistFileImportUITests --require OFFLINEUITests/PlaylistMigrationUITests --require OFFLINEUITests/ReviewQueueUITests --require OFFLINEUITests/YouTubeUITests" \
+                -only-testing:OFFLINEUITests/PlaylistFileImportUITests -only-testing:OFFLINEUITests/PlaylistMigrationUITests \
+                -only-testing:OFFLINEUITests/ReviewQueueUITests -only-testing:OFFLINEUITests/YouTubeUITests
               ;;
             *) echo "Unknown regression scope: $TEST_SCOPE" >&2; exit 1 ;;
           esac
@@ -164,7 +186,7 @@ jobs:
           done
       - name: Upload independent test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: regression-${{ matrix.scope }}
           path: |
@@ -208,7 +230,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
       COMPARISON_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Pin the control so a moving develop branch cannot change the comparison.
           ref: ${{ matrix.source == 'develop' && '897f3f7180ad31615df1d20946f0b7521d84afb4' || github.sha }}
@@ -272,7 +294,7 @@ jobs:
           fi
       - name: Preserve comparison evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: environment-comparison-${{ matrix.source }}
           path: |
@@ -291,7 +313,7 @@ jobs:
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Validate diagnostic scope
@@ -302,7 +324,7 @@ jobs:
         run: bash Scripts/test-playlist-migration-foundation.sh
       - name: Upload foundation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: foundation-contract-results
           path: |
@@ -315,7 +337,7 @@ jobs:
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.compare_develop && 'develop' || github.event.pull_request.head.sha || github.sha }}
       - name: Record verification source
@@ -351,7 +373,7 @@ jobs:
           echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
       - name: Download compiled test products
         if: inputs.prebuilt_run_id != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: offline-test-products
           path: build/prebuilt
@@ -403,7 +425,7 @@ jobs:
         run: tar -czf build/test-products.tar.gz -C build/TestProducts/Build Products
       - name: Upload compiled test products
         if: inputs.verification_scope == 'focused' || inputs.verification_scope == 'library-menu'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: offline-test-products
           path: |
@@ -462,7 +484,7 @@ jobs:
           fi
       - name: Upload UI screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: library-ui-screenshots
           path: |
@@ -472,7 +494,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playback-test-results
           path: |
@@ -499,7 +521,7 @@ jobs:
           bash Scripts/package-ipa.sh build/DeviceCandidate/Build/Products/Release-iphoneos/OFFLINE.app build/ipa
       - name: Upload verified unsigned candidate
         if: inputs.verification_scope == 'complete' && inputs.prebuilt_run_id != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: OFFLINE-unsigned-IPA
           path: |

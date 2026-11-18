@@ -25,6 +25,7 @@ struct RecordingReplacementControls: View {
 }
 
 private struct RecordingReplacementStatus: View {
+    @Environment(\.themePalette) private var palette
     @ObservedObject var acquisition: PlaylistAcquisitionCoordinator
     let entry: PlaylistMigrationEntry
     let accepted: PlaylistMigrationCandidate
@@ -39,7 +40,7 @@ private struct RecordingReplacementStatus: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Selected: \(accepted.title)").font(.headline)
-            Text("Available offline.").font(.caption).foregroundStyle(AppColors.accentPrimary)
+            Text("Available offline.").font(.caption).foregroundStyle(palette.accent)
                 .accessibilityIdentifier("migration-replacement-current")
             if let pending = acquisition.replacement(for: entry.id) {
                 let state = acquisition.replacementStates[entry.id]
@@ -47,9 +48,9 @@ private struct RecordingReplacementStatus: View {
                     Text("Replacing with: \(pending.title)").font(.subheadline.weight(.semibold))
                     Text(pending.state == .failed ? "Replacement failed" : (state?.label ?? "Waiting to download"))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(pending.state == .failed ? AppColors.error : AppColors.accentPrimary)
+                        .foregroundStyle(pending.state == .failed ? AppColors.error : palette.accent)
                         .accessibilityIdentifier("migration-replacement-state")
-                    if case .downloading(let progress?)? = state { ProgressView(value: progress).tint(AppColors.accentPrimary) }
+                    if case .downloading(let progress?)? = state { ProgressView(value: progress).tint(palette.accent) }
                     if let failure = pending.failure, pending.state == .failed {
                         Text(failure).font(.caption).foregroundStyle(AppColors.textSecondary)
                     }

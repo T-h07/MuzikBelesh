@@ -81,8 +81,11 @@ final class PlaylistMigrationUITests: XCTestCase {
         let clear = app.buttons["playlist-search-clear"]
         XCTAssertTrue(clear.exists); clear.tap()
         XCTAssertTrue(app.staticTexts["Original song 0"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Original song 3"].exists)
         XCTAssertFalse(app.staticTexts["playlist-search-empty"].exists)
+        XCTAssertEqual(app.staticTexts["migration-playlist-count"].label, "5 songs")
+        // Clear ends the search, so the list is back at its top where the playlist header leaves
+        // room for one row; lower rows are created only when scrolled to (lazy List).
+        XCTAssertTrue(scroll(app, toReveal: app.staticTexts["Original song 3"], maxSwipes: 6), "Every song is listed again")
     }
 
     /// Unresolved songs keep the matching inspector.

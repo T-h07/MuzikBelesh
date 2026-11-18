@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NowPlayingView: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var audioPlayer: AudioPlayerService
@@ -38,7 +39,7 @@ struct NowPlayingView: View {
             Button {
                 library.perform { try library.setLiked(!library.snapshot.likedIDs.contains(track.id), trackID: track.id) }
             } label: { Label(library.snapshot.likedIDs.contains(track.id) ? "Unlike Song" : "Like Song", systemImage: library.snapshot.likedIDs.contains(track.id) ? "heart.fill" : "heart").frame(minHeight: 44) }
-                .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("now-playing-like")
+                .foregroundStyle(palette.accent).accessibilityIdentifier("now-playing-like")
             PlaybackSlider(audioPlayer: audioPlayer)
             HStack { Text(format(audioPlayer.state.elapsedTime)); Spacer(); Text(format(audioPlayer.state.duration)) }.font(.caption).foregroundStyle(AppColors.textSecondary)
             if audioPlayer.state.status == .ended {
@@ -51,9 +52,9 @@ struct NowPlayingView: View {
                 Button { Task { await audioPlayer.next() } } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }.disabled(!audioPlayer.state.canSkipNext).accessibilityLabel("Next track")
             }.foregroundStyle(AppColors.textPrimary)
             HStack(spacing: AppSpacing.lg) {
-                Button { audioPlayer.queue.toggleShuffle() } label: { Image(systemName: "shuffle").foregroundStyle(audioPlayer.queue.shuffleEnabled ? AppColors.accentPrimary : AppColors.textSecondary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Shuffle").accessibilityValue(audioPlayer.queue.shuffleEnabled ? "On" : "Off")
-                Button { audioPlayer.queue.cycleRepeat() } label: { Image(systemName: audioPlayer.queue.repeatMode.symbol).foregroundStyle(audioPlayer.queue.repeatMode == .off ? AppColors.textSecondary : AppColors.accentPrimary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Repeat \(audioPlayer.queue.repeatMode.rawValue)")
-                Button { showingTimer = true } label: { Image(systemName: audioPlayer.sleepTimer.isActive ? "moon.fill" : "moon").foregroundStyle(audioPlayer.sleepTimer.isActive ? AppColors.accentPrimary : AppColors.textSecondary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Sleep Timer")
+                Button { audioPlayer.queue.toggleShuffle() } label: { Image(systemName: "shuffle").foregroundStyle(audioPlayer.queue.shuffleEnabled ? palette.accent : AppColors.textSecondary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Shuffle").accessibilityValue(audioPlayer.queue.shuffleEnabled ? "On" : "Off")
+                Button { audioPlayer.queue.cycleRepeat() } label: { Image(systemName: audioPlayer.queue.repeatMode.symbol).foregroundStyle(audioPlayer.queue.repeatMode == .off ? AppColors.textSecondary : palette.accent) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Repeat \(audioPlayer.queue.repeatMode.rawValue)")
+                Button { showingTimer = true } label: { Image(systemName: audioPlayer.sleepTimer.isActive ? "moon.fill" : "moon").foregroundStyle(audioPlayer.sleepTimer.isActive ? palette.accent : AppColors.textSecondary) }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Sleep Timer")
             }
             SleepTimerStatusIndicator(timer: audioPlayer.sleepTimer, showsLabel: true) { showingTimer = true }
             HStack {
@@ -79,13 +80,14 @@ private extension String {
 }
 
 private struct PlaybackSlider: View {
+    @Environment(\.themePalette) private var palette
     @ObservedObject var audioPlayer: AudioPlayerService
     @State private var draftPosition: TimeInterval?
     var body: some View {
         let duration = max(audioPlayer.state.duration, 0.01)
         Slider(value: Binding(get: { draftPosition ?? audioPlayer.state.elapsedTime }, set: { draftPosition = min(max($0, 0), duration) }), in: 0...duration, onEditingChanged: { editing in
             if !editing, let draftPosition { Task { await audioPlayer.seek(to: draftPosition) }; self.draftPosition = nil }
-        }).tint(AppColors.accentPrimary).disabled(!audioPlayer.state.canSeek)
+        }).tint(palette.accent).disabled(!audioPlayer.state.canSeek)
     }
 }
 

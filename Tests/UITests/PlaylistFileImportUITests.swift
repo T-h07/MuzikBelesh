@@ -62,7 +62,10 @@ final class PlaylistFileImportUITests: XCTestCase {
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
     }
 
-    func testMultipleSelectionRenamePreviewAndInvalidCandidate() {
+    // Phase 12: this flow was one test of ~40 accessibility checks plus a commit, which ran past
+    // its 60 s allowance without hanging (v1.1.0 baseline failure). It is split in two; every
+    // assertion is kept.
+    func testMultipleSelectionDeselectSelectAllAndSwitchFlips() {
         launch(fixture: true, extra: ["--playlist-import-multiple"])
         let counts = app.staticTexts["playlist-import-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 10))
@@ -74,19 +77,46 @@ final class PlaylistFileImportUITests: XCTestCase {
         assertSelected(0)
         let selectAll = app.buttons["playlist-import-select-all"]
         scrollTo(selectAll, down: true); selectAll.tap()
-        let firstSwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
-        scrollTo(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
+        let anySwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
+        scrollTo(anySwitch)
+        // Pin one candidate. A `firstMatch` query re-resolves after scrolling, and once the first
+        // row leaves the lazy list it names the next candidate's switch instead (CI evidence:
+        // the second flip tapped a different identifier, turning an already-selected one off).
+        let firstSwitch = app.switches[anySwitch.identifier]
+        XCTAssertEqual(firstSwitch.value as? String, "1")
         // Flip the switch itself and confirm the selection model changed, not only the control.
         flipSwitch(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "0")
         assertSelected(1)
         scrollTo(firstSwitch, down: true)
         flipSwitch(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
         assertSelected(2)
+    }
+
+    func testMultipleSelectionRenamePreviewAndInvalidCandidate() {
+        launch(fixture: true, extra: ["--playlist-import-multiple"])
+        let counts = app.staticTexts["playlist-import-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 10))
+        XCTAssertEqual(counts.label, "2 valid • 1 invalid playlists")
+        // Pin the "First source" candidate while the list is at the top: scrolling down from there
+        // reveals candidates in order, so the first switch found is the first candidate's. Its UUID
+        // names that candidate's preview button. Unpinned `firstMatch` queries resolved to the
+        // second candidate once the first section left the lazy list (CI: the preview showed the
+        // empty "Second source").
+        let anySwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
+        scrollTo(anySwitch)
+        let candidateID = String(anySwitch.identifier.dropFirst("playlist-import-select-".count))
+        let firstSwitch = app.switches["playlist-import-select-" + candidateID]
+        let preview = app.buttons["playlist-import-preview-" + candidateID]
+        let selectAll = app.buttons["playlist-import-select-all"]
+        scrollTo(selectAll, down: true); selectAll.tap()
+        assertSelected(2)
+        let confirm = app.buttons["playlist-import-confirm"]
+        // Bring the first candidate back; its text field is then the first one in the tree.
+        scrollTo(firstSwitch, down: true)
         let name = app.textFields["playlist-import-destination-name"].firstMatch
         scrollTo(name); name.tap()
         let old = name.value as? String ?? ""
         name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + "Reviewed destination\n")
-        let preview = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-preview-")).firstMatch
         scrollTo(preview); preview.tap()
         XCTAssertTrue(app.staticTexts["First song"].waitForExistence(timeout: 5))
         preview.tap()
@@ -121,17 +151,20 @@ final class PlaylistFileImportUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["migration-playlist-count"].waitForExistence(timeout: 5))
         let start = Date()
         for _ in 0..<12 { app.swipeUp(velocity: .fast) }
-        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "migration-occurrence-"))
-        let visible = rows.allElementsBoundByIndex.filter(\.isHittable)
-        XCTAssertFalse(visible.isEmpty, "Rows must remain usable after rapid scrolling")
+        // Read the rows from one consistent snapshot. Querying element-by-element while a
+        // fast fling is still decelerating races cell reuse ("No matches found" in CI #298).
+        let visibleIDs = settledVisibleOccurrenceIDs()
+        XCTAssertFalse(visibleIDs.isEmpty, "Rows must remain usable after rapid scrolling")
         XCTAssertFalse(app.staticTexts["Synthetic song 0"].isHittable)
-        XCTAssertEqual(Set(visible.map(\.identifier)).count, visible.count)
-        guard let inspected = visible.first else { return }
+        XCTAssertEqual(Set(visibleIDs).count, visibleIDs.count)
+        guard let inspectedID = visibleIDs.first else { return }
+        let inspected = app.buttons[inspectedID]
+        let visible = visibleIDs
         inspected.tap()
         XCTAssertTrue(app.staticTexts["migration-inspector-status"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["migration-inspector-status"].label, "Awaiting local audio")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "migration-occurrence-play-")).firstMatch.exists)
-        let evidence = XCTAttachment(string: "1,000-entry dataset; twelve rapid scrolls and entry inspection elapsed: \(Date().timeIntervalSince(start)) seconds; visible occurrence IDs: \(visible.map(\.identifier)). No latency threshold claimed.")
+        let evidence = XCTAttachment(string: "1,000-entry dataset; twelve rapid scrolls and entry inspection elapsed: \(Date().timeIntervalSince(start)) seconds; visible occurrence IDs: \(visible). No latency threshold claimed.")
         evidence.lifetime = .keepAlways; add(evidence)
         let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.lifetime = .keepAlways; add(screenshot)
         app.terminate(); app.launchArguments = ["--ui-testing"]; app.launch()
@@ -146,7 +179,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let details = app.buttons["migration-dashboard-toggle"]
         scrollTo(details); details.tap()
         scrollTo(app.staticTexts["migration-unresolved-count"])
-        XCTAssertEqual(app.staticTexts["migration-unresolved-count"].label, "Unresolved: 1000")
+        XCTAssertEqual(app.staticTexts["migration-unresolved-count"].label, "Unresolved: 1,000") // Locale-grouped, like "1,000 songs".
     }
 
     private func openMigrationDetails(file: StaticString = #filePath, line: UInt = #line) {
@@ -154,6 +187,33 @@ final class PlaylistFileImportUITests: XCTestCase {
         let item = app.buttons["Migration Details"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), file: file, line: line); item.tap()
         XCTAssertTrue(app.navigationBars["Migration Details"].waitForExistence(timeout: 5), file: file, line: line)
+    }
+
+    /// Occurrence row identifiers fully on screen, from a single accessibility snapshot taken
+    /// once two consecutive snapshots agree (the list has stopped moving). Bounded: 10 tries.
+    private func settledVisibleOccurrenceIDs() -> [String] {
+        func capture() -> [String] {
+            guard let root = try? app.snapshot() else { return [] }
+            let window = app.windows.firstMatch.frame
+            var ids: [String] = []
+            var stack: [XCUIElementSnapshot] = [root]
+            while let node = stack.popLast() {
+                if node.elementType == .button, node.identifier.hasPrefix("migration-occurrence-"),
+                   !node.identifier.hasPrefix("migration-occurrence-play-"),
+                   node.frame.minY >= window.minY + 120, node.frame.maxY <= window.maxY - 100 {
+                    ids.append(node.identifier)
+                }
+                stack.append(contentsOf: node.children.reversed())
+            }
+            return ids
+        }
+        var previous = capture()
+        for _ in 0..<10 {
+            let next = capture()
+            if !next.isEmpty && next == previous { return next }
+            previous = next
+        }
+        return previous
     }
 
     /// Bounded: stops at the first swipe that makes `element` tappable.
