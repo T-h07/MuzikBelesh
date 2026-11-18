@@ -256,6 +256,7 @@ struct TopSongsSection: View {
                     .buttonStyle(ListeningPressStyle())
                     .disabled(!first.isAvailable)
                     .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton) // .ignore replaces the Button's element and its trait
                     .accessibilityLabel(label(first, rank: 1))
                     .accessibilityHint(first.isAvailable ? "Plays this song" : "")
                     .accessibilityIdentifier("listening-top-song-1")
@@ -266,6 +267,7 @@ struct TopSongsSection: View {
                         .buttonStyle(ListeningPressStyle())
                         .disabled(!song.isAvailable)
                         .accessibilityElement(children: .ignore)
+                        .accessibilityAddTraits(.isButton)
                         .accessibilityLabel(label(song, rank: index + 2))
                         .accessibilityHint(song.isAvailable ? "Plays this song" : "")
                         .accessibilityIdentifier("listening-top-song-\(index + 2)")
@@ -380,6 +382,7 @@ struct TopArtistsSection<Destination: View>: View {
                 }
                 .buttonStyle(ListeningPressStyle())
                 .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isButton)
                 .accessibilityLabel("Number \(index + 2), \(artist.title), \(ListeningFormat.spokenDuration(artist.listenedMs))")
                 .accessibilityIdentifier("listening-top-artist-\(index + 2)")
             }
@@ -413,6 +416,7 @@ struct TopCollectionsCarousel<Destination: View>: View {
                         NavigationLink { destination(item) } label: { card(item, rank: index + 1) }
                             .buttonStyle(ListeningPressStyle())
                             .accessibilityElement(children: .ignore)
+                            .accessibilityAddTraits(.isButton)
                             .accessibilityLabel("Number \(index + 1), \(item.title)\(item.subtitle.isEmpty ? "" : ", " + item.subtitle), \(ListeningFormat.spokenDuration(item.listenedMs))\(showsPlays ? ", " + ListeningFormat.plays(item.plays) : "")")
                             .accessibilityIdentifier("\(identifier)-\(index + 1)")
                     }
