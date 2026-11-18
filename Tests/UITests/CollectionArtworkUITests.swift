@@ -108,7 +108,7 @@ final class CollectionArtworkUITests: XCTestCase {
         let remove = app.buttons["collection-artwork-remove-cover"]
         reveal(remove, in: app.collectionViews.firstMatch)
         remove.tap()
-        let confirm = app.buttons["collection-artwork-confirm-remove"]
+        let confirm = app.buttons.matching(identifier: "collection-artwork-confirm-remove").firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         confirm.tap()
         XCTAssertTrue(remove.waitForNonExistence(timeout: 8), "The custom cover is gone")

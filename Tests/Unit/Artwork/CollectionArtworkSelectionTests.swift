@@ -152,6 +152,17 @@ final class CollectionArtworkSelectionTests: XCTestCase {
         XCTAssertTrue((0.25...0.35).contains(CollectionArtworkCanvas.transitionDuration))
     }
 
+    func testOnlyARealVisibleArtworkChangeCrossfades() {
+        let first = CollectionArtworkPresentation.mosaic(CollectionMosaicSelection(tiles: ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]))
+        let next = CollectionArtworkPresentation.mosaic(CollectionMosaicSelection(tiles: ["a.jpg", "b.jpg", "c.jpg", "e.jpg"]))
+        XCTAssertTrue(CollectionArtworkCanvas.shouldCrossfade(from: first, to: next, visible: true, reduceMotion: false))
+        XCTAssertFalse(CollectionArtworkCanvas.shouldCrossfade(from: nil, to: next, visible: true, reduceMotion: false), "The first composition appears without animation")
+        XCTAssertFalse(CollectionArtworkCanvas.shouldCrossfade(from: first, to: first, visible: true, reduceMotion: false), "A size or scale change of the same artwork swaps instantly")
+        XCTAssertFalse(CollectionArtworkCanvas.shouldCrossfade(from: .placeholder, to: .placeholder, visible: true, reduceMotion: false))
+        XCTAssertFalse(CollectionArtworkCanvas.shouldCrossfade(from: first, to: next, visible: false, reduceMotion: false), "Nothing animates off screen")
+        XCTAssertFalse(CollectionArtworkCanvas.shouldCrossfade(from: first, to: next, visible: true, reduceMotion: true))
+    }
+
     func testAccessibilityDescribesOneArtworkElement() {
         let mosaic = CollectionMosaicSelection(tiles: ["a.jpg", nil, nil, "b.jpg"])
         XCTAssertEqual(CollectionArtworkView.label(.mosaic(mosaic), title: "Road Trip"), "Automatic artwork for Road Trip")

@@ -458,7 +458,7 @@ final class LocalProfileUpgradeTests: XCTestCase {
             // Phase 11.4 tables are new and empty; its widened source CHECK admits every v1.1.0 row.
             try db.execute(sql: "DROP TABLE portable_library_entries; DROP TABLE portable_library_import_items; DROP TABLE portable_library_imports")
             // Phase 11.5 preferences are new and empty; dropping the table drops its triggers.
-            try db.execute(sql: "DROP TABLE collection_artwork_preferences")
+            try db.execute(sql: "DROP TRIGGER collection_artwork_preferences_playlist_deleted; DROP TRIGGER collection_artwork_preferences_album_deleted; DROP TRIGGER collection_artwork_preferences_artist_deleted; DROP TABLE collection_artwork_preferences")
             try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN (?, ?, ?, ?)", arguments: [LocalProfileSchema.version, ListeningAnalyticsSchema.version, PortableLibrarySchema.version, CollectionArtworkSchema.version])
         }
         let last = try fixture.storage.database.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier").last }

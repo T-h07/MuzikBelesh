@@ -79,6 +79,8 @@ struct CollectionArtworkCanvas: View {
     @State private var previous: Composition?
     @State private var current: Composition?
     @State private var currentOpacity: Double = 1
+    @State private var isVisible = false
+    @State private var fadeCleanup: Task<Void, Never>?
 
     private var isMosaic: Bool { if case .mosaic = presentation { return true }; return false }
     /// Each tile is half the artwork; never decode a full-size cover for a small quadrant.
@@ -93,6 +95,13 @@ struct CollectionArtworkCanvas: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+        .onAppear { isVisible = true }
+        .onDisappear {
+            isVisible = false
+            // Never leave a half-finished fade behind: settle on the current composition.
+            fadeCleanup?.cancel(); fadeCleanup = nil
+            previous = nil; currentOpacity = 1
+        }
         .task(id: LoadKey(presentation: presentation.key, bucket: bucket, foreground: artwork.isForeground)) { await prepare() }
     }
 
@@ -164,15 +173,31 @@ struct CollectionArtworkCanvas: View {
         show(Composition(key: key, presentation: target, images: images))
     }
 
+    /// Only a real artwork change on screen crossfades: the first composition, a size or
+    /// display-scale change of the same artwork, and anything off screen swap instantly, so no
+    /// animation is ever left pending in a view that is not being drawn.
+    static func shouldCrossfade(from current: CollectionArtworkPresentation?, to next: CollectionArtworkPresentation,
+                                visible: Bool, reduceMotion: Bool) -> Bool {
+        guard visible, !reduceMotion, let current else { return false }
+        return current.key != next.key
+    }
+
     private func show(_ next: Composition) {
-        guard let animation = Self.animation(reduceMotion: reduceMotion), current != nil else {
+        fadeCleanup?.cancel(); fadeCleanup = nil
+        guard Self.shouldCrossfade(from: current?.presentation, to: next.presentation, visible: isVisible, reduceMotion: reduceMotion),
+              let animation = Self.animation(reduceMotion: reduceMotion) else {
             previous = nil; current = next; currentOpacity = 1
             return
         }
         previous = current
         current = next
         currentOpacity = 0
-        withAnimation(animation) { currentOpacity = 1 } completion: {
+        withAnimation(animation) { currentOpacity = 1 }
+        // The fully covered previous layer is dropped after the fade, without an animation
+        // completion handler.
+        fadeCleanup = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.transitionDuration + 0.05))
+            guard !Task.isCancelled else { return }
             if current?.key == next.key { previous = nil }
         }
     }
