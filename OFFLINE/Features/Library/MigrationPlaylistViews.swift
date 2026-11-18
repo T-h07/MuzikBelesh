@@ -287,6 +287,7 @@ extension PlaylistMigrationSource {
         case .spotifyAccountExport: return "Spotify account export"
         case .exportify: return "Spotify / Exportify"
         case .spotifyAPI: return "Spotify"
+        case .muzikBelesh: return "Muzik Belesh library"
         }
     }
 }

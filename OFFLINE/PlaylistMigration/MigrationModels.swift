@@ -5,6 +5,8 @@ enum PlaylistMigrationSource: String, Codable, CaseIterable, Sendable {
     case spotifyAccountExport
     case exportify
     case spotifyAPI
+    /// Phase 11.4: a native Muzik Belesh portable library (`.mbelesh`). Never Spotify.
+    case muzikBelesh
 }
 
 enum PlaylistMigrationStatus: String, Codable, CaseIterable, Sendable {

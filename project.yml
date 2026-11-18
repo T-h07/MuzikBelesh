@@ -46,6 +46,19 @@ targets:
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # Phase 11.4 portable library documents (.mbelesh): metadata-only JSON, never audio.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.th07.muzikbelesh.library
+            UTTypeDescription: Muzik Belesh Library
+            UTTypeConformsTo: [public.data, public.content]
+            UTTypeTagSpecification:
+              public.filename-extension: [mbelesh]
+              public.mime-type: [application/vnd.muzikbelesh.library+json]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Muzik Belesh Library
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [com.th07.muzikbelesh.library]
         UIBackgroundModes: [audio, processing]
         BGTaskSchedulerPermittedIdentifiers: ['com.th07.muzikbelesh.matching.*']
         NSAppTransportSecurity: {NSAllowsArbitraryLoads: false, NSAllowsLocalNetworking: true}

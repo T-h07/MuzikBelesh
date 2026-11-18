@@ -7,6 +7,9 @@ struct LocalProfileView: View {
     @EnvironmentObject private var profile: LocalProfileService
     @State private var editing: ProfileEditFocus?
     @State private var showingSettings = false
+    @State private var showingSharing = false
+    @State private var showingExport = false
+    @State private var showingImport = false
 
     var body: some View {
         NavigationStack {
@@ -35,8 +38,12 @@ struct LocalProfileView: View {
                             }.frame(minHeight: 52).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityIdentifier("profile-appearance")
                     }
-                    section("Coming Later") {
-                        planned("Music Sharing", icon: "square.and.arrow.up.on.square", detail: "Library export and import")
+                    section("Music Sharing") {
+                        row("Export Library", icon: "square.and.arrow.up", identifier: "profile-export-library") { showingExport = true }
+                        Divider().overlay(AppColors.divider)
+                        row("Import Muzik Belesh Library", icon: "square.and.arrow.down", identifier: "profile-import-library") { showingImport = true }
+                        Divider().overlay(AppColors.divider)
+                        row("Imports and Sharing", icon: "square.and.arrow.up.on.square", identifier: "profile-music-sharing") { showingSharing = true }
                     }
                     section("Settings") {
                         row("Settings", icon: "gearshape", identifier: "profile-open-settings") { showingSettings = true }
@@ -54,6 +61,9 @@ struct LocalProfileView: View {
                 if let current = profile.profile { EditProfileView(original: current, focus: focus) }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingSharing) { LibrarySharingHubView() }
+            .sheet(isPresented: $showingExport) { LibraryExportView(initialScope: .library) }
+            .sheet(isPresented: $showingImport) { LibraryImportView() }
         }
     }
 

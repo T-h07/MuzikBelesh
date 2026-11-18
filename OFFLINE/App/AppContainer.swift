@@ -39,6 +39,8 @@ final class AppContainer: ObservableObject {
     let listening: ListeningStatsService
     /// Phase 11.3 accent theme. Loaded synchronously so the first frame already uses it.
     let theme: ThemeService
+    /// Phase 11.4 portable `.mbelesh` library export, import and progress.
+    let sharing: LibrarySharingService
     init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil, profileStore: (any LocalProfileStoring)? = nil, themeStore: ThemePreferenceStoring? = nil) {
         self.theme = ThemeService(store: themeStore ?? UserDefaultsThemePreferences())
         self.resources = resourceMonitor ?? ResourceMonitor()
@@ -113,6 +115,12 @@ final class AppContainer: ObservableObject {
             self.migrationIssues = issues
             Task { await issues.start() }
         } else { self.migrationIssues = nil }
+        // Phase 11.4: portable library export/import. Reuses the coordinator above for all
+        // matching and acquisition; restores unfinished imports after the coordinator.
+        let sharing = LibrarySharingService(storage: self.storage, coordinator: self.migrationCoordinator,
+                                            metadata: self.youtubeMetadata, appVersion: configuration.version)
+        self.sharing = sharing
+        Task { await sharing.start() }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)

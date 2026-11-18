@@ -11,6 +11,8 @@ struct LibraryView: View {
     @State private var showingPlaylistEditor = false
     @State private var showingPlaylistImporter = false
     @State private var showingAlbumEditor = false
+    @State private var showingLibraryImport = false
+    @State private var showingLibraryExport = false
     @State private var importMessage: String?
     @State private var query = ""
     @StateObject private var search = LibrarySearchSession()
@@ -42,6 +44,8 @@ struct LibraryView: View {
             if let model = container.playlistImport { PlaylistImportView(model: model) }
         }
         .sheet(isPresented: $showingAlbumEditor) { AlbumEditorView() }
+        .sheet(isPresented: $showingLibraryImport) { LibraryImportView() }
+        .sheet(isPresented: $showingLibraryExport) { LibraryExportView(initialScope: .library) }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.audio, .supportedAudio], allowsMultipleSelection: true) { result in
             Task { @MainActor in
                 do {
@@ -63,6 +67,13 @@ struct LibraryView: View {
         HStack {
             Text("Library").font(.largeTitle.bold()).foregroundStyle(AppColors.textPrimary)
             Spacer()
+            Menu {
+                Button { searchFocus = nil; showingLibraryImport = true } label: { Label("Import Muzik Belesh Library", systemImage: "square.and.arrow.down.on.square") }
+                    .accessibilityIdentifier("library-import-mbelesh")
+                Button { searchFocus = nil; showingLibraryExport = true } label: { Label("Export Library", systemImage: "square.and.arrow.up") }
+                    .accessibilityIdentifier("library-export")
+            } label: { Image(systemName: "square.and.arrow.up.on.square").font(.title3).foregroundStyle(palette.accent).frame(minWidth: 44, minHeight: 44) }
+                .disabled(!container.sharing.isAvailable).accessibilityLabel("Music Sharing").accessibilityIdentifier("library-sharing")
             Button { searchFocus = nil; showingImporter = true } label: { Label("Import", systemImage: "square.and.arrow.down").lineLimit(1) }
                 .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).frame(minHeight: 44).accessibilityIdentifier("library-import")
         }

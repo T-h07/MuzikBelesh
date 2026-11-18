@@ -29,6 +29,16 @@ final class GRDBPlaylistMigrationRepository: PlaylistMigrationStatePersisting, P
         let fingerprint = try PlaylistMigrationValidation.importFingerprint(for: source)
         let displayName = try LibraryIdentity.validatedName(destinationName ?? source.name)
         return try db.write { db in
+            try Self.insertCommittedPlaylist(db, source: source, operation: operation, fingerprint: fingerprint, displayName: displayName)
+        }
+    }
+
+    /// The transactional body of `createCommittedPlaylist`, shared with the Phase 11.4
+    /// portable importer so several playlists commit in one transaction. Callers validate
+    /// `source`, normalize `operation` and compute `fingerprint` first.
+    static func insertCommittedPlaylist(_ db: Database, source: PlaylistMigrationSourcePlaylist, operation: String,
+                                        fingerprint: String, displayName: String) throws -> PlaylistMigrationSession {
+        do {
             if let existing = try MigrationSessionRecord.fetchOne(db, sql: "SELECT * FROM playlist_migrations WHERE operationID = ?", arguments: [operation]) {
                 guard existing.importFingerprint == fingerprint else { throw PlaylistMigrationStorageError.operationConflict }
                 try Self.verify(existing, db: db)
@@ -1148,5 +1158,139 @@ extension GRDBPlaylistMigrationRepository {
             record.evidence = try migrationJSON(evidence); record.updatedAt = Date()
             try record.update(db)
         }
+    }
+}
+
+// MARK: - Phase 11.4 portable library (.mbelesh) reuse and reference acceptance
+
+extension GRDBPlaylistMigrationRepository {
+    /// Exact recording identity: the local track was downloaded from the YouTube video the
+    /// shared library references (`track_sources`). Audio is decoded and hashed once, outside
+    /// the write transaction; every occurrence is then re-checked and associated atomically.
+    /// Occurrences that changed meanwhile are left untouched. Returns the associated IDs.
+    func associatePortableProvenance(trackID: String, videoID: String, entries expected: [PlaylistMigrationEntry]) async throws -> [UUID] {
+        guard YouTubeURLValidator.isValidID(videoID), !expected.isEmpty else { return [] }
+        let track = try await verifiedMatchingAudio(trackID: trackID)
+        return try await db.write { [self] db in
+            try validateMatchingAudio(track, db: db)
+            guard try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM track_sources WHERE trackID = ? AND sourceType = 'youtube' AND sourceIdentifier = ?)",
+                                    arguments: [trackID, videoID]) == true else { throw PlaylistMigrationStorageError.invalidLocalTrack }
+            let artistName = try track.artistID.flatMap { try StoredArtist.fetchOne(db, key: $0)?.name }
+            let safeTitle = MatchingSafeText.metadata(track.title)
+            let title = safeTitle.isEmpty ? "Local recording" : String(safeTitle.prefix(500))
+            let safeArtist = artistName.map { MatchingSafeText.metadata($0) }.flatMap { $0.isEmpty ? nil : $0 }
+            var associated: [UUID] = []
+            for value in expected {
+                guard var entry = try MigrationEntryRecord.fetchOne(db, key: value.id.uuidString), try entry.model() == value,
+                      entry.localTrackID == nil, try !Self.isRemoved(db, entryID: entry.id),
+                      [.pending, .needsReview, .failed, .unavailable].contains(entry.status) else { continue }
+                let previous = try Self.matchingCandidates(value.id, db: db)
+                guard !previous.contains(where: { $0.decision == .accepted }),
+                      !previous.contains(where: { $0.provider == "local" && $0.providerTrackID == trackID && $0.decision == .rejected }) else { continue }
+                if entry.status != .pending {
+                    try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+                }
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .ready)
+                let old = previous.first { $0.provider == "local" && $0.providerTrackID == trackID }
+                let candidate = PlaylistMigrationCandidate(id: old?.id ?? UUID(), entryID: value.id, provider: "local", providerTrackID: trackID,
+                    title: title, artist: safeArtist, durationMs: track.durationMs, confidence: nil,
+                    evidence: ["matchingAlgorithmVersion": "portable-provenance-11.4", "selectionMethod": "portable-provenance",
+                               "sourceOccurrenceID": entry.id, "recordingIdentity": "youtube:" + videoID,
+                               "acceptance": "Automatic reuse of the exact recording referenced by the shared library",
+                               "selectionExplanation": "This song was downloaded from the same YouTube video. Managed audio decoding and SHA-256 verification passed.",
+                               "confidenceClassification": "Exact recording identity", "currentAttempt": "true", "rank": "1"], decision: .accepted)
+                let metadata = [candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist].compactMap { $0 }
+                    + candidate.evidence.flatMap { [$0.key, $0.value] }
+                guard metadata.allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else { throw PlaylistMigrationStorageError.unsafeDiagnostics }
+                try MigrationCandidateRecord(candidate, createdAt: Date()).save(db)
+                entry.status = .ready; entry.localTrackID = trackID; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt)
+                try entry.update(db)
+                try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false, outcome: "local", updatedAt: Date()).save(db)
+                try Self.resolveAttemptIssue(entry.id, db: db)
+                associated.append(value.id)
+            }
+            return associated
+        }
+    }
+
+    /// The recording a shared reference describes, built exactly like a manual selection.
+    static func portableReferenceRecording(_ video: YouTubeVideo) -> SongRecording {
+        let fullTitle = MatchingSafeText.metadata(video.title.trimmingCharacters(in: .whitespacesAndNewlines))
+        let title = fullTitle.isEmpty ? "YouTube video " + video.id : String(fullTitle.prefix(500))
+        let durationMs = video.duration.flatMap { $0.isFinite && $0 > 0 && $0 < 86_400 ? Int64($0 * 1000) : nil }
+        let credits = YouTubeSearchProviderAdapter.credits(title)
+        return SongRecording(provider: "youtube", identity: video.id, title: credits.title, artist: credits.artist,
+                             durationMs: durationMs, performerEstablished: credits.artist != nil,
+                             available: video.availability == .available && !video.isShort, fullTitle: title,
+                             channel: video.channel.map { MatchingSafeText.metadata($0) }.flatMap { $0.isEmpty ? nil : $0 })
+    }
+
+    /// True only when the established scoring engine and decision policy classify the
+    /// shared recording `recommended` (every strict gate passes, confidence above the
+    /// automatic threshold). Thresholds are unchanged.
+    static func portableReferenceRecommended(for entry: PlaylistMigrationEntry, video: YouTubeVideo) -> Bool {
+        let score = CandidateScoringEngine().score(source: entry.source, candidate: portableReferenceRecording(video))
+        return MatchDecisionPolicy().decide([score]).outcome == .recommended
+    }
+
+    /// Accepts the shared library's recording reference for one occurrence only when it is
+    /// `portableReferenceRecommended`. The import confirmation with automatic acquisition
+    /// enabled is the user's consent. The occurrence becomes `matched`; acquisition then runs
+    /// through the shared download job. Returns nil (nothing written) otherwise.
+    @discardableResult
+    func acceptPortableReference(for expected: PlaylistMigrationEntry, video: YouTubeVideo) async throws -> PlaylistMigrationCandidate? {
+        guard YouTubeURLValidator.isValidID(video.id) else { throw YouTubeError.invalidVideoID }
+        guard Self.portableReferenceRecommended(for: expected, video: video) else { return nil }
+        return try await db.write { db -> PlaylistMigrationCandidate? in
+            guard var entry = try MigrationEntryRecord.fetchOne(db, key: expected.id.uuidString), try entry.model() == expected,
+                  entry.localTrackID == nil, try !Self.isRemoved(db, entryID: entry.id),
+                  [.pending, .needsReview, .failed, .unavailable].contains(entry.status) else { return nil }
+            let previous = try Self.matchingCandidates(expected.id, db: db)
+            guard !previous.contains(where: { $0.decision == .accepted }),
+                  !previous.contains(where: { $0.provider == "youtube" && $0.providerTrackID == video.id && $0.decision == .rejected }) else { return nil }
+            let old = previous.first { $0.provider == "youtube" && $0.providerTrackID == video.id }
+            let base = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: true, id: old?.id ?? UUID())
+            var evidence = base.evidence
+            evidence["matchingAlgorithmVersion"] = "portable-reference-11.4"
+            evidence["selectionMethod"] = "portable-reference"
+            evidence["outcome"] = "recommended"
+            evidence["acceptance"] = "Automatic: the shared library recording passed every strict matching check and automatic downloads were confirmed for this import"
+            evidence["selectionExplanation"] = "Recording from the shared library. Not available offline until downloaded and verified."
+            evidence["confidenceClassification"] = "Shared recording reference; strict automatic policy passed"
+            let candidate = PlaylistMigrationCandidate(id: base.id, entryID: base.entryID, provider: base.provider, providerTrackID: base.providerTrackID,
+                title: base.title, artist: base.artist, durationMs: base.durationMs, confidence: base.confidence, evidence: evidence, decision: .accepted)
+            let metadata = [candidate.provider, candidate.providerTrackID, candidate.title, candidate.artist].compactMap { $0 }
+                + candidate.evidence.filter { $0.key != "thumbnailURL" }.flatMap { [$0.key, $0.value] }
+            guard metadata.allSatisfy({ MatchingSafeText.metadata($0) == $0 }) else { throw PlaylistMigrationStorageError.unsafeDiagnostics }
+            let created = try MigrationCandidateRecord.fetchOne(db, key: candidate.id.uuidString)?.createdAt ?? Date()
+            try MigrationCandidateRecord(candidate, createdAt: created).save(db)
+            if entry.status == .unavailable {
+                try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matching); entry.status = .matching
+            }
+            try PlaylistMigrationValidation.requireEntryTransition(entry.status, to: .matched)
+            entry.status = .matched; entry.updatedAt = Self.nextMatchingRevision(entry.updatedAt); try entry.update(db)
+            try MatchingCheckpoint(entryID: entry.id, algorithm: CandidateScoringEngine.algorithmVersion, retryable: false,
+                                   outcome: "selected", updatedAt: Date()).save(db)
+            try Self.resolveAttemptIssue(entry.id, db: db)
+            return candidate
+        }
+    }
+
+    /// Saves the shared library's recording as a *pending* candidate for review (it did not
+    /// meet the automatic policy). Nothing is accepted and nothing is downloaded.
+    func proposePortableReference(for expected: PlaylistMigrationEntry, video: YouTubeVideo) async throws {
+        guard YouTubeURLValidator.isValidID(video.id) else { throw YouTubeError.invalidVideoID }
+        let previous = try await candidates(entryID: expected.id)
+        guard !previous.contains(where: { $0.provider == "youtube" && $0.providerTrackID == video.id }) else { return }
+        let base = try Self.manualYouTubeCandidate(for: expected, video: video, metadataVerified: true)
+        var evidence = base.evidence
+        evidence["matchingAlgorithmVersion"] = "portable-reference-11.4"
+        evidence["selectionMethod"] = "portable-reference"
+        evidence["outcome"] = "review"
+        evidence["acceptance"] = "Pending review"
+        evidence["selectionExplanation"] = "Recording from the shared library. Review it before it is downloaded."
+        evidence["confidenceClassification"] = "Shared recording reference; needs review"
+        try await saveCandidate(PlaylistMigrationCandidate(id: base.id, entryID: base.entryID, provider: base.provider, providerTrackID: base.providerTrackID,
+            title: base.title, artist: base.artist, durationMs: base.durationMs, confidence: base.confidence, evidence: evidence, decision: .pending))
     }
 }

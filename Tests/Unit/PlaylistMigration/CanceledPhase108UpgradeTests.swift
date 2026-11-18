@@ -68,10 +68,10 @@ final class CanceledPhase108UpgradeTests: XCTestCase {
         // the unknown v023 record is neither a failure nor a reason to erase anything.
         let reopened = try DatabaseManager(url: fixture.paths.database)
         let identifiers = try await reopened.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
-        // v001–v022, the canceled v023 record, Phase 11.1's v024 and Phase 11.2's v025.
-        XCTAssertEqual(identifiers.count, 25)
+        // v001–v022, the canceled v023 record, Phase 11.1's v024, Phase 11.2's v025 and Phase 11.4's v026.
+        XCTAssertEqual(identifiers.count, 26)
         XCTAssertTrue(identifiers.contains(Self.canceledMigration), "The historical record is kept")
-        XCTAssertEqual(identifiers.last, ListeningAnalyticsSchema.version)
+        XCTAssertEqual(identifiers.last, PortableLibrarySchema.version)
         XCTAssertTrue(identifiers.contains(LocalProfileSchema.version))
         XCTAssertTrue(identifiers.contains(PlaylistLinkDownloadSchema.version))
         let after = try ReleaseIntegritySnapshot.capture(reopened.dbQueue, paths: fixture.paths)
@@ -128,6 +128,6 @@ final class CanceledPhase108UpgradeTests: XCTestCase {
         try LibraryRepository(db: launched.database.dbQueue).addTracks([installed.fixture.ids[1]], playlistID: manual.id)
         let migrations = try await launched.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM grdb_migrations") }
         let leftovers = try await launched.database.dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM spotify_pending_imports") }
-        XCTAssertEqual(migrations, 25); XCTAssertEqual(leftovers, 2)
+        XCTAssertEqual(migrations, 26); XCTAssertEqual(leftovers, 2)
     }
 }
