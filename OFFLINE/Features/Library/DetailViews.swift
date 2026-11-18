@@ -45,7 +45,11 @@ struct PlaylistDetailView: View {
         (migrationManaged ? visibleImported.count + visibleManual.count : visibleSongs.count) + visibleLinks.count
     }
 
+    /// Scroll anchor for the in-playlist search field.
+    private static let searchRowID = "playlist-search-row"
+
     var body: some View {
+        ScrollViewReader { scrollProxy in
         List {
             if let playlist {
                 Section {
@@ -66,7 +70,7 @@ struct PlaylistDetailView: View {
                     }.padding(.vertical, AppSpacing.md)
                 }.listRowBackground(AppColors.backgroundPrimary)
                 Section {
-                    PlaylistSearchField(text: $query)
+                    PlaylistSearchField(text: $query).id(Self.searchRowID)
                 }.listRowBackground(AppColors.backgroundPrimary)
                 if searching && visibleCount == 0 {
                     Section {
@@ -130,6 +134,12 @@ struct PlaylistDetailView: View {
                     }
                 }
             } else { Text("This playlist was removed.").foregroundStyle(AppColors.textSecondary) }
+        }
+        .onChange(of: searching) { _, isSearching in
+            // With the keyboard up the field sits at the bottom of the visible list, so the
+            // filtered songs would be laid out under the keyboard. Keep the field at the top.
+            if isSearching { withAnimation(.easeOut(duration: 0.2)) { scrollProxy.scrollTo(Self.searchRowID, anchor: .top) } }
+        }
         }
         .environment(\.editMode, $editMode)
         .sheet(item: $songOptions) { SongOptionsView(context: $0) }
