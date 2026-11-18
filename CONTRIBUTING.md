@@ -1,86 +1,114 @@
 # Contributing to Muzik Belesh
 
-Thanks for your interest in contributing. **Muzik Belesh** is a native, offline-first SwiftUI music player for personal iPhone use, with local audio, a persistent library, YouTube search/downloads, and file-based Spotify playlist migration (v1.1.0).
+Muzik Belesh is a native, offline-first iOS music player. The current stable release is **[v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)**.
 
-Please keep pull requests focused, preserve existing music libraries, and never introduce account credentials or a required backend.
+The codebase includes playback and persistent queues, local library management, YouTube search/download workflows, Spotify playlist-file migration, a local profile, listening analytics, custom themes, portable `.mbelesh` sharing and dynamic collection artwork.
 
-## Project and release model
+Contributions should **preserve users' music libraries** and improve well-defined behavior. A small, verified correction is preferable to a large speculative rewrite.
 
-The repository uses these long-lived branches:
+## Branches and pull requests
 
 | Branch | Purpose |
 | --- | --- |
-| `develop` | Default integration branch; the base for normal contributions |
-| `release` | Owner-approved release promotion and stable packaging |
-| `main` | Published stable code and GitHub release tags |
+| `develop` | Default development branch and target for feature/bug-fix pull requests |
+| `release` | Owner-reviewed stable release integration |
+| `main` | Published stable source and release tags |
 
-Create feature and fix branches from `develop`, using descriptive names such as `feature/playlist-improvement` or `fix/share-inbox-recovery`. Open pull requests **into `develop`**, not directly into `main` or `release`.
+Create a descriptive `feature/`, `fix/` or `docs/` branch from `develop`. Open a PR against `develop`; avoid direct changes to stable release branches. Releases are promoted by reviewed merges to `release` and `main`, followed by the owner-authorized tag and GitHub Release.
 
-A version release is promoted **from `develop` to `release`, then synchronized with `main`**. Only after owner approval are the corresponding version tag and GitHub Release published. Never publish automatically from a feature branch. Preserve long-lived branch history; do not force-push release branches.
+Do not force-push `release` or `main`, rewrite published tags, or replace previously distributed IPA bytes.
 
-## Development setup
+## Development environment
 
-The app and Share extension are written in **Swift**, with **SwiftUI**, **AVFoundation / MediaPlayer**, **GRDB / SQLite**, and **URLSession**. XcodeGen generates the Xcode project from `project.yml`.
+- **Language/UI:** Swift, SwiftUI and UIKit.
+- **Playback:** AVFoundation and MediaPlayer.
+- **Storage:** SQLite / GRDB, managed audio and artwork files.
+- **Downloads:** URLSession foreground and background transfers.
+- **Media discovery:** YouTubeKit, supported public Invidious and configured SearXNG.
+- **Imports:** Spotify CSV/JSON/ZIP and portable `.mbelesh` metadata documents.
+- **Build:** XcodeGen; native builds and XCTest on macOS.
+- **Minimum supported OS:** iOS 17.
 
-- Editing, Git and source checks can be done on Windows, including via an editor and GitHub.
-- Native iOS compilation and XCTest require macOS with Xcode. GitHub Actions uses **Xcode 26.2** and **XcodeGen 2.46.0** for the current release pipeline.
-- Supported deployment target: **iOS 17+**.
-- The app target is `OFFLINE`; the extension target is `OFFLINEShareExtension`.
-
-On macOS:
+The current CI configuration uses **Xcode 26.2** and **XcodeGen 2.46.0**. Run and inspect the workflows to verify toolchain availability rather than assuming all macOS images include the pinned versions.
 
 ```bash
 git clone https://github.com/T-h07/MuzikBelesh.git
 cd MuzikBelesh
 git switch develop
+
 xcodegen generate
-xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+xcodebuild -resolvePackageDependencies \
+  -project OFFLINE.xcodeproj -scheme OFFLINE
+
 xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE \
-  -configuration Debug -destination 'generic/platform=iOS Simulator' \
+  -configuration Debug \
+  -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-See [Build pipeline](Docs/BUILD_PIPELINE.md) and [SideStore installation](Docs/SIDELOADING.md) for verification and device-distribution details.
+You may edit source on Windows, but a Windows Swift compiler is not a substitute for an iOS SDK/Xcode build. Use macOS or GitHub Actions to verify native changes.
 
-## Contribution guidelines
+See [build pipeline](Docs/BUILD_PIPELINE.md) and [SideStore installation](Docs/SIDELOADING.md).
 
-- Prefer small changes with a clear problem statement and relevant tests.
-- Preserve local track identities, playlist occurrence order, repeated entries, file references, migration/recovery state and the existing SQLite migration history.
-- Never reset or erase a user's database as a repair strategy. Use isolated temporary directories for destructive tests.
-- Keep security boundaries explicit: validate external URLs and imported CSV/JSON/ZIP/audio, use parameterized SQL, preserve safe file ownership and atomic writes, and avoid unbounded work on untrusted input.
-- Avoid heavy work on SwiftUI render paths and unnecessary blocking operations on the main actor. Measure performance changes where possible; don't assert device energy improvements from simulator timings.
-- Keep async task ownership, cancellation and background-operation recovery clear. iOS controls background execution and stops or defers work after a user force-quit.
-- Don't reintroduce the **canceled Spotify OAuth/Web API flow**. The v1.1.0 Spotify migration feature accepts **Exportify CSV, Spotify account-data JSON and supported ZIP exports** without an account login.
-- Avoid unrelated refactors, feature creep and UI redesigns in bug-fix PRs. Document high-risk architectural proposals for separate review.
-- Use concise comments where behavior is non-obvious. Update README and other docs when public behavior changes.
+## Architectural invariants
 
-## Tests and evidence
+Before changing code, read the [architecture](Docs/ARCHITECTURE.md) and related subsystem documentation.
 
-Before opening a PR:
+- **One audio engine:** playback, queue, sleep timer, Lock Screen and Bluetooth controls use the established audio service; do not add a second player.
+- **One persistent library:** retain GRDB/SQLite as the authoritative state. Never reset a user's database as a shortcut or change historical migration IDs.
+- **Order and repeats matter:** imported and ordinary playlists must preserve occurrence identity, ordering and duplicates.
+- **Atomic file operations:** validate paths, maintain file-operation recovery semantics, and do not delete a recording still referenced elsewhere.
+- **Migration isolation:** preserve placeholders, review decisions, retry state, cancellation and recovery across relaunch.
+- **Local-first privacy:** usernames, avatars, listening history and preferences stay on-device and must not leak into portable exports.
+- **Share extension safety:** use the App Group inbox and documented handoff flow. Do not use private APIs to launch the containing app.
+- **Background correctness:** iOS governs scheduling. Do not promise execution after force-quit or create multiple concurrent download coordinators.
+- **View performance:** avoid expensive queries, repeated image decoding, redundant observers and unnecessary work on the main actor.
+- **User-visible accessibility:** retain VoiceOver traits and stable UI test identifiers.
+
+Keep the main app and extension identifiers plus App Group intact. They are part of the established SideStore in-place-upgrade contract.
+
+## Feature-specific change guidance
+
+**Spotify migration:** imports are **file-based**, using Exportify CSV, supported account-data JSON and ZIP. The direct Spotify OAuth/API/Share workflow was explicitly canceled. Do not reintroduce it as an incidental dependency.
+
+**Listening analytics:** credit actual progressing playback, not skipped, paused, buffering or seeked time. Analytics failures must not stop audio.
+
+**Themes:** changing accent colours must not mutate playlists, profile, playback or analytics. Re-selecting the active theme should not cause unnecessary work.
+
+**Portable library sharing:** `.mbelesh` files contain portable metadata, not audio bytes, user profile, analytics, private settings or device paths. Always validate untrusted documents.
+
+**Dynamic artwork:** use existing shared image caches and collection-specific selections. Respect manual cover precedence, per-collection mode and the app's rotation interval.
+
+## Testing and evidence
+
+Before submitting a PR:
 
 1. Run `python3 Scripts/check-test-hygiene.py` and `git diff --check`.
-2. Run appropriate unit/integration tests for the changed components using macOS or GitHub Actions.
-3. Test relevant user interactions on a physical device when changing playback, downloads, share handling, storage or migrations.
-4. Include the exact commit SHA, test commands/run links and outcomes in the PR description.
-5. Mark unexecuted verification **NOT RUN**, unavailable verification **BLOCKED**, and failures **FAIL**. Never imply that skipped tests passed.
-6. Identify pre-existing failures separately from failures introduced by the PR, with evidence.
+2. Execute affected XCTest/unit/UI tests when a macOS runner is available.
+3. For changes to playback, database migrations, managed files, downloads or Share extension, include physical iPhone acceptance where relevant.
+4. Record the tested commit, workflow links, test counts and failed assertions.
+5. Treat **FAIL**, **CANCELLED**, **SKIPPED**, **BLOCKED** and **NOT RUN** as distinct from PASS.
+6. For performance fixes, document comparable measured baselines rather than claimed improvements.
+7. Document external network/service dependencies and error behavior.
 
-The v1.1.0 focused release verification completed **261 tests with no failures**. The final full regression retained seven documented baseline failures (six migration/review UI tests and one coordinator timing case); those failures must not be concealed or described as passing. See [Phase 10.9 release evidence](Docs/PHASE_10_09_RELEASE.md) and the [hardening audit](Docs/PHASE_10_09_SECURITY_PERFORMANCE.md).
+**Current release context:** v1.2.0 build 200 passed **10/10 owner-reported expedited physical-device checks**. The final complete CI and playlist migration verification were canceled, with earlier Phase 12 failures documented as accepted release risks. New changes should still run the relevant tests; previous risk acceptance is not permission to disable or weaken them.
+
+[Phase 12 acceptance](Docs/PHASE_12_DEVICE_ACCEPTANCE.md) · [Release gate record](Docs/PHASE_12_RELEASE_CHECKLIST.md) · [Test reliability guide](Docs/TESTING_RELIABILITY.md)
 
 ## Pull request checklist
 
-- [ ] My branch is based on `develop` and contains only the intended change.
-- [ ] No user-data deletion or unexpected schema changes.
-- [ ] Security and concurrency risks have been considered.
-- [ ] Relevant tests ran and their actual results are documented.
-- [ ] I updated docs for any user-facing behavior change.
-- [ ] I did not commit secrets, certificates, provisioning profiles, API tokens, signed/unsigned IPA files, Xcode build outputs or generated `.xcodeproj` artifacts.
-- [ ] Any required device test is explicitly recorded.
+- [ ] Based on `develop` with a focused diff and clear motivation.
+- [ ] No destructive database migration, loss of files or change to published IDs.
+- [ ] Security, privacy and concurrency impact considered.
+- [ ] Relevant tests executed; results and incomplete checks recorded accurately.
+- [ ] Physical-device retesting described if the change affects app/extension or installation behavior.
+- [ ] README/docs updated for user-facing changes.
+- [ ] No secrets, signing keys, provisioning profiles, generated Xcode build outputs or IPA artifacts committed.
 
-## Release and signing safety
+## Publishing and SideStore safety
 
-Version tags and stable GitHub Releases are **owner-controlled**. Produce unsigned IPAs through the pinned GitHub Actions workflow; the main app and Share extension must retain compatible bundle identifiers and App Group entitlements so SideStore can sign an **in-place update**.
+Version tags and public releases are controlled by the project owner. The unsigned IPA must include compatible bundle identifiers and App Group entitlement metadata so the user's SideStore signing setup can preserve the existing app container.
 
-**Never instruct an existing user to uninstall the app before upgrading.** Uninstalling can delete the local music library. Use the same SideStore signing identity for an update, and keep a backup of important local music.
+**Do not ask users to uninstall Muzik Belesh before updating.** Uninstalling can remove the user's downloaded music, database and playlists. Recommend preserving independent copies of important audio.
 
-See [v1.1.0 release notes](Docs/RELEASE_NOTES_v1.1.0.md), [known limitations](Docs/KNOWN_LIMITATIONS.md), and [the project README](README.md).
+For the full current product overview, see [README.md](README.md). For release artifacts, consult the [v1.2.0 GitHub Release](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0).
