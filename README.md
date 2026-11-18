@@ -14,7 +14,7 @@ A native, offline-first iOS music player with a persistent local library, backgr
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-native-000000?logo=swift&logoColor=white)
 ![SideStore](https://img.shields.io/badge/installation-SideStore-202020)
 
-**[Download v1.1.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.1.0)** · **[Unsigned IPA](https://github.com/T-h07/MuzikBelesh/releases/download/v1.1.0/OFFLINE-unsigned.ipa)** · **[Installation guide](Docs/SIDELOADING.md)**
+**[Download the latest release](https://github.com/T-h07/MuzikBelesh/releases/latest)** · **[Unsigned IPA](https://github.com/T-h07/MuzikBelesh/releases/latest/download/OFFLINE-unsigned.ipa)** · **[Installation guide](Docs/SIDELOADING.md)**
 
 </div>
 
@@ -24,7 +24,7 @@ A native, offline-first iOS music player with a persistent local library, backgr
 
 Muzik Belesh keeps your music on your device. Import audio files through Files, organize your collection into playlists and albums, and listen without a network connection. When you want new music, the app can search supported YouTube content, inspect audio formats, and queue a download for offline playback.
 
-The player is built with **SwiftUI and AVFoundation**, using **SQLite/GRDB** for persistent library data. It supports native **Lock Screen / Control Center** and **AirPods / Bluetooth** media controls. In v1.1.0, you can import exported Spotify playlists while keeping their order and repeated tracks, match recordings, and gradually make them available offline.
+The player is built with **SwiftUI and AVFoundation**, using **SQLite/GRDB** for persistent library data. It supports native **Lock Screen / Control Center** and **AirPods / Bluetooth** media controls. You can import exported Spotify playlists while keeping their order and repeated tracks, and v1.2.0 adds a local profile, listening statistics, custom accent colours, `.mbelesh` library sharing between iPhones and automatic collection artwork.
 
 ## Features
 
@@ -42,7 +42,18 @@ The player is built with **SwiftUI and AVFoundation**, using **SQLite/GRDB** for
 | Download queue with progress, cancellation, and retry | Downloads managed through background URLSession |
 | Wi-Fi-only preference with optional cellular downloads | Low Power Mode and thermal-aware work scheduling |
 
-### New in v1.1.0 — Spotify playlist migration
+### New in v1.2.0 — profile, statistics, themes, sharing and artwork
+
+| Personal | Share and browse |
+| --- | --- |
+| **Local profile** with name and optional photo — no account or server | Export playlists or the whole library as a small **`.mbelesh`** file |
+| **Your Listening**: 7-day, 30-day and all-time listening time, activity chart, top songs, artists, albums and playlists | Import on another iPhone, reusing songs already there and finding the rest |
+| Only time when audio is really playing is counted | Files carry metadata and public YouTube references only — never audio or personal data |
+| **Custom themes**: eight accent presets or any colour, contrast-adjusted | Automatic **2×2 artwork mosaics** for playlists, albums and artists; custom covers always win |
+
+[v1.2.0 release notes](Docs/RELEASE_NOTES_v1.2.0.md)
+
+### Since v1.1.0 — Spotify playlist migration
 
 | Import and matching | Manage and listen |
 | --- | --- |
@@ -62,13 +73,13 @@ A persistent mini-player and full-screen Now Playing interface keep playback acc
 > The release provides an **unsigned IPA** for personal **SideStore** installation. It is **not** an App Store build. SideStore must sign the main app and the Share extension using your compatible signing identity.
 
 1. Open the **[latest GitHub Release](https://github.com/T-h07/MuzikBelesh/releases/latest)**.
-2. Download `OFFLINE-unsigned.ipa` (and optionally `OFFLINE-build-manifest.json` to verify provenance).
+2. Download `OFFLINE-unsigned.ipa` (and optionally `OFFLINE-build-manifest.json` and `OFFLINE-unsigned.ipa.sha256` to verify provenance and integrity).
 3. Open the IPA with **SideStore**, sign it, and install on your iPhone.
 4. Launch Muzik Belesh. Import existing audio from Files, or search for supported media and download audio for offline listening.
 
 **Updating?** Install the new IPA **over the existing app**, using the same SideStore signing identity. **Do not uninstall first**—doing so may delete your local music library.
 
-[Full sideloading instructions](Docs/SIDELOADING.md) · [Release checksums and details](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.1.0)
+[Full sideloading instructions](Docs/SIDELOADING.md) · [Release checksums and details](https://github.com/T-h07/MuzikBelesh/releases/latest)
 
 ## Import a Spotify playlist
 
@@ -93,7 +104,7 @@ Sharing a link does **not** automatically start a download. Apple's supported Sh
 
 ## Performance and reliability
 
-v1.0.0 introduced reliability improvements for long listening sessions and large libraries; v1.1.0 adds validation and maintainability hardening:
+v1.0.0 introduced reliability improvements for long listening sessions and large libraries; v1.1.0 added validation and maintainability hardening; v1.2.0 adds a final release-hardening pass:
 
 - Reduces repeated playback-clock database reads and writes.
 - Reuses Now Playing artwork instead of rebuilding it on every clock tick.
@@ -103,10 +114,19 @@ v1.0.0 introduced reliability improvements for long listening sessions and large
 - Bounds imported audio metadata and removes unsafe control characters to avoid rejected imports or oversized metadata.
 - Avoids rebuilding the whole playlist playback-ID list separately for every visible ordinary-playlist row.
 - Includes import-integrity tests through 10,000 entries, careful inbox downgrade handling, and reviewed CI workflow input validation.
+- Stops oversized YouTube and discovery responses while they stream (8 MB / 4 MB) instead of buffering them first.
+- Verifies in-place upgrades from v1.1.0 and every Phase 11 database schema with row-for-row, integrity and foreign-key checks.
+- Pins every CI action to an immutable commit and publishes a SHA-256 checksum with each IPA.
 
 These are engineering improvements, **not a guarantee of a particular battery life or device temperature**.
 
-### Verification for v1.1.0 (Build 99)
+### Verification for v1.2.0 (Build 200)
+
+Simulator, unit, upgrade and packaging evidence, and the physical-iPhone acceptance checklist, are recorded in the [Phase 12 final release audit](Docs/PHASE_12_FINAL_RELEASE_AUDIT.md), [release checklist](Docs/PHASE_12_RELEASE_CHECKLIST.md) and [device acceptance](Docs/PHASE_12_DEVICE_ACCEPTANCE.md). The IPA's SHA-256 is published with the release.
+
+[Security audit](Docs/PHASE_12_SECURITY_AUDIT.md) · [Performance report](Docs/PHASE_12_PERFORMANCE_REPORT.md)
+
+### Previous release: v1.1.0 (Build 99)
 
 - **261 focused native tests passed**, including new hardening/import integrity coverage ([run](https://github.com/T-h07/MuzikBelesh/actions/runs/44096490155)).
 - Final full regression: **Library UI 16/16** and compact UI **5/5** passed. Seven other tests (six migration/review UI cases and one coordinator timing case) remain **documented baseline failures**; do not interpret the full CI run as green ([run](https://github.com/T-h07/MuzikBelesh/actions/runs/44096495656)).
@@ -170,6 +190,7 @@ Development took place on short-lived feature branches, integrated through pull 
 ## Documentation
 
 - [Project roadmap](Docs/ROADMAP.md) and [contributing](CONTRIBUTING.md)
+- [v1.2.0 release notes](Docs/RELEASE_NOTES_v1.2.0.md), [final release audit](Docs/PHASE_12_FINAL_RELEASE_AUDIT.md), [security audit](Docs/PHASE_12_SECURITY_AUDIT.md) and [performance report](Docs/PHASE_12_PERFORMANCE_REPORT.md)
 - [v1.1.0 release notes](Docs/RELEASE_NOTES_v1.1.0.md), [verification](Docs/PHASE_10_09_RELEASE.md), and [hardening audit](Docs/PHASE_10_09_SECURITY_PERFORMANCE.md)
 - [v1.0 feature acceptance matrix](Docs/PHASE_09_FEATURE_MATRIX.md)
 - [Library architecture](Docs/LIBRARY_ARCHITECTURE.md) and [playlist management](Docs/PLAYLIST_MANAGEMENT.md)
@@ -185,13 +206,14 @@ Development took place on short-lived feature branches, integrated through pull 
 - The distributed IPA requires personal signing through SideStore.
 - Spotify playlist import is **file-based**, not an account connection or direct Spotify URL import.
 - Matching and downloading require internet access. iOS may pause or stop background work after a force-quit; saved work is restored when reopened.
-- A few pre-existing simulator UI regression tests still fail; their status and device acceptance evidence are documented in the Phase 10.9 release report.
+- `.mbelesh` files share metadata only; songs not on the receiving iPhone are matched or downloaded there.
+- Full list: [known limitations](Docs/KNOWN_LIMITATIONS.md).
 
 ---
 
 <div align="center">
 
-**Muzik Belesh · v1.1.0**
+**Muzik Belesh · v1.2.0**
 
 Built for personal, offline-first listening.
 

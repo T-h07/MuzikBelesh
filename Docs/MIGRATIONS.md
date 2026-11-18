@@ -22,3 +22,21 @@ Phase 11.1 appends `v024_local_user_profile` after `v022_playlist_link_downloads
 `v023_spotify_pending_imports` on some phones, and GRDB ignores that unknown identifier.
 `LocalProfileUpgradeTests` rewinds a database to the exact v1.1.0 schema, reopens it and
 checks every library table is unchanged.
+
+## Phase 12 (v1.2.0) — no new migration
+
+v1.2.0 adds **no** schema change; its final migration is `v027_dynamic_collection_artwork`.
+The full v1.2.0 sequence is v001–v022 (as shipped in v1.1.0), then v024–v027; `v023` stays
+reserved and unregistered.
+
+`Phase12UpgradeMatrixTests` is the release gate for in-place updates. It builds one
+populated library (ordered playlist, like, migrated playlist with repeated sources and
+ready occurrences, profile and listening session where the cut has them), rewinds it to the
+schema of v1.1.0 (v022), Phase 11.1 (v024), 11.2/11.3 (v025), 11.4 (v026) and 11.5 (v027),
+reopens it with the current `StorageCoordinator` and asserts that every pre-existing row is
+unchanged, `PRAGMA integrity_check` is `ok`, `PRAGMA foreign_key_check` is empty, playlist
+order, profile and audio files are kept, v023 is never applied, and a second launch changes
+nothing. Rewinding removes later tables and their `grdb_migrations` rows; the widened
+`playlist_migrations.source` CHECK from v026 is not reverted for earlier cuts (it only
+accepts more values), and the v025→v026 rebuild itself is covered by
+`PortableLibrarySchemaTests`.
