@@ -1,5 +1,8 @@
 # Phase 11.3: Custom themes, accent colours and the reactive appearance system
 
+> **Current status (18 November 2026):** This feature is merged into the stable application and published in [Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0). Historical branch/CI/acceptance status statements below describe the original feature-implementation stage, not the current release state. The final release had 10/10 owner-reported expedited iPhone checks PASS; complete final CI was canceled with known risks accepted.
+
+
 Branch: `feature/phase-11-03-themes`, from `develop` at `f1d4e78` (Phase 11.2 merged).
 Status: implemented; **10/10 developer-reported physical-device checks PASS** on 2026-11-17. Native CI not green (canceled regression shards); not merged, not released.
 
