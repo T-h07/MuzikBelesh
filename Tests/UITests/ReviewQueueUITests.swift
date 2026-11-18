@@ -155,21 +155,18 @@ final class ReviewQueueUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["review-error"].exists)
     }
 
+    // Phase 12: one test of ~40 checks ran past its 60 s allowance without hanging (v1.1.0
+    // baseline timeout). Buttons and swipes are now separate tests; every check is kept.
     func testNavigationResetsScrollAndNeverSelects() {
         openQueue()
         // Scroll to song 1's last candidate; scrolling alone never opens a confirmation.
         reveal(useButton(song: 0, candidate: 4))
         assertNoConfirmation("Scrolling never confirms")
         app.buttons["review-next"].tap()
-        assertShowing(2, of: 4)
-        header.swipeLeft() // Horizontal swipe on the song header navigates only.
-        assertShowing(3, of: 4)
-        assertNoConfirmation("Swiping never confirms")
-        app.buttons["review-previous"].tap()
-        assertShowing(2, of: 4)
+        assertShowing(2, of: 4) // Also asserts the new song starts at the top.
         app.buttons["review-skip"].tap()
         assertShowing(3, of: 4)
-        header.swipeRight()
+        app.buttons["review-previous"].tap()
         assertShowing(2, of: 4)
         app.buttons["review-previous"].tap()
         assertShowing(1, of: 4)
@@ -177,5 +174,19 @@ final class ReviewQueueUITests: XCTestCase {
         XCTAssertTrue(useButton(song: 0, candidate: 0).waitForExistence(timeout: 3))
         reveal(useButton(song: 0, candidate: 4))
         assertNoConfirmation("Navigation never confirms")
+    }
+
+    func testHeaderSwipesNavigateAndNeverSelect() {
+        openQueue()
+        header.swipeLeft() // Horizontal swipe on the song header navigates only.
+        assertShowing(2, of: 4)
+        header.swipeLeft()
+        assertShowing(3, of: 4)
+        assertNoConfirmation("Swiping never confirms")
+        header.swipeRight()
+        assertShowing(2, of: 4)
+        header.swipeRight()
+        assertShowing(1, of: 4)
+        XCTAssertTrue(useButton(song: 0, candidate: 0).waitForExistence(timeout: 3), "Swiping selected or rejected nothing")
     }
 }

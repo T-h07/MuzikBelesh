@@ -204,7 +204,10 @@ struct MigrationProgressOverview: View {
             }
             Text("Unresolved: \(progress.unresolved)").accessibilityIdentifier("migration-unresolved-count")
             if progress.actual == 0 { Text("Empty source playlist — no audio to acquire.").font(.caption) }
-        }.tint(palette.accent).accessibilityIdentifier("migration-overall-progress")
+        }.tint(palette.accent)
+        // A plain stack passes its identifier down to every child, replacing theirs; `.contain`
+        // keeps the counts individually addressable. VoiceOver order and labels are unchanged.
+        .accessibilityElement(children: .contain).accessibilityIdentifier("migration-overall-progress")
     }
 }
 

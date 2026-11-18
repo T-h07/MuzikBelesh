@@ -205,6 +205,41 @@ hardening issue with no user-visible effect.
   "Original song 3" *exists* required a row the lazy List had not created. The test now
   checks the count is back to 5 and scrolls to song 3.
 
+### P12-20 — Migration progress counts had no usable accessibility identifiers (P3, fixed)
+
+- **Component:** `OFFLINE/Features/Library/MigrationPlaylistViews.swift`
+  (`MigrationProgressOverview`).
+- **Observed:** the 1,000-entry import test (which, with P12-07, now gets through scrolling,
+  inspection and relaunch for the first time) could not find `migration-unresolved-count`
+  after 15 swipes, both before and after relaunch (run 44318566907).
+- **Root cause:** the captured hierarchy shows every text in the overview carrying the
+  container's identifier `migration-overall-progress` — a plain SwiftUI stack passes its
+  identifier down to its children and replaces theirs. The label is also locale-grouped
+  ("Unresolved: 1,000"), while the test expected "1000".
+- **Correction:** `.accessibilityElement(children: .contain)` on the overview, so the
+  children keep their own identifiers (VoiceOver order and labels unchanged); the test
+  expects "Unresolved: 1,000", matching the existing "1,000 songs" assertion.
+
+### P12-21 — Two v1.1.0 baseline UI failures were over-long tests, not hangs (P3, fixed)
+
+- `ReviewQueueUITests.testNavigationResetsScrollAndNeverSelects` and
+  `PlaylistFileImportUITests.testMultipleSelectionRenamePreviewAndInvalidCandidate` were
+  listed as baseline failures in v1.1.0 (`PHASE_10_09_RELEASE.md`). The step logs show
+  steady progress of about one check per second with no idle stall; each simply contains
+  more than 60 s of work, so the 60 s allowance ended them (4 of 5 earlier runs for the
+  navigation test).
+- **Correction:** each is split in two (button navigation / header-swipe navigation;
+  selection and switch flips / rename, preview and commit). Every assertion is kept and no
+  allowance was raised.
+
+### P12-14 addendum — the upgrade matrix's first run
+
+Run 44318566907 was the first to execute `Phase12UpgradeMatrixTests`. The v1.1.0 and
+Phase 11.1 cuts passed every assertion; the Phase 11.2 fixture then failed to build because
+the test used `"session-1"` as a listening-session ID, which the schema rejects
+(`CHECK(length(id) = 36)`). The fixture now uses a fixed UUID. This was a test-fixture
+error; the schema check behaved correctly.
+
 ### P12-10 — HTTP metadata responses buffered without a limit (P2, security)
 
 See [security audit S01](PHASE_12_SECURITY_AUDIT.md). Fixed with `BoundedHTTPBody`

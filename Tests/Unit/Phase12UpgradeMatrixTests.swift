@@ -45,9 +45,10 @@ final class Phase12UpgradeMatrixTests: XCTestCase {
         if [.phase112and113, .phase114, .phase115].contains(cut) {
             let analytics = ListeningAnalyticsRepository(db: fixture.storage.database.dbQueue)
             let started = Date(timeIntervalSince1970: 1_700_000_000)
-            try analytics.begin(ListeningSessionStart(id: "session-1", trackID: fixture.ids[0], startedAt: started, startDay: "2023-11-14",
+            let sessionID = "5E2C1B7A-0000-4000-8000-000000000001" // The schema requires a 36-character UUID.
+            try analytics.begin(ListeningSessionStart(id: sessionID, trackID: fixture.ids[0], startedAt: started, startDay: "2023-11-14",
                                                       durationMs: 2_000, context: ListeningContext(kind: "playlist", sourceID: mix.id)))
-            try analytics.write(ListeningSessionUpdate(id: "session-1", listenedMs: 1_900, durationMs: 2_000, qualified: true, completed: true,
+            try analytics.write(ListeningSessionUpdate(id: sessionID, listenedMs: 1_900, durationMs: 2_000, qualified: true, completed: true,
                                                        dayDeltas: ["2023-11-14": 1_900], at: started.addingTimeInterval(2), endReason: "ended"))
         }
         try rewind(fixture, to: cut)

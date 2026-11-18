@@ -62,7 +62,10 @@ final class PlaylistFileImportUITests: XCTestCase {
         XCTAssertFalse(app.buttons["collection-play"].isEnabled)
     }
 
-    func testMultipleSelectionRenamePreviewAndInvalidCandidate() {
+    // Phase 12: this flow was one test of ~40 accessibility checks plus a commit, which ran past
+    // its 60 s allowance without hanging (v1.1.0 baseline failure). It is split in two; every
+    // assertion is kept.
+    func testMultipleSelectionDeselectSelectAllAndSwitchFlips() {
         launch(fixture: true, extra: ["--playlist-import-multiple"])
         let counts = app.staticTexts["playlist-import-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 10))
@@ -87,6 +90,17 @@ final class PlaylistFileImportUITests: XCTestCase {
         scrollTo(firstSwitch, down: true)
         flipSwitch(firstSwitch); XCTAssertEqual(firstSwitch.value as? String, "1")
         assertSelected(2)
+    }
+
+    func testMultipleSelectionRenamePreviewAndInvalidCandidate() {
+        launch(fixture: true, extra: ["--playlist-import-multiple"])
+        let counts = app.staticTexts["playlist-import-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 10))
+        XCTAssertEqual(counts.label, "2 valid • 1 invalid playlists")
+        let selectAll = app.buttons["playlist-import-select-all"]
+        scrollTo(selectAll, down: true); selectAll.tap()
+        assertSelected(2)
+        let confirm = app.buttons["playlist-import-confirm"]
         let name = app.textFields["playlist-import-destination-name"].firstMatch
         scrollTo(name); name.tap()
         let old = name.value as? String ?? ""
@@ -154,7 +168,7 @@ final class PlaylistFileImportUITests: XCTestCase {
         let details = app.buttons["migration-dashboard-toggle"]
         scrollTo(details); details.tap()
         scrollTo(app.staticTexts["migration-unresolved-count"])
-        XCTAssertEqual(app.staticTexts["migration-unresolved-count"].label, "Unresolved: 1000")
+        XCTAssertEqual(app.staticTexts["migration-unresolved-count"].label, "Unresolved: 1,000") // Locale-grouped, like "1,000 songs".
     }
 
     private func openMigrationDetails(file: StaticString = #filePath, line: UInt = #line) {
