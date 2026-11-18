@@ -31,7 +31,7 @@ final class CollectionArtworkRotationTests: XCTestCase {
 
     func testOneSharedSchedulerSleepsUntilTheNextBoundaryAndAdvances() async {
         let clock = ArtworkTestClock(start)
-        let requests = SleepRecorder()
+        let requests = ArtworkSleepRecorder()
         let artwork = service(clock, sleep: { duration in
             let first = await requests.record(duration)
             if first { clock.advance(1200) } // The requested sleep "elapses".
@@ -128,7 +128,7 @@ final class CollectionArtworkRotationTests: XCTestCase {
 }
 
 /// Records requested sleep durations across the sleeper's concurrency domain.
-actor SleepRecorder {
+actor ArtworkSleepRecorder {
     private(set) var durations: [Duration] = []
     /// Returns true for the first request.
     func record(_ duration: Duration) -> Bool {
