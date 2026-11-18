@@ -72,10 +72,12 @@ final class ThemeService: ObservableObject {
 
     var effectiveColor: ThemeRGB { palette.chosen }
 
-    func select(_ preset: ThemePreset) { apply(.preset(preset), custom: customColor); save() }
+    /// Selecting the theme that is already active (and saved) is a no-op: nothing is
+    /// published and nothing is written. A previous failed save is retried instead.
+    func select(_ preset: ThemePreset) { choose(.preset(preset)) }
 
     /// Switches to the saved custom colour.
-    func selectCustom() { apply(.custom, custom: customColor); save() }
+    func selectCustom() { choose(.custom) }
 
     /// Live update while the system colour picker is dragged. The interface follows
     /// immediately; the write is coalesced and `commitCustomColor()` flushes it.
@@ -97,7 +99,13 @@ final class ThemeService: ObservableObject {
     }
 
     /// Restores Original Lime. The saved custom colour is kept for later.
-    func reset() { apply(.default, custom: customColor); save() }
+    func reset() { choose(.default) }
+
+    private func choose(_ next: ThemeSelection) {
+        guard next != selection || pendingSave != nil || lastError != nil else { return }
+        apply(next, custom: customColor)
+        save()
+    }
 
     private func apply(_ selection: ThemeSelection, custom: ThemeRGB) {
         if self.selection != selection { self.selection = selection }
@@ -112,9 +120,11 @@ final class ThemeService: ObservableObject {
         do {
             let data = try JSONEncoder().encode(StoredTheme(selection: selection.identifier, custom: customColor.hex))
             try store.save(data)
-            lastError = nil
+            // @Published notifies on every assignment, even nil to nil.
+            if lastError != nil { lastError = nil }
         } catch {
-            lastError = "Your appearance choice couldn't be saved. It applies until Muzik Belesh closes."
+            let message = "Your appearance choice couldn't be saved. It applies until Muzik Belesh closes."
+            if lastError != message { lastError = message }
         }
     }
 }
