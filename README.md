@@ -14,6 +14,7 @@ A native, offline-first iPhone music player built with **SwiftUI**, **AVFoundati
 ![iOS 17+](https://img.shields.io/badge/iOS-17%2B-161616?logo=apple&logoColor=white)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-native-161616?logo=swift&logoColor=white)
 ![Distribution](https://img.shields.io/badge/Distribution-SideStore-222222)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/T-h07/MuzikBelesh/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/T-h07/MuzikBelesh/actions/workflows/ci.yml)
 
 **[Get v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)** · **[Download unsigned IPA](https://github.com/T-h07/MuzikBelesh/releases/download/v1.2.0/OFFLINE-unsigned.ipa)** · **[Install / update guide](Docs/SIDELOADING.md)**
@@ -223,6 +224,12 @@ Feature branches are integrated through pull requests. Existing release tags and
 **Core systems:** [Architecture](Docs/ARCHITECTURE.md) · [Playback](Docs/AUDIO_ENGINE.md) · [Library](Docs/LIBRARY_ARCHITECTURE.md) · [Playlist migration](Docs/PHASE_10_09_RELEASE.md) · [Database migrations](Docs/MIGRATIONS.md)
 
 **Release engineering:** [v1.2.0 notes](Docs/RELEASE_NOTES_v1.2.0.md) · [Final audit](Docs/PHASE_12_FINAL_RELEASE_AUDIT.md) · [Acceptance and CI caveats](Docs/PHASE_12_RELEASE_CHECKLIST.md) · [Known limitations](Docs/KNOWN_LIMITATIONS.md)
+
+## License
+
+Muzik Belesh's original source code and documentation are released under the **[MIT License](LICENSE)** — Copyright © 2026 T-h07.
+
+You may use, modify and redistribute the MIT-licensed parts under the license terms, including keeping the copyright and permission notice. Bundled third-party libraries, media and other separately licensed content remain subject to their respective terms. The license does not grant rights to audio downloaded or imported into the app.
 
 ## Important limitations
 
