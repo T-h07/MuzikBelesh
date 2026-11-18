@@ -116,7 +116,7 @@ struct PlaylistLibraryRow: View {
     let playlist: StoredPlaylist
     var body: some View {
         HStack(spacing: AppSpacing.md) {
-            ManagedArtworkView(path: playlist.artworkRelativePath, fallbackID: playlist.id, size: 60)
+            CollectionArtworkView(identity: .playlist(playlist.id), size: 60, title: playlist.name, decorative: true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(playlist.name).font(.headline).foregroundStyle(AppColors.textPrimary).lineLimit(1)
                 Text("\(library.playlistEntryCount(playlist.id)) songs").font(.caption).foregroundStyle(AppColors.textSecondary)
@@ -129,9 +129,15 @@ struct PlaylistLibraryRow: View {
 
 struct LibraryGroupRow: View {
     let group: LibraryGroup
+    /// Album groups (including Unassigned Songs) or artist groups.
+    let identity: CollectionArtworkIdentity
+    init(group: LibraryGroup, kind: CollectionArtworkKind) {
+        self.group = group
+        identity = kind == .artist ? .artist(group.id) : .album(group.id)
+    }
     var body: some View {
         HStack(spacing: AppSpacing.md) {
-            ManagedArtworkView(path: group.artworkRelativePath, fallbackID: group.id, size: 60)
+            CollectionArtworkView(identity: identity, size: 60, title: group.title, decorative: true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(group.title).font(.headline).foregroundStyle(AppColors.textPrimary).lineLimit(1)
                 Text("\(group.subtitle) • \(group.count) songs").font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1)

@@ -117,6 +117,7 @@ final class DatabaseManager {
         LocalProfileSchema.register(in: &migrator)
         ListeningAnalyticsSchema.register(in: &migrator)
         PortableLibrarySchema.register(in: &migrator)
+        CollectionArtworkSchema.register(in: &migrator)
         if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
         else { try migrator.migrate(dbQueue) }
     }

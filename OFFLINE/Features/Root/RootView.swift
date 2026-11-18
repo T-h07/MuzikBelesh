@@ -14,7 +14,8 @@ struct RootView: View {
             .environmentObject(container.audioPlayer)
             .environmentObject(container.library)
             .environmentObject(container.profile)
-            .environmentObject(container.listening)))
+            .environmentObject(container.listening)
+            .environmentObject(container.collectionArtwork)))
             .ignoresSafeArea().preferredColorScheme(.dark)
             // Phase 11.4: a `.mbelesh` file opened from Files, Mail or AirDrop is staged
             // privately at once; the tab interface presents it after the profile gate.
@@ -55,6 +56,8 @@ private struct ProfileGate: View {
                 } else { container.playlistMatching?.setForeground(phase == .active) }
             }
             if phase != .active { container.theme.commitCustomColor() }
+            // Artwork rotation and decoding pause in the background; nothing wakes the app for it.
+            if phase != .inactive { container.collectionArtwork.setForeground(phase == .active) }
             if phase != .inactive { container.downloads.setForeground(phase == .active); audioPlayer.setForeground(phase == .active) }
             if phase == .active {
                 audioPlayer.reconcileLifecycle(); Task { await library.reconcileFiles() }; container.playlistAcquisition?.requestReconcile()

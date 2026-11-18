@@ -21,6 +21,9 @@ import Foundation
                     try themeStore.save(data)
                 }
                 if process.arguments.contains("--reset-ui-library") { try seed(storage) }
+                if process.arguments.contains("--reset-ui-library"), process.arguments.contains("--artwork-fixtures") { try ArtworkFixtureSeeder.seed(storage) }
+                // The global artwork switch shares the isolated appearance suite (separate key).
+                let artworkStore = UserDefaultsCollectionArtworkDefaults(defaults: themeDefaults)
                 // Historical suites expect Home: a reset library has a profile unless a Phase 11.1
                 // test asks for the first-launch (or v1.1.0-upgrade) onboarding state.
                 if process.arguments.contains("--reset-ui-library"), !process.arguments.contains("--profile-onboarding") {
@@ -35,7 +38,7 @@ import Foundation
                     if process.arguments.contains("--reset-ui-library") { defaults.removePersistentDomain(forName: "YouTubeUITests-\(identifier)") }
                     // Automatic acquisition is opt-in for UI tests so historical suites keep
                     // their exact (download-free) behavior; deterministic unit tests cover it.
-                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults, resourceMonitor: ResourceMonitor(observeSystem: false), automaticAcquisition: process.arguments.contains("--automatic-acquisition"), themeStore: themeStore)
+                    let container = AppContainer(audioTransfer: FixtureAudioTransfer(failOnce: process.arguments.contains("--download-fail-once")), observeDownloadNetwork: false, storage: storage, youtubeSearchProvider: fixtures, youtubeMetadataProvider: fixtures, youtubeAudioResolver: fixtures, youtubeDefaults: defaults, resourceMonitor: ResourceMonitor(observeSystem: false), automaticAcquisition: process.arguments.contains("--automatic-acquisition"), themeStore: themeStore, artworkStore: artworkStore)
                     container.downloads.setPath(connected: true, wifi: !process.arguments.contains("--download-cellular"))
                     if process.arguments.contains("--download-queue-fixtures") {
                         for index in 1...3 {
@@ -47,7 +50,7 @@ import Foundation
                 }
                 let profileStore: (any LocalProfileStoring)? = process.arguments.contains("--profile-load-failure")
                     ? FailingFirstLoadProfileStore(base: LocalProfileRepository(db: storage.database.dbQueue, paths: storage.paths)) : nil
-                return AppContainer(storage: storage, resourceMonitor: ResourceMonitor(observeSystem: false), profileStore: profileStore, themeStore: themeStore)
+                return AppContainer(storage: storage, resourceMonitor: ResourceMonitor(observeSystem: false), profileStore: profileStore, themeStore: themeStore, artworkStore: artworkStore)
             } catch { fatalError("Could not create the isolated UI test library") }
         }
         #endif

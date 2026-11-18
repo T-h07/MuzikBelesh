@@ -14,6 +14,7 @@ struct PlaylistDetailView: View {
     @State private var showingLinks = false
     @State private var showingMigrationDetails = false
     @State private var showingExport = false
+    @State private var showingArtworkSettings = false
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
     private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
@@ -49,7 +50,7 @@ struct PlaylistDetailView: View {
             if let playlist {
                 Section {
                     VStack(alignment: .leading, spacing: AppSpacing.md) {
-                        ManagedArtworkView(path: playlist.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first, fallbackID: playlist.id, size: 220).frame(maxWidth: .infinity)
+                        CollectionArtworkView(identity: .playlist(playlist.id), size: 220, title: playlist.name).frame(maxWidth: .infinity)
                         Text(playlist.name).font(.title.bold()).foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("playlist-detail-name")
                         if let description = playlist.description, !description.isEmpty { Text(description).foregroundStyle(AppColors.textSecondary) }
                         if migrationManaged {
@@ -151,6 +152,8 @@ struct PlaylistDetailView: View {
                             .accessibilityIdentifier("playlist-migration-details")
                     }
                     Button("Edit Playlist") { showingEditor = true }
+                    Button { showingArtworkSettings = true } label: { Label("Artwork Settings", systemImage: "photo.on.rectangle") }
+                        .accessibilityIdentifier("playlist-artwork-settings")
                     Button { showingExport = true } label: { Label("Export Playlist", systemImage: "square.and.arrow.up") }
                         .accessibilityIdentifier("playlist-export")
                     Button("Delete Playlist", role: .destructive) { confirmingDelete = true }
@@ -163,6 +166,7 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showingLinks) { AddYouTubeLinksView(playlistID: playlistID) }
         .sheet(isPresented: $showingMigrationDetails) { MigrationDetailsSheet(playlistID: playlistID) }
         .sheet(isPresented: $showingExport) { LibraryExportView(initialScope: .playlist(playlistID)) }
+        .sheet(isPresented: $showingArtworkSettings) { CollectionArtworkSettingsView(identity: .playlist(playlistID), title: playlist?.name ?? "Playlist") }
         .confirmationDialog("Add Songs", isPresented: $choosingSource, titleVisibility: .visible) {
             Button("From Your Library") { showingTracks = true }.accessibilityIdentifier("playlist-add-from-library")
             Button("From YouTube Links") { showingLinks = true }.accessibilityIdentifier("playlist-add-from-youtube")
@@ -193,14 +197,14 @@ struct ArtistDetailView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: AppSpacing.lg) {
                 if let group {
-                    ManagedArtworkView(path: group.artworkRelativePath, fallbackID: group.id, size: 180).frame(maxWidth: .infinity)
+                    CollectionArtworkView(identity: .artist(group.id), size: 180, title: group.title).frame(maxWidth: .infinity)
                     Text(group.title).font(.title.bold()).foregroundStyle(AppColors.textPrimary)
                     Text("\(group.count) songs").foregroundStyle(AppColors.textSecondary)
                     CollectionPlaybackButtons(tracks: library.tracks(group.trackIDs), kind: "artist", sourceID: groupID)
                     ForEach(library.albumGroups.filter { album in
                         !Set(album.trackIDs).isDisjoint(with: group.trackIDs) || library.snapshot.albums.contains { $0.id == album.id && $0.artistID == groupID }
                     }) { album in
-                        NavigationLink { AlbumDetailView(groupID: album.id) } label: { LibraryGroupRow(group: album) }
+                        NavigationLink { AlbumDetailView(groupID: album.id) } label: { LibraryGroupRow(group: album, kind: .album) }
                     }
                     ForEach(library.tracks(group.trackIDs)) { StoredTrackRow(track: $0, contextTrackIDs: group.trackIDs, contextKind: "artist", contextSourceID: groupID) }
                 } else { EmptyState(icon: "person", title: "No songs for this artist", message: "Its songs may have been edited or removed.") }

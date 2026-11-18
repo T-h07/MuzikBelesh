@@ -63,7 +63,7 @@ enum ProfileTestImages {
 /// Every user table except the profile itself, as sorted row descriptions.
 func librarySnapshot(_ db: DatabaseQueue) throws -> [String: [String]] {
     try db.read { db in
-        let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('grdb_migrations', 'local_user_profile', 'listening_sessions', 'listening_session_days', 'listening_analytics_state', 'portable_library_imports', 'portable_library_import_items', 'portable_library_entries') ORDER BY name")
+        let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('grdb_migrations', 'local_user_profile', 'listening_sessions', 'listening_session_days', 'listening_analytics_state', 'portable_library_imports', 'portable_library_import_items', 'portable_library_entries', 'collection_artwork_preferences') ORDER BY name")
         var result: [String: [String]] = [:]
         for table in tables { result[table] = try Row.fetchAll(db, sql: "SELECT * FROM \"\(table)\"").map(\.description).sorted() }
         return result
@@ -457,7 +457,9 @@ final class LocalProfileUpgradeTests: XCTestCase {
             try db.execute(sql: "DROP TABLE listening_session_days; DROP TABLE listening_sessions; DROP TABLE listening_analytics_state")
             // Phase 11.4 tables are new and empty; its widened source CHECK admits every v1.1.0 row.
             try db.execute(sql: "DROP TABLE portable_library_entries; DROP TABLE portable_library_import_items; DROP TABLE portable_library_imports")
-            try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN (?, ?, ?)", arguments: [LocalProfileSchema.version, ListeningAnalyticsSchema.version, PortableLibrarySchema.version])
+            // Phase 11.5 preferences are new and empty; dropping the table drops its triggers.
+            try db.execute(sql: "DROP TABLE collection_artwork_preferences")
+            try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN (?, ?, ?, ?)", arguments: [LocalProfileSchema.version, ListeningAnalyticsSchema.version, PortableLibrarySchema.version, CollectionArtworkSchema.version])
         }
         let last = try fixture.storage.database.dbQueue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier").last }
         XCTAssertEqual(last, PlaylistLinkDownloadSchema.version, "v1.1.0 ends at v022")
