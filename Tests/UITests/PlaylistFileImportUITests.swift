@@ -97,15 +97,26 @@ final class PlaylistFileImportUITests: XCTestCase {
         let counts = app.staticTexts["playlist-import-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 10))
         XCTAssertEqual(counts.label, "2 valid • 1 invalid playlists")
+        // Pin the "First source" candidate while the list is at the top: scrolling down from there
+        // reveals candidates in order, so the first switch found is the first candidate's. Its UUID
+        // names that candidate's preview button. Unpinned `firstMatch` queries resolved to the
+        // second candidate once the first section left the lazy list (CI: the preview showed the
+        // empty "Second source").
+        let anySwitch = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-select-")).firstMatch
+        scrollTo(anySwitch)
+        let candidateID = String(anySwitch.identifier.dropFirst("playlist-import-select-".count))
+        let firstSwitch = app.switches["playlist-import-select-" + candidateID]
+        let preview = app.buttons["playlist-import-preview-" + candidateID]
         let selectAll = app.buttons["playlist-import-select-all"]
         scrollTo(selectAll, down: true); selectAll.tap()
         assertSelected(2)
         let confirm = app.buttons["playlist-import-confirm"]
+        // Bring the first candidate back; its text field is then the first one in the tree.
+        scrollTo(firstSwitch, down: true)
         let name = app.textFields["playlist-import-destination-name"].firstMatch
         scrollTo(name); name.tap()
         let old = name.value as? String ?? ""
         name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + "Reviewed destination\n")
-        let preview = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playlist-import-preview-")).firstMatch
         scrollTo(preview); preview.tap()
         XCTAssertTrue(app.staticTexts["First song"].waitForExistence(timeout: 5))
         preview.tap()

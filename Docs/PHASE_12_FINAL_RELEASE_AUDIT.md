@@ -231,6 +231,24 @@ hardening issue with no user-visible effect.
 - **Correction:** each is split in two (button navigation / header-swipe navigation;
   selection and switch flips / rename, preview and commit). Every assertion is kept and no
   allowance was raised.
+- **Follow-up (run 44327423510):** the rename half then failed at the preview check. Without
+  the switch flips that used to precede it, the list was at the bottom when the test looked
+  for the name field and preview button, so both unpinned `firstMatch` queries named the
+  second candidate (the step log shows the preview tap on a different UUID, which reveals
+  the empty "Second source"). The test now pins the first candidate by the UUID in its
+  switch identifier before scrolling, and uses that UUID for the preview button.
+
+### P12-22 — Acquisition dedup test fixture produced different bytes per encode (P3, fixed)
+
+- `PlaylistAcquisitionRecoveryTests.testFailedVerificationNeverMarksReadyAndIdenticalAudioIsStoredOnce`
+  stored 2 tracks instead of 1 in run 44327423510 (it passed in the two earlier runs).
+- **Root cause:** the fixture re-encoded the "identical" tone with `AVAudioFile` for each
+  download. The M4A header records its creation time to the second, so two encodes that
+  straddle a second boundary differ in bytes. The app's `UNIQUE` index on
+  `tracks.contentSHA256` proves the stored files differed; the app's deduplication behaved
+  correctly for the bytes it was given.
+- **Correction:** the fixture renders each seed once and reuses those bytes, so "same seed"
+  now means byte-identical audio. No app code changed.
 
 ### P12-14 addendum — the upgrade matrix's first run
 
