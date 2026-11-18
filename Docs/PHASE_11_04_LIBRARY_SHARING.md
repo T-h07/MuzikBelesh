@@ -1,5 +1,8 @@
 # Phase 11.4: Portable music library export, import and sharing
 
+> **Current status (18 November 2026):** This feature is merged into the stable application and published in [Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0). Historical branch/CI/acceptance status statements below describe the original feature-implementation stage, not the current release state. The final release had 10/10 owner-reported expedited iPhone checks PASS; complete final CI was canceled with known risks accepted.
+
+
 Branch: `feature/phase-11-04-sharing`, from `develop` at `86f983e` (Phase 11.3 merged, #27).
 Status: implemented; unsigned IPA built (run 44195714530); developer reports installed Phase 11.4 IPA and says the feature works. Detailed P01–P25 device checks **not individually verified**. Owner explicitly approves merging into `develop` with these limitations. **Not merged or released at time of documentation update.**
 

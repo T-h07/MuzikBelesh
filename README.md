@@ -4,210 +4,237 @@
 
 # Muzik Belesh
 
-**Your music. On your iPhone. Offline.**
+### Your music. Your library. Your iPhone. Offline.
 
-A native, offline-first iOS music player with a persistent local library, background playback, YouTube audio downloads, and **file-based Spotify playlist migration**. No mandatory account, subscription, or backend.
+A native, offline-first iPhone music player built with **SwiftUI**, **AVFoundation** and **SQLite**. Import your music, build playlists, discover and download supported YouTube audio, migrate Spotify playlists from exports, and take your library between devices.
 
-[![Latest release](https://img.shields.io/github/v/release/T-h07/MuzikBelesh?display_name=tag&label=release)](https://github.com/T-h07/MuzikBelesh/releases/latest)
+**No subscription. No mandatory online account. No backend required for your local library.**
+
+[![Latest version](https://img.shields.io/github/v/release/T-h07/MuzikBelesh?display_name=tag&label=Latest%20release)](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)
+![iOS 17+](https://img.shields.io/badge/iOS-17%2B-161616?logo=apple&logoColor=white)
+![SwiftUI](https://img.shields.io/badge/SwiftUI-native-161616?logo=swift&logoColor=white)
+![Distribution](https://img.shields.io/badge/Distribution-SideStore-222222)
 [![CI](https://github.com/T-h07/MuzikBelesh/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/T-h07/MuzikBelesh/actions/workflows/ci.yml)
-![iOS](https://img.shields.io/badge/iOS-17%2B-000000?logo=apple&logoColor=white)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-native-000000?logo=swift&logoColor=white)
-![SideStore](https://img.shields.io/badge/installation-SideStore-202020)
 
-**[Download the latest release](https://github.com/T-h07/MuzikBelesh/releases/latest)** · **[Unsigned IPA](https://github.com/T-h07/MuzikBelesh/releases/latest/download/OFFLINE-unsigned.ipa)** · **[Installation guide](Docs/SIDELOADING.md)**
+**[Get v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)** · **[Download unsigned IPA](https://github.com/T-h07/MuzikBelesh/releases/download/v1.2.0/OFFLINE-unsigned.ipa)** · **[Install / update guide](Docs/SIDELOADING.md)**
 
 </div>
 
 ---
 
-## Overview
+## What is Muzik Belesh?
 
-Muzik Belesh keeps your music on your device. Import audio files through Files, organize your collection into playlists and albums, and listen without a network connection. When you want new music, the app can search supported YouTube content, inspect audio formats, and queue a download for offline playback.
+Muzik Belesh is an iOS music player designed around an **on-device library** rather than streaming subscriptions. Add MP3/M4A files from Files, organize songs into albums and playlists, and listen without internet access once the audio is stored locally.
 
-The player is built with **SwiftUI and AVFoundation**, using **SQLite/GRDB** for persistent library data. It supports native **Lock Screen / Control Center** and **AirPods / Bluetooth** media controls. You can import exported Spotify playlists while keeping their order and repeated tracks, and v1.2.0 adds a local profile, listening statistics, custom accent colours, `.mbelesh` library sharing between iPhones and automatic collection artwork.
+When you want to expand your library, search supported YouTube content, choose an available audio quality, and save it for offline playback. You can also bring in Spotify playlist exports while preserving song order and repeats.
 
-## Features
+**v1.2.0** adds personal listening statistics, a local profile, configurable colour themes, portable library sharing, and rotating collection artwork.
 
-| Playback | Your library |
+## Highlights
+
+| Listen | Organize | Discover & acquire |
+| --- | --- | --- |
+| Offline playback, even with the screen locked | Playlists, albums, artists and liked songs | Search supported YouTube content |
+| AirPods, Bluetooth and Control Center controls | Editable titles, artist/album metadata and artwork | Select audio quality and queue downloads |
+| Queue, shuffle, repeat and sleep timer | Library-wide search, sorting and in-playlist search | Persistent downloads, retries and progress |
+| Background audio and interruption recovery | Duplicate-aware import, export and safe deletion | Wi-Fi-only option and background transfers |
+
+| Make it yours | Move your library |
 | --- | --- |
-| Offline audio and background / Lock Screen playback | Playlists, likes, albums, and artists |
-| Play, pause, seek, shuffle, and repeat | Local search and seven sorting options |
-| Persistent queue, listening history, and sleep timer | Editable titles, artists, albums, and artwork |
-| AirPods / Bluetooth controls and audio interruption recovery | Duplicate detection, Files import/export, safe deletion |
+| Local profile with name and optional photo | Import Spotify playlist exports without Spotify sign-in |
+| **Your Listening**: 7-day, 30-day and all-time statistics | Keep playlist order, repeated songs and unresolved entries |
+| Eight colour presets plus a custom accent picker | Export playlists or your library as a portable `.mbelesh` file |
+| Rotating 2×2 collection artwork and manual covers | Reuse local matches, review candidates and download missing songs |
 
-| YouTube and downloads | Native iOS integration |
-| --- | --- |
-| Search, video details, and supported URL imports | Share links directly from YouTube or Safari |
-| Quality choices: Data Saver, Balanced, Best Available | Persistent Share extension inbox |
-| Download queue with progress, cancellation, and retry | Downloads managed through background URLSession |
-| Wi-Fi-only preference with optional cellular downloads | Low Power Mode and thermal-aware work scheduling |
+## What's new in v1.2.0
 
-### New in v1.2.0 — profile, statistics, themes, sharing and artwork
+### Local profile
 
-| Personal | Share and browse |
-| --- | --- |
-| **Local profile** with name and optional photo — no account or server | Export playlists or the whole library as a small **`.mbelesh`** file |
-| **Your Listening**: 7-day, 30-day and all-time listening time, activity chart, top songs, artists, albums and playlists | Import on another iPhone, reusing songs already there and finding the rest |
-| Only time when audio is really playing is counted | Files carry metadata and public YouTube references only — never audio or personal data |
-| **Custom themes**: eight accent presets or any colour, contrast-adjusted | Automatic **2×2 artwork mosaics** for playlists, albums and artists; custom covers always win |
+Give your library a personal identity with a **display name** and optional avatar. Create the profile on first launch and edit it from the Home header.
 
-[v1.2.0 release notes](Docs/RELEASE_NOTES_v1.2.0.md)
+The profile is stored **on the iPhone**, not in an online account. There is no registration, password or profile sync server.
 
-### Since v1.1.0 — Spotify playlist migration
+[How local profiles work](Docs/PHASE_11_01_LOCAL_PROFILE.md)
 
-| Import and matching | Manage and listen |
-| --- | --- |
-| Import **Exportify CSV**, Spotify account-data **JSON**, or supported **ZIP** exports | Preserve original order and repeated song occurrences |
-| Preview files and import up to **10,000 songs per playlist** | Match songs already in your local library first |
-| Find possible YouTube recordings for remaining songs | Review ambiguous matches instead of silently choosing the wrong recording |
-| Persistent migration progress, retry, pause, and recovery | Add library songs, paste multiple YouTube links, remove an occurrence, or **Change Video** |
-| Per-song Migration Issues with next steps | Search within a playlist without restricting its playback queue |
+### Your Listening — personal music statistics
 
-**No Spotify sign-in or developer credentials required.** Direct Spotify account connection, Spotify playlist-URL importing, and Spotify Share integration are **not** included. These imports use files you export yourself.
+Open **Profile → Your Listening** to explore what you've actually listened to:
 
-A persistent mini-player and full-screen Now Playing interface keep playback accessible across **Home, Search, Library, and Downloads**.
+- Listening time across **7 days, 30 days, or all time**.
+- An interactive daily activity chart and listening highlights.
+- Top songs, artists, albums and playlists.
+- Library totals and shortcuts back to your music.
 
-## Install on iPhone
+Listening time is based on **audio that advances during actual playback**, including Lock Screen and AirPods use. Pausing, buffering and skipping do not artificially add listening time. Analytics remain local to your device.
+
+[Listening analytics details](Docs/PHASE_11_02_LISTENING_ANALYTICS.md)
+
+### Personalize your theme
+
+Choose from **Original Lime, Purple, Violet, Blue, Cyan, Pink, Red and Orange**, or select your own accent colour. Changes apply across the app immediately, persist after restarting and use contrast-aware foreground colours.
+
+Your theme does not alter music files, listening data or playback.
+
+[Theme system](Docs/PHASE_11_03_CUSTOM_THEMES.md)
+
+### Portable library sharing
+
+Export **one playlist, selected playlists, or your whole library** to a `.mbelesh` document. Send it through Files, AirDrop, Messages or Mail and import it on another iPhone.
+
+The importer preserves playlist order and repeated songs, attempts to reuse recordings already stored on the receiving device, and can help find or download missing audio through the existing matching pipeline.
+
+**Privacy by design:** `.mbelesh` files carry portable song/playlist metadata and public YouTube references; they **do not contain audio bytes**, your avatar, profile, listening history, settings or device file paths.
+
+[Library sharing details](Docs/PHASE_11_04_LIBRARY_SHARING.md)
+
+### Dynamic artwork for your collections
+
+Playlists, albums, artists and Unassigned Songs can display **automatic 2×2 mosaics** built from their own track covers. The selected mosaic rotates on the configured 30-minute cycle while the app is active.
+
+A manual collection cover takes precedence. Global and per-collection artwork preferences are available, and the image pipeline uses a shared bounded cache for smoother scrolling.
+
+[Dynamic artwork details](Docs/PHASE_11_05_DYNAMIC_ARTWORK.md)
+
+### Release refinements
+
+The v1.2.0 hardening work also addresses in-playlist search visibility, accessibility of listening-statistics controls, redundant theme updates, bounded network response handling and release-artifact integrity checks.
+
+[Complete v1.2.0 release notes](Docs/RELEASE_NOTES_v1.2.0.md) · [Security and performance findings](Docs/PHASE_12_FINAL_RELEASE_AUDIT.md)
+
+## Spotify playlist migration
+
+Muzik Belesh supports **file-based Spotify migration**, introduced in v1.1.0 and retained in v1.2.0. No Spotify account linking or Spotify developer credentials are required.
+
+**Supported sources:** Exportify CSV, Spotify account-data JSON, and supported ZIP exports.
+
+1. Export the desired playlist to a supported file.
+2. Use the playlist-file import flow in Muzik Belesh and select it from Files.
+3. Preview and create the destination playlist. Source order and repeat occurrences are retained.
+4. Existing local recordings are matched first; missing entries can be searched and downloaded from supported sources.
+5. Open **Migration Details / Issues** to pause, resume, retry, skip, inspect or manually resolve problematic recordings.
+
+The app retains unresolved occurrences rather than discarding songs it cannot match. Large imports, including playlists with up to 10,000 occurrences, are supported by the import pipeline.
+
+**Not supported:** direct Spotify account connection, importing a Spotify playlist URL, or Spotify Share extension imports.
+
+[Migration implementation](Docs/PHASE_10_09_RELEASE.md) · [v1.1.0 release notes](Docs/RELEASE_NOTES_v1.1.0.md)
+
+## YouTube search, downloads and sharing
+
+Search supported YouTube videos within the app or paste a video URL. The acquisition workflow presents available audio choices such as **Data Saver**, **Balanced** and **Best Available**, then queues the selected recording for offline use.
+
+Downloads feature persistent progress, cancellation, retry and a Wi-Fi-only preference. Background transfers are subject to iOS scheduling and network conditions. Availability also depends on the source and third-party discovery services.
+
+**Using the iOS Share extension:**
+
+1. From YouTube or Safari, choose **Share → Muzik Belesh**.
+2. Select **Save Link** and finish sharing.
+3. **Open Muzik Belesh manually** to process the saved link.
+4. Review the media and choose an available quality to download.
+
+Saving a shared link does not automatically begin a download. iOS does not provide a supported Share-extension API to foreground the containing app.
+
+[YouTube architecture](Docs/PHASE_06_YOUTUBE.md) · [Background downloads](Docs/PHASE_07_BACKGROUND_DOWNLOADS.md) · [Known limitations](Docs/KNOWN_LIMITATIONS.md)
+
+## Install on your iPhone
 
 > [!IMPORTANT]
-> The release provides an **unsigned IPA** for personal **SideStore** installation. It is **not** an App Store build. SideStore must sign the main app and the Share extension using your compatible signing identity.
+> Muzik Belesh is distributed as an **unsigned IPA** for personal sideloading through **SideStore**. It is **not available on the App Store**. SideStore must sign the app and Share extension with a compatible signing identity.
 
-1. Open the **[latest GitHub Release](https://github.com/T-h07/MuzikBelesh/releases/latest)**.
-2. Download `OFFLINE-unsigned.ipa` (and optionally `OFFLINE-build-manifest.json` and `OFFLINE-unsigned.ipa.sha256` to verify provenance and integrity).
-3. Open the IPA with **SideStore**, sign it, and install on your iPhone.
-4. Launch Muzik Belesh. Import existing audio from Files, or search for supported media and download audio for offline listening.
+**Requirements:** iPhone running **iOS 17 or later**, and SideStore configured for installation.
 
-**Updating?** Install the new IPA **over the existing app**, using the same SideStore signing identity. **Do not uninstall first**—doing so may delete your local music library.
+1. Open the **[Muzik Belesh v1.2.0 release](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)**.
+2. Download **[OFFLINE-unsigned.ipa](https://github.com/T-h07/MuzikBelesh/releases/download/v1.2.0/OFFLINE-unsigned.ipa)**.
+3. Open the IPA in SideStore, sign it and install.
+4. Launch the app, create your local profile if prompted, and import or download music.
 
-[Full sideloading instructions](Docs/SIDELOADING.md) · [Release checksums and details](https://github.com/T-h07/MuzikBelesh/releases/latest)
+**Upgrading from v1.0.0, v1.1.0 or a Phase 11 test build?** Install the new IPA **over the existing app using the same SideStore signing identity**. **Never uninstall first**: that can erase the local library, downloaded songs and playlists.
 
-## Import a Spotify playlist
+You can validate the published download using [the SHA-256 checksum](https://github.com/T-h07/MuzikBelesh/releases/download/v1.2.0/OFFLINE-unsigned.ipa.sha256) and [build manifest](https://github.com/T-h07/MuzikBelesh/releases/download/v1.2.0/OFFLINE-build-manifest.json).
 
-1. Export a Spotify playlist to **CSV** using Exportify, or obtain Spotify account-data **JSON/ZIP** files.
-2. Open Muzik Belesh and choose its **playlist file-import** flow, then select the exported file in Files.
-3. Review the preview and create the playlist. Songs are added in source order as placeholders until audio is found.
-4. Match tracks from your library or review YouTube candidates; download accepted recordings for offline playback.
-5. Use **Migration Details** and **Issues** to review unresolved songs, retry failures, or select a different recording.
+[Complete installation and upgrade guide](Docs/SIDELOADING.md)
 
-Importing the same export again recognizes the prior import without overwriting local playlist edits. Network access is needed to discover and download new recordings; downloaded music plays offline.
+## Release and verification
 
-[Detailed v1.1.0 release notes](Docs/RELEASE_NOTES_v1.1.0.md)
+| Release | What changed | Release page |
+| --- | --- | --- |
+| **v1.2.0** · build **200** | Local profile, listening stats, themes, portable sharing, dynamic artwork and release fixes | [Download v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0) |
+| v1.1.0 · build 99 | Spotify playlist migration, matching, recovery and playlist tools | [v1.1.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.1.0) |
+| v1.0.0 · build 195 | Initial complete offline player, downloads and iOS sharing | [v1.0.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.0.0) |
 
-## Using YouTube sharing
+The v1.2.0 **unsigned Release IPA** was built from commit `ab3763c` by [GitHub Actions #110](https://github.com/T-h07/MuzikBelesh/actions/runs/44371763077). The developer reported **10/10 PASS** on a final physical-iPhone acceptance checklist, covering upgrade and data preservation, playback, downloads, imported playlists, profile, themes, analytics, artwork and library sharing.
 
-1. In the YouTube app or Safari, choose **Share → Muzik Belesh**.
-2. Select **Save Link**, then **Done**.
-3. **Manually open Muzik Belesh** to inspect the saved link.
-4. Choose an available audio quality and tap **Download Audio**.
+**Verification transparency:** complete final automated regression CI and dedicated playlist-migration verification were **intentionally cancelled** to prioritize the release, and earlier Phase 12 CI runs had failures. The 10 physical checks are **not** equivalent to a fully passing automated suite or completion of the separate 45-item detailed checklist.
 
-Sharing a link does **not** automatically start a download. Apple's supported Share extension behavior does not automatically foreground the containing app.
-
-## Performance and reliability
-
-v1.0.0 introduced reliability improvements for long listening sessions and large libraries; v1.1.0 added validation and maintainability hardening; v1.2.0 adds a final release-hardening pass:
-
-- Reduces repeated playback-clock database reads and writes.
-- Reuses Now Playing artwork instead of rebuilding it on every clock tick.
-- Uses linear-time queue setup and bounded recent navigation history.
-- Streams file exports with integrity checks rather than loading entire audio files into memory.
-- Adapts optional work to Low Power Mode and thermal pressure without interrupting normal music playback.
-- Bounds imported audio metadata and removes unsafe control characters to avoid rejected imports or oversized metadata.
-- Avoids rebuilding the whole playlist playback-ID list separately for every visible ordinary-playlist row.
-- Includes import-integrity tests through 10,000 entries, careful inbox downgrade handling, and reviewed CI workflow input validation.
-- Stops oversized YouTube and discovery responses while they stream (8 MB / 4 MB) instead of buffering them first.
-- Verifies in-place upgrades from v1.1.0 and every Phase 11 database schema with row-for-row, integrity and foreign-key checks.
-- Pins every CI action to an immutable commit and publishes a SHA-256 checksum with each IPA.
-
-These are engineering improvements, **not a guarantee of a particular battery life or device temperature**.
-
-### Verification for v1.2.0 (Build 200)
-
-Simulator, unit, upgrade and packaging evidence, and the physical-iPhone acceptance checklist, are recorded in the [Phase 12 final release audit](Docs/PHASE_12_FINAL_RELEASE_AUDIT.md), [release checklist](Docs/PHASE_12_RELEASE_CHECKLIST.md) and [device acceptance](Docs/PHASE_12_DEVICE_ACCEPTANCE.md). The IPA's SHA-256 is published with the release.
-
-[Security audit](Docs/PHASE_12_SECURITY_AUDIT.md) · [Performance report](Docs/PHASE_12_PERFORMANCE_REPORT.md)
-
-### Previous release: v1.1.0 (Build 99)
-
-- **261 focused native tests passed**, including new hardening/import integrity coverage ([run](https://github.com/T-h07/MuzikBelesh/actions/runs/44096490155)).
-- Final full regression: **Library UI 16/16** and compact UI **5/5** passed. Seven other tests (six migration/review UI cases and one coordinator timing case) remain **documented baseline failures**; do not interpret the full CI run as green ([run](https://github.com/T-h07/MuzikBelesh/actions/runs/44096495656)).
-- The developer reported **P01–P08** physical acceptance on build 98 and passing **targeted build-99 checks** for in-place update, imports/downloads, playlist playback/search/editing, and sharing.
-- Build 99 source: `d5551d5`; SHA-256 for `OFFLINE-unsigned.ipa`: `2358a7bdd6da6dafa3d309501464c4fc53163c99f46e732bd64b90c6b530984f`.
-
-[Integration and release verification](Docs/PHASE_10_09_RELEASE.md) · [Security, performance and cleanup audit](Docs/PHASE_10_09_SECURITY_PERFORMANCE.md)
-
-### Previous release: v1.0.0 (Build 195)
-
-- **262** unit/integration tests in the full suite (six optional live YouTube tests skipped).
-- **25** full UI tests, **5** compact-layout checks, and **1** accessibility check passed.
-- **25/25** physical iPhone 13 Pro Max acceptance cases reported as passed, including in-place upgrade, offline/locked playback, Bluetooth, downloads, and library preservation.
-
-[Full CI evidence](https://github.com/T-h07/MuzikBelesh/actions/runs/42197209510) · [Performance report](Docs/PHASE_09_PERFORMANCE.md) · [Test plan](Docs/PHASE_09_DEVICE_TESTING.md)
+[Acceptance report](Docs/PHASE_12_DEVICE_ACCEPTANCE.md) · [Release gates and accepted risks](Docs/PHASE_12_RELEASE_CHECKLIST.md) · [Security audit](Docs/PHASE_12_SECURITY_AUDIT.md) · [Performance report](Docs/PHASE_12_PERFORMANCE_REPORT.md)
 
 ## Tech stack
 
-| Layer | Technology |
+| Area | Implementation |
 | --- | --- |
-| App and UI | Swift, SwiftUI, UIKit |
-| Audio | AVFoundation, MediaPlayer |
-| Local storage | SQLite with GRDB, managed local audio files |
-| Downloads | URLSession background transfers, Network framework |
-| YouTube support | YouTubeKit, validated URL and stream handling |
-| Project generation | XcodeGen |
-| Builds and testing | GitHub Actions on macOS, XCTest |
-| Device installation | SideStore |
+| iOS interface | Swift, SwiftUI, UIKit |
+| Audio and system controls | AVFoundation, MediaPlayer |
+| Database and persistence | SQLite, GRDB |
+| Network and downloads | URLSession, Network framework, background transfers |
+| Media discovery | YouTubeKit, Invidious / SearXNG support |
+| Portable documents | JSON-based `.mbelesh` metadata, ZIPFoundation for supported imports |
+| Project and tooling | XcodeGen, GitHub Actions, XCTest |
+| Distribution | Unsigned IPA, SideStore re-signing |
 
-**Requirements:** iPhone running **iOS 17 or later**. Building from source requires macOS/Xcode; the application can be developed from Windows while GitHub Actions performs macOS builds.
+The project targets iOS 17+. On GitHub Actions, the v1.2.0 pipeline uses a pinned Xcode/XcodeGen toolchain on macOS runners.
 
 ## Build from source
+
+Native iOS builds require **macOS with Xcode and XcodeGen**. Swift source and documentation can also be edited on Windows, with GitHub Actions handling native builds.
 
 ```bash
 git clone https://github.com/T-h07/MuzikBelesh.git
 cd MuzikBelesh
+git switch develop
 
-# On macOS, with Xcode and XcodeGen installed:
 xcodegen generate
-xcodebuild -resolvePackageDependencies -project OFFLINE.xcodeproj -scheme OFFLINE
+xcodebuild -resolvePackageDependencies \
+  -project OFFLINE.xcodeproj -scheme OFFLINE
+
 xcodebuild -project OFFLINE.xcodeproj -scheme OFFLINE \
   -configuration Debug \
   -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-For simulator test runs and the verified arm64 unsigned IPA packaging process, see [Build pipeline](Docs/BUILD_PIPELINE.md). The source app target is `OFFLINE`; the Share extension target is `OFFLINEShareExtension`.
+The primary app target is `OFFLINE`; its native sharing target is `OFFLINEShareExtension`. For Release IPA packaging, CI test scopes, build numbers, the manifest and signing metadata, read the [build pipeline](Docs/BUILD_PIPELINE.md).
 
-## Branches and development
+## Repository branches
 
-The repository keeps three long-lived branches:
-
-| Branch | Purpose |
+| Branch | Responsibility |
 | --- | --- |
-| [`main`](https://github.com/T-h07/MuzikBelesh/tree/main) | Stable repository baseline |
-| [`develop`](https://github.com/T-h07/MuzikBelesh/tree/develop) | Default branch; ongoing integration |
-| [`release`](https://github.com/T-h07/MuzikBelesh/tree/release) | Validated stable releases and tags |
+| [`develop`](https://github.com/T-h07/MuzikBelesh/tree/develop) | Default branch for ongoing development and integration |
+| [`release`](https://github.com/T-h07/MuzikBelesh/tree/release) | Owner-reviewed release integration |
+| [`main`](https://github.com/T-h07/MuzikBelesh/tree/main) | Published stable source and release tags |
 
-Development took place on short-lived feature branches, integrated through pull requests. **Completed feature branches can be deleted without deleting their merged commits or pull-request history.**
+Feature branches are integrated through pull requests. Existing release tags and assets are preserved. See [CONTRIBUTING.md](CONTRIBUTING.md) for changes, tests and PR expectations.
 
 ## Documentation
 
-- [Project roadmap](Docs/ROADMAP.md) and [contributing](CONTRIBUTING.md)
-- [v1.2.0 release notes](Docs/RELEASE_NOTES_v1.2.0.md), [final release audit](Docs/PHASE_12_FINAL_RELEASE_AUDIT.md), [security audit](Docs/PHASE_12_SECURITY_AUDIT.md) and [performance report](Docs/PHASE_12_PERFORMANCE_REPORT.md)
-- [v1.1.0 release notes](Docs/RELEASE_NOTES_v1.1.0.md), [verification](Docs/PHASE_10_09_RELEASE.md), and [hardening audit](Docs/PHASE_10_09_SECURITY_PERFORMANCE.md)
-- [v1.0 feature acceptance matrix](Docs/PHASE_09_FEATURE_MATRIX.md)
-- [Library architecture](Docs/LIBRARY_ARCHITECTURE.md) and [playlist management](Docs/PLAYLIST_MANAGEMENT.md)
-- [Metadata](Docs/METADATA_EDITING.md), [artwork](Docs/ARTWORK_MANAGEMENT.md), and [search/sorting](Docs/LOCAL_SEARCH_AND_SORTING.md)
-- [Duplicate detection](Docs/DUPLICATE_DETECTION.md) and [safe deletion](Docs/SAFE_LIBRARY_DELETION.md)
-- [Release audit](Docs/PHASE_09_RELEASE_AUDIT.md), [test evidence](Docs/TEST_PLAN.md), and [known limitations](Docs/KNOWN_LIMITATIONS.md)
+**Getting started:** [Install and update](Docs/SIDELOADING.md) · [Build pipeline](Docs/BUILD_PIPELINE.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](Docs/ROADMAP.md)
 
-## Known limitations
+**Current features:** [Profile](Docs/PHASE_11_01_LOCAL_PROFILE.md) · [Your Listening](Docs/PHASE_11_02_LISTENING_ANALYTICS.md) · [Themes](Docs/PHASE_11_03_CUSTOM_THEMES.md) · [Library sharing](Docs/PHASE_11_04_LIBRARY_SHARING.md) · [Dynamic artwork](Docs/PHASE_11_05_DYNAMIC_ARTWORK.md)
 
-- YouTube availability and supported stream formats can change independently of the app; requests require connectivity and can occasionally time out.
-- The native Share extension requires you to open Muzik Belesh manually after saving a link.
-- iOS controls the scheduling of background transfers; force-quitting the app may stop pending background work.
-- The distributed IPA requires personal signing through SideStore.
-- Spotify playlist import is **file-based**, not an account connection or direct Spotify URL import.
-- Matching and downloading require internet access. iOS may pause or stop background work after a force-quit; saved work is restored when reopened.
-- `.mbelesh` files share metadata only; songs not on the receiving iPhone are matched or downloaded there.
-- Full list: [known limitations](Docs/KNOWN_LIMITATIONS.md).
+**Core systems:** [Architecture](Docs/ARCHITECTURE.md) · [Playback](Docs/AUDIO_ENGINE.md) · [Library](Docs/LIBRARY_ARCHITECTURE.md) · [Playlist migration](Docs/PHASE_10_09_RELEASE.md) · [Database migrations](Docs/MIGRATIONS.md)
+
+**Release engineering:** [v1.2.0 notes](Docs/RELEASE_NOTES_v1.2.0.md) · [Final audit](Docs/PHASE_12_FINAL_RELEASE_AUDIT.md) · [Acceptance and CI caveats](Docs/PHASE_12_RELEASE_CHECKLIST.md) · [Known limitations](Docs/KNOWN_LIMITATIONS.md)
+
+## Important limitations
+
+- **Offline playback works after audio is stored locally.** Finding and downloading new audio requires internet access.
+- YouTube formats, restrictions and third-party discovery services can change independently of the app.
+- Spotify migration accepts exported files, **not** live account access or direct playlist URLs.
+- Portable `.mbelesh` documents contain **metadata, not music files**.
+- Share-extension links require opening Muzik Belesh manually.
+- iOS decides background task scheduling; force-quitting prevents background work until the app is reopened.
+- SideStore installation and refresh rules depend on your signing setup; the public IPA is unsigned.
+
+Read [all known limitations](Docs/KNOWN_LIMITATIONS.md) before relying on background downloads or cross-device migration.
 
 ---
 
@@ -216,5 +243,7 @@ Development took place on short-lived feature branches, integrated through pull 
 **Muzik Belesh · v1.2.0**
 
 Built for personal, offline-first listening.
+
+[Latest release](https://github.com/T-h07/MuzikBelesh/releases/latest) · [Release notes](Docs/RELEASE_NOTES_v1.2.0.md) · [Report an issue](https://github.com/T-h07/MuzikBelesh/issues)
 
 </div>

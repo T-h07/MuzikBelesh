@@ -324,6 +324,17 @@ and the six Phase 12 documents.
 
 ## 5. Status
 
-Automated results, the final candidate's SHA-256 and the gate matrix are in
-[PHASE_12_RELEASE_CHECKLIST.md](PHASE_12_RELEASE_CHECKLIST.md). Physical acceptance has
-not yet been run, so the release is **not** approved for publication.
+This section was initially drafted before the final artifact and iPhone acceptance. The actual release outcome is recorded below and in the [release checklist](PHASE_12_RELEASE_CHECKLIST.md).
+
+
+## 6. Publication outcome (post-audit update)
+
+Muzik Belesh **v1.2.0 is published**, with the official [GitHub Release](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0) dated 18 November 2026. The final unsigned IPA is **build 200**, created from application-source commit `ab3763cd0a1f9dfec628bd590d3a2627bb34118f` in [Actions #110](https://github.com/T-h07/MuzikBelesh/actions/runs/44371763077).
+
+The owner reported **10/10 PASS** on the expedited physical-iPhone verification, covering existing music, playlists and downloads, playback and remote controls, YouTube acquisition, Spotify migrations, profiles, listening analytics, themes, 2×2 artwork and library sharing. The separate detailed 45-case checklist was not individually executed.
+
+**CI disclosure:** complete final CI #307 and playlist-migration verification were intentionally canceled, and earlier Phase 12 runs contained failures. The owner knowingly accepted these gaps for expedited publication. The Phase 12 release therefore must not be described as having a completely green regression suite.
+
+Promotion history: [#30](https://github.com/T-h07/MuzikBelesh/pull/30) (develop), [#31](https://github.com/T-h07/MuzikBelesh/pull/31) (release), [#32](https://github.com/T-h07/MuzikBelesh/pull/32) (main). No application or packaging-source differences from the accepted commit were present in stable branches at publication preparation.
+
+**Accepted IPA SHA-256:** `a59f7597946dd64d3cc25cbeef675a3cf1f87f09dd0ce8e4b265b2ed73685ea2`.

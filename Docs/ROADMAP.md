@@ -1,31 +1,55 @@
-# Roadmap
+# Muzik Belesh — Roadmap and release history
 
-| Phase | Name | Branch |
-|---|---|---|
-| 0 | Foundation, CI & feasibility | `feature/phase-00-foundation` |
-| 1 | Design system and UI navigation | `feature/phase-01-ui` |
-| 2 | Database and file storage | `feature/phase-02-storage` |
-| 3 | Native audio playback engine | `feature/phase-03-audio` |
-| 4 | Playback state, queue, history and sleep timer | `feature/phase-04-playback` |
-| 5 | Music library and playlist management | `feature/phase-05-library` |
-| 6 | YouTube search, metadata and extraction | `feature/phase-06-youtube` |
-| 7 | Audio download management | `feature/phase-07-downloads` |
-| 8 | iOS Share extension | `feature/phase-08-sharing` |
-| 9 | Integration, testing and v1.0 release | `feature/phase-09-release` |
+Muzik Belesh is a **completed, offline-first native iOS music app** with an on-device music library, playback, downloads, playlist migration, personalization and portable library sharing.
 
-Phase 0-3: complete. Phase 4: **merged into develop at a58861f (PR #5), with
-physical acceptance recorded by the developer in its merge commit**.
+**Current stable release:** [v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0) · **Build 200** · published **18 November 2026**.
 
-Phase 5: merged through PR #6 at `9ba81a7fe6d0cd6420958971ac2a89bfadb68264`,
-following developer-reported build 155 category acceptance on iPhone 13 Pro Max
-(iOS 27.0.1). Individual procedures not separately attested remain documented.
+This page is a historical implementation roadmap, **not a list of unfinished feature commitments**.
 
-Phase 6 merged through PR #7 at `7674daf`. Phase 7 download management and
-Phase 7.1 native background transfers are integrated into the accepted Phase 8
-baseline. The Phase 9 brief records physical acceptance of Phase 8 build 189 and
-PR #10 merge `b9386122a56ddf1550b360c4ce9401ff100ceeb3`.
+## Published versions
 
-Phase 9: 1.0.0 candidate preparation on `feature/phase-09-release`. Automated
-results and artifact provenance are recorded in its integration PR. P0–P24 device
-acceptance and publication approval remain open. `release` and stable tagging are
-not advanced by candidate preparation. See PHASE_09_RELEASE_CHECKLIST.md.
+| Release | Published | Scope |
+| --- | --- | --- |
+| [v1.0.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.0.0) | 6 Nov 2026 | Offline music library, audio engine, downloads, background playback and iOS Share extension |
+| [v1.1.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.1.0) | 17 Nov 2026 | Spotify playlist-file migration, local-first matching, acquisition, retry and review workflows |
+| **[v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)** | **18 Nov 2026** | Local profiles, listening analytics, theme customization, portable `.mbelesh` library sharing, dynamic artwork and release hardening |
+
+## Completed implementation phases
+
+| Phase | Scope | Outcome |
+| --- | --- | --- |
+| 0 | Feasibility, app foundation, XcodeGen and CI | Complete |
+| 1 | SwiftUI design system, navigation and player presentation | Complete |
+| 2 | SQLite/GRDB persistence and managed-file storage | Complete |
+| 3 | Native AVFoundation audio playback | Complete |
+| 4 | Queue, shuffle/repeat, history, restoration and sleep timer | Complete |
+| 5 | Library, playlists, albums, metadata and artwork management | Complete |
+| 6 | YouTube search, metadata and audio selection | Complete |
+| 7 / 7.1 | Foreground/background downloads and network policy | Complete |
+| 8 | Share extension and durable shared-link inbox | Complete |
+| 9 | Integration, physical acceptance and v1.0.0 release | Released |
+| 10.1–10.7 | Spotify export parsing, playlist migration, matching, acquisition, recovery and review UI | Complete |
+| 10.8 | Proposed Spotify OAuth/Share integration | **Canceled intentionally**; file export remains the supported import path |
+| 10.9 | v1.1.0 validation, security and release | Released |
+| 11.1 | Local profile and optional avatar | Complete |
+| 11.2 | Your Listening statistics and activity dashboard | Complete |
+| 11.3 | Accent presets, custom themes and persistence | Complete |
+| 11.4 | Portable library export/import using `.mbelesh` documents | Complete |
+| 11.5 | Automatic rotating 2×2 collection artwork and cover preferences | Complete |
+| 12 | Targeted accessibility, security, performance, packaging and upgrade corrections | **Released with v1.2.0** |
+
+## Version 1.2.0 release evidence
+
+- **Accepted application source:** `ab3763cd0a1f9dfec628bd590d3a2627bb34118f`.
+- **Unsigned IPA:** build 200, [Actions run #110](https://github.com/T-h07/MuzikBelesh/actions/runs/44371763077).
+- **Device acceptance:** developer-reported **10/10 PASS** on the expedited iPhone release checklist.
+- **Release promotion:** Phase 12 [PR #30](https://github.com/T-h07/MuzikBelesh/pull/30) → `develop`, [PR #31](https://github.com/T-h07/MuzikBelesh/pull/31) → `release`, [PR #32](https://github.com/T-h07/MuzikBelesh/pull/32) → `main`.
+- **Verification limitation:** final comprehensive CI and migration verification runs were intentionally canceled, with earlier failures documented and accepted by the owner. Do not describe full automated testing as green.
+
+See [v1.2.0 release notes](RELEASE_NOTES_v1.2.0.md), [physical-device report](PHASE_12_DEVICE_ACCEPTANCE.md), [release gates](PHASE_12_RELEASE_CHECKLIST.md) and [known limitations](KNOWN_LIMITATIONS.md).
+
+## Maintenance after v1.2.0
+
+The feature roadmap has reached its v1.2.0 target. Future work is **not pre-committed**; prioritize reproducible defect reports, device compatibility, source-provider changes, accessibility and data preservation before introducing additional features.
+
+For development practices, see [CONTRIBUTING.md](../CONTRIBUTING.md). Feature branches may be deleted after merging without removing their reviewed commit history.
