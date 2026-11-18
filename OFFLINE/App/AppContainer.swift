@@ -41,7 +41,9 @@ final class AppContainer: ObservableObject {
     let theme: ThemeService
     /// Phase 11.4 portable `.mbelesh` library export, import and progress.
     let sharing: LibrarySharingService
-    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil, profileStore: (any LocalProfileStoring)? = nil, themeStore: ThemePreferenceStoring? = nil) {
+    /// Phase 11.5 dynamic collection artwork (mosaics, preferences, one rotation epoch). Purely visual.
+    let collectionArtwork: CollectionArtworkService
+    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil, profileStore: (any LocalProfileStoring)? = nil, themeStore: ThemePreferenceStoring? = nil, artworkStore: CollectionArtworkDefaultStoring? = nil) {
         self.theme = ThemeService(store: themeStore ?? UserDefaultsThemePreferences())
         self.resources = resourceMonitor ?? ResourceMonitor()
         self.configuration = configuration
@@ -71,6 +73,10 @@ final class AppContainer: ObservableObject {
         self.listening.beforeLoad = { [weak player = self.audioPlayer] in player?.listening.checkpoint() }
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
+        // Observes the library snapshot only; never the player, downloads or analytics.
+        self.collectionArtwork = CollectionArtworkService(library: self.library, database: self.storage?.database.dbQueue, paths: self.storage?.paths,
+                                                          store: artworkStore ?? UserDefaultsCollectionArtworkDefaults(),
+                                                          foreground: backgroundTransfers == nil || UIApplication.shared.applicationState != .background)
         var matchingService: PlaylistMigrationMatchingService?
         let coordinatorStore = self.storage.map { MigrationCoordinatorRepository(db: $0.database.dbQueue) }
         if let storage = self.storage {

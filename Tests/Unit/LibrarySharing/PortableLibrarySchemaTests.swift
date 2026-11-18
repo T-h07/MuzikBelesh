@@ -41,7 +41,7 @@ final class PortableLibrarySchemaTests: XCTestCase {
         let before = try old.dbQueue.read { try Row.fetchOne($0, sql: "SELECT * FROM playlist_migrations WHERE id = 'mig-1'") }
         let upgraded = try DatabaseManager(url: url)
         try upgraded.dbQueue.read { db in
-            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier").last, PortableLibrarySchema.version)
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier").contains(PortableLibrarySchema.version), true)
             XCTAssertEqual(try Row.fetchOne(db, sql: "SELECT * FROM playlist_migrations WHERE id = 'mig-1'"), before)
             XCTAssertEqual(try Int64.fetchOne(db, sql: "SELECT rowid FROM playlist_migrations WHERE id = 'mig-1'"), rowid)
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM migration_entries WHERE migrationID = 'mig-1'"), 1)

@@ -71,3 +71,12 @@ Child tables keep their `REFERENCES playlist_migrations(id)` clauses. It adds:
 
 No profile, listening, preference or device data is referenced. See
 [Phase 11.4](PHASE_11_04_LIBRARY_SHARING.md).
+
+## Phase 11.5 collection artwork
+
+`v027_dynamic_collection_artwork` (appended after v026) creates
+`collection_artwork_preferences`: `collectionKind` (`playlist`, `album`, `artist`),
+`collectionID` (1–512 characters), `artworkMode` (`automatic`, `static`), `updatedAt`; primary
+key `(collectionKind, collectionID)`. "Use App Default" is the absence of a row. AFTER DELETE
+triggers on `playlists`, `albums` and `artists` remove a deleted collection's row. Unknown values
+are ignored when read. No existing table changes. See [Phase 11.5](PHASE_11_05_DYNAMIC_ARTWORK.md).

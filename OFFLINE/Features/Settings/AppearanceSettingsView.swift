@@ -16,6 +16,7 @@ struct AppearanceSettingsView: View {
                 presets
                 custom
                 reset
+                AutomaticCollectionArtworkSetting()
                 Text("Your accent colour changes highlights, buttons, sliders and charts. Muzik Belesh keeps its black background, and colours for errors and warnings never change.")
                     .font(.caption).foregroundStyle(AppColors.textTertiary)
                     .accessibilityIdentifier("appearance-note")

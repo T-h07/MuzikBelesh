@@ -99,3 +99,13 @@ recordings the strict policy recommends before handing each playlist to
 `PlaylistMigrationCoordinator`. Downloads stay with `PlaylistAcquisitionCoordinator` and
 `DownloadManager`. Opened files are staged privately and presented after the profile gate.
 See [Phase 11.4](PHASE_11_04_LIBRARY_SHARING.md).
+
+## Phase 11.5 collection artwork
+
+`CollectionArtworkService` (`OFFLINE/Library/Artwork`) is owned by `AppContainer` and injected as
+an environment object. It builds a candidate index from library snapshots off the main actor,
+observes per-collection modes from `collection_artwork_preferences`, and runs the app's one
+30-minute rotation scheduler while in the foreground (`RootView` forwards `scenePhase`).
+`CollectionArtworkView` renders custom cover → mosaic → single cover → placeholder through the
+shared `ArtworkImagePipeline`. Custom covers are written by `MusicLibraryService.setCollectionCover`
+through the existing managed-file journal. See [Phase 11.5](PHASE_11_05_DYNAMIC_ARTWORK.md).
