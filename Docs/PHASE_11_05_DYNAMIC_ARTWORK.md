@@ -1,7 +1,7 @@
 # Phase 11.5: Dynamic collection artwork and automatic 2×2 mosaics
 
 Branch: `feature/phase-11-05-artwork`, from `develop` at `03fabc8` (Phase 11.4 merged, #28). Target: v1.2.0.
-Status: implemented; **not merged, not released**. Physical-device checks P01–P30 are **not verified** until the developer reports them.
+Status: implemented; **not merged, not released**. Developer-reported physical-device acceptance **15/15 PASS** on 2026-11-18 using the user-facing P01–P15 checklist below. The distinct repository P01–P30 checklist has **not** been individually reported in full.
 
 Playlists, albums, artists and the virtual Unassigned Songs collection show a 2×2 mosaic built
 from up to four of their own local song covers. The mosaic changes every 30 minutes while the app
@@ -111,4 +111,35 @@ with a value such as "4 song covers". List-row artwork is decorative (the row is
 
 ## 11. Physical device checklist (P01–P30)
 
-Not verified. Results are recorded only when the developer reports them.
+The separate 30-condition repository checklist has not been individually completed or mapped to results. See the developer's 15-condition acceptance report below. Do not mark untested detailed conditions PASS.
+
+## 12. Developer-reported physical-device acceptance — 2026-11-18
+
+The developer confirmed an installed Phase 11.5 IPA and submitted the **user-facing 15-test checklist** with **15 PASS, 0 FAIL, 0 not tested**. These are developer observations, not independently repeated by CI or GitHub automation.
+
+| User-facing ID | Reported check | Result |
+| --- | --- | --- |
+| P01 | Playlists display 2×2 artwork mosaics | PASS |
+| P02 | Albums display 2×2 mosaics | PASS |
+| P03 | Four distinct covers appear when available | PASS |
+| P04 | Fewer than four covers use proper fallbacks | PASS |
+| P05 | Artwork matches between Library and detail screens | PASS |
+| P06 | Mosaics rotate after the configured interval (30 min) | PASS |
+| P07 | Artwork transitions smoothly without flashing | PASS |
+| P08 | Manual playlist/album covers take priority | PASS |
+| P09 | Global automatic artwork toggle works | PASS |
+| P10 | Per-collection artwork settings work | PASS |
+| P11 | Artwork preferences survive app restart | PASS |
+| P12 | Adding or removing songs updates artwork | PASS |
+| P13 | Library scrolling remains smooth | PASS |
+| P14 | Music playback stays uninterrupted | PASS |
+| P15 | Existing playlists, downloads, themes and analytics still work | PASS |
+
+**Important mapping:** The IDs above refer to the 15-item user-facing form and **do not correspond 1:1** to the repository's more detailed P01–P30 checklist. Any detailed check not directly covered remains unverified; do not infer full 30/30 acceptance.
+
+### GitHub verification and merge readiness
+
+- Feature source at acceptance: `ab12b093d1a714e85b9135ec5b33774da869bd64`, three commits ahead of `develop` at `03fabc800e89f7075edace9c43f564868a35f040`, zero behind.
+- [Unsigned IPA run #108](https://github.com/T-h07/MuzikBelesh/actions/runs/44291800290) **SUCCESS** for feature source; `OFFLINE-unsigned-IPA` uploaded.
+- [CI run #298](https://github.com/T-h07/MuzikBelesh/actions/runs/44290264115) was **in progress** when assessed. Static checks and regression-compact passed. Unit/accessibility failed in `ReleasePerformanceTests.testPlaybackClockDatabaseAndPublicationWork` (expected 12 / actual 15) and two `ThemeServiceTests`; regression-library failed when `LibraryManagementUITests.testUniversalLibraryGroupsFiltersAndSearchAfterRelaunch` exceeded its two-minute execution allowance. Regression-other-ui had not yet concluded. These are not artwork-specific test failures on the observed log, but full automated regression is **not green**; do not claim these failures are harmless or known baseline without controlled comparison.
+- **Assessment:** Physical device acceptance PASS (all reported cases), branch structurally mergeable, **automated CI still a verification caveat**. Appropriate for owner-approved integration only if the owner explicitly accepts this CI risk; otherwise investigate/redress before merge. No merge authorization is implied by submitting the test results.
