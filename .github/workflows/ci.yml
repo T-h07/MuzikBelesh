@@ -63,7 +63,11 @@ jobs:
           - {scope: unit-accessibility, device: 'iPhone 16'}
           - {scope: compact, device: 'iPhone SE (3rd generation)'}
           - {scope: library, device: 'iPhone 16 Pro Max'}
+          # Phase 12: one other-ui shard (47 UI tests, ~35 min of tests after a 13-23 min
+          # build) exceeded the 40-minute job limit in every run from #298 on, so its later
+          # suites never reported. Two shards keep every test and the limit unchanged.
           - {scope: other-ui, device: 'iPhone 16 Pro Max'}
+          - {scope: migration-ui, device: 'iPhone 16 Pro Max'}
     defaults:
       run:
         shell: bash
@@ -154,8 +158,17 @@ jobs:
               run_suite LibraryUI 60 "--require OFFLINEUITests/LibraryManagementUITests" -only-testing:OFFLINEUITests/LibraryManagementUITests
               ;;
             other-ui)
-              run_suite OtherUI 60 "--expect-suites-in Tests/UITests:OFFLINEUITests --except OFFLINEUITests/LibraryManagementUITests" \
-                -only-testing:OFFLINEUITests -skip-testing:OFFLINEUITests/LibraryManagementUITests
+              # Every UI suite not owned by the library or migration-ui shard, so a new suite is
+              # selected and required here automatically.
+              run_suite OtherUI 60 "--expect-suites-in Tests/UITests:OFFLINEUITests --except OFFLINEUITests/LibraryManagementUITests --except OFFLINEUITests/PlaylistFileImportUITests --except OFFLINEUITests/PlaylistMigrationUITests --except OFFLINEUITests/ReviewQueueUITests --except OFFLINEUITests/YouTubeUITests" \
+                -only-testing:OFFLINEUITests -skip-testing:OFFLINEUITests/LibraryManagementUITests \
+                -skip-testing:OFFLINEUITests/PlaylistFileImportUITests -skip-testing:OFFLINEUITests/PlaylistMigrationUITests \
+                -skip-testing:OFFLINEUITests/ReviewQueueUITests -skip-testing:OFFLINEUITests/YouTubeUITests
+              ;;
+            migration-ui)
+              run_suite MigrationUI 60 "--require OFFLINEUITests/PlaylistFileImportUITests --require OFFLINEUITests/PlaylistMigrationUITests --require OFFLINEUITests/ReviewQueueUITests --require OFFLINEUITests/YouTubeUITests" \
+                -only-testing:OFFLINEUITests/PlaylistFileImportUITests -only-testing:OFFLINEUITests/PlaylistMigrationUITests \
+                -only-testing:OFFLINEUITests/ReviewQueueUITests -only-testing:OFFLINEUITests/YouTubeUITests
               ;;
             *) echo "Unknown regression scope: $TEST_SCOPE" >&2; exit 1 ;;
           esac
