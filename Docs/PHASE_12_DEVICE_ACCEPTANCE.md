@@ -9,12 +9,12 @@ application** (no uninstall), using the same signing identity as v1.1.0.
 | Field | Value |
 | --- | --- |
 | Version | 1.2.0 |
-| Build | _recorded when the final candidate is built_ |
-| Source SHA | _recorded when the final candidate is built_ |
-| IPA SHA-256 | _recorded when the final candidate is built_ |
-| Build run / artifact | _recorded when the final candidate is built_ |
-| Device / iOS version | _reported by the developer_ |
-| Installed over | _version and build previously installed on the device_ |
+| Build | **200** — build workflow run #110 |
+| Source SHA | `ab3763cd0a1f9dfec628bd590d3a2627bb34118f` |
+| IPA SHA-256 | `a59f7597946dd64d3cc25cbeef675a3cf1f87f09dd0ce8e4b265b2ed73685ea2` (packager build log) |
+| Build run / artifact | [Run #110](https://github.com/T-h07/MuzikBelesh/actions/runs/44371763077) / `OFFLINE-unsigned-IPA` (artifact 14461626413) |
+| Device / iOS version | iPhone (exact iOS version not reported for this candidate) |
+| Installed over | Previous installed Muzik Belesh app; precise build not stated in this acceptance report |
 
 An acceptance record is valid only for the exact build number and SHA-256 above. If any
 executable source, resource, extension or packaging input changes afterwards, the IPA is
@@ -88,3 +88,29 @@ rebuilt, re-verified and the affected cases are repeated.
 
 **Device acceptance status: NOT RUN.** Gate G16 cannot pass until the developer reports
 results for the exact candidate recorded above.
+
+
+## 2026-11-18 — Developer-reported expedited release acceptance (T01–T10)
+
+The project owner reports having installed **Muzik Belesh v1.2.0 build 200, IPA workflow #110** on a physical iPhone and submitted the following **distinct expedited ten-item checklist**, all **PASS**. This is direct developer-reported manual testing; it is not an independent execution of the 45-item R01–R45 detailed checklist above.
+
+| ID | User-facing acceptance criterion | Reported result |
+| --- | --- | --- |
+| T01 | App launches successfully and shows v1.2.0 | PASS |
+| T02 | Existing songs, playlists, albums and downloads are preserved | PASS |
+| T03 | Play, pause, skip, seek, shuffle and repeat work | PASS |
+| T04 | Background playback, Lock Screen and AirPods controls work | PASS |
+| T05 | YouTube search and downloading work | PASS |
+| T06 | Spotify-imported playlists, matching and review work | PASS |
+| T07 | Profile and listening analytics work | PASS |
+| T08 | Themes and custom accent colors are preserved | PASS |
+| T09 | 2×2 artwork mosaics, rotation and manual covers work | PASS |
+| T10 | Library export/import and app relaunch work without data loss | PASS |
+
+**Expedited acceptance totals: 10 PASS, 0 FAIL, 0 NOT RUN.** These tests substantially cover the core release smoke test. Do not infer that the more specific R01–R45 scenarios (e.g., corrupt imports, cellular download policy, multi-hour thermal, full upgrade matrix) were each performed. The R01–R45 entries remain unscored individually, rather than silently reclassified as PASS. The exact iOS version and independent on-device checksum computation were not supplied.
+
+**Artifact provenance:** [Build #110](https://github.com/T-h07/MuzikBelesh/actions/runs/44371763077) completed successfully at commit `ab3763cd0a1f9dfec628bd590d3a2627bb34118f`; the packaging log printed version `1.2.0`, build `200`, source `ab3763c`, and IPA SHA-256 `a59f7597946dd64d3cc25cbeef675a3cf1f87f09dd0ce8e4b265b2ed73685ea2`. Artifact `OFFLINE-unsigned-IPA` exists and is not expired.
+
+**Remaining verification limitation:** [CI #307](https://github.com/T-h07/MuzikBelesh/actions/runs/44371494404) and [playlist migration verification](https://github.com/T-h07/MuzikBelesh/actions/runs/44371493723) were intentionally cancelled to prioritize IPA publication. Previous Phase 12 CI runs failed. A passing artifact build and ten manual smoke checks do not constitute complete automated regression. The app was compiled under Swift 5.9 settings and the IPA log also contains Swift 6 language-mode concurrency warnings; they are not build failures under the current toolchain. Any final release proceeds with explicitly documented CI coverage risk.
+
+**Status:** **EXPEDITED PHYSICAL ACCEPTANCE PASS (T01–T10)**. Formal publication is still **PENDING OWNER APPROVAL** and the release workflow's explicit accepted hash/SHA/run fields remain gated; this record is not a publication authorization.
