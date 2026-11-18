@@ -42,7 +42,7 @@ upgrade-matrix and documentation commits and is superseded by the candidate abov
 | G17 Owner publication approval | **APPROVED** | Owner explicitly approved release despite the disclosed incomplete CI on 2026-11-18; publication workflow has separate explicit manual authorization |
 
 
-## Pre-publication checklist (owner)
+## Historical pre-publication checklist (completed after owner approval)
 
 1. Install the candidate above over the existing app with SideStore; do not uninstall.
 2. Run R01–R45 in [PHASE_12_DEVICE_ACCEPTANCE.md](PHASE_12_DEVICE_ACCEPTANCE.md) and
@@ -66,3 +66,12 @@ upgrade-matrix and documentation commits and is superseded by the candidate abov
 The owner expressly approved merging and publishing v1.2.0 **with the documented remaining CI limitations** after reporting **10/10 PASS** for the expedited iPhone acceptance. [PR #30](https://github.com/T-h07/MuzikBelesh/pull/30) merged to `develop`, [PR #31](https://github.com/T-h07/MuzikBelesh/pull/31) integrated into `release`, and [PR #32](https://github.com/T-h07/MuzikBelesh/pull/32) integrated into `main`. All changes relative to the accepted source `ab3763c` in the stable branch at verification were documentation or the publication workflow; no `OFFLINE/`, `OFFLINEShareExtension/`, `Sharing/`, `project.yml` or `Scripts/package-ipa.sh` changes.
 
 The manual publisher on `main` is pinned to IPA build 200 from run 44371763077, exact accepted source and SHA-256 above. **Approval and preparation are not evidence of actual publication**; the workflow's run and published release asset checks are required to mark publication successful.
+
+
+## Published release confirmation
+
+**Published successfully on 18 November 2026:** [Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0) contains all three verified assets: `OFFLINE-unsigned.ipa`, `OFFLINE-build-manifest.json` and `OFFLINE-unsigned.ipa.sha256`.
+
+Release version **1.2.0**, build **200**, accepted source `ab3763c`, IPA SHA-256 `a59f7597946dd64d3cc25cbeef675a3cf1f87f09dd0ce8e4b265b2ed73685ea2`. Owner-reported physical acceptance was **10/10 PASS**. The full final CI and playlist-migration verification runs were intentionally canceled; prior failures remain acknowledged rather than represented as green.
+
+No source rebuild or replacement IPA was required for documentation-only release changes. Earlier entries on this page record historical pre-publication conditions and should not be mistaken for the current publication status.

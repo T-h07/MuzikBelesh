@@ -1,14 +1,43 @@
-# Architecture
+# Muzik Belesh architecture — v1.2.0
 
-`OFFLINEApp` creates an `AppContainer` with environment-aware `AppConfiguration`, the Phase 0 `YouTubeProbe`, and Phase 1 in-memory stores. `RootView` and `AppCoordinator` own tab and presentation state. Feature views receive shared stores through the SwiftUI environment; focused view models can be added without introducing global singletons. `DiagnosticsView` remains available from Settings and is not part of normal music browsing.
+Muzik Belesh is a **native SwiftUI iPhone application** built around a persistent, on-device music library. The application is offline-first: music and personal settings live on the phone, while network providers are used only to discover or acquire recordings when requested.
 
-Phase 2 adds an optional `StorageCoordinator` to the same container. It owns `AppStoragePaths`, `DatabaseManager`, GRDB repositories, metadata/hash services, and import/export consistency. The database remains private in Application Support, while managed audio and artwork use Documents-relative paths. Existing mock playback/download behavior remains intentionally available until its later production phases.
+**Stable release:** [v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0) · **Build 200**. This overview describes the shipped architecture. The phase sections below record the historical evolution of individual subsystems.
 
-The YouTubeKit adapter is isolated under `OFFLINE/Feasibility/YouTube`. It validates input, requests metadata and streams locally, filters audio-only streams, and returns sanitized result data. It does not enable YouTubeKit's remote fallback and does not persist or download media.
+## Runtime composition
 
-The Share extension is a separate target with its own bundle identifier and activation metadata. Phase 0 validates received URLs and finishes cleanly; the physical iPhone test confirmed Share-sheet appearance and URL receipt. No unsupported extension-to-app launch or App Group entitlement is assumed. Automatic handoff is deferred to Phase 8.
+`OFFLINE/App/OFFLINEApp.swift` provides the app entry point. `AppContainer` creates and owns the production services, while `RootView` / `AppCoordinator` manage the four-tab UI, navigation and presentation. This keeps shared state in established service owners instead of constructing duplicate download, database or playback engines in feature views.
 
-Phase 2 provides the GRDB repositories and Phase 3 provides the AVFoundation/MediaPlayer playback subsystem. Phase 3 is complete and was accepted through developer-reported iPhone 13 Pro Max validation. Later phases may add the production YouTube integration, download manager, and supported Share handoff. Development infrastructure remains outside runtime code.
+| Responsibility | Current authority |
+| --- | --- |
+| Audio playback | `AudioPlayerService`, AVPlayer/AVFoundation and MediaPlayer integration |
+| Queue, shuffle, repeat and restoration | `PlaybackQueueManager` and the navigation engine |
+| Library and managed files | `StorageCoordinator`, GRDB repositories and `MusicLibraryService` |
+| Downloads | One `DownloadManager`, managed transfers and persisted jobs |
+| Spotify/portable-library acquisition | Existing playlist migration repository/coordinator and candidate matching pipeline |
+| Local profile | `LocalProfileService` and managed avatar storage |
+| Listening analytics | `ListeningSessionTracker`, analytics repository and stats service |
+| Themes | `ThemeService` / `ThemeRoot` and `ThemePalette` |
+| Portable exports/imports | `LibrarySharingService` and `OFFLINE/LibrarySharing` |
+| Collection artwork | `CollectionArtworkService`, `CollectionArtworkView`, shared image pipeline |
+| Share extension | `OFFLINEShareExtension`, validated shared-link App Group inbox |
+
+## Persistence and boundaries
+
+- **SQLite / GRDB** is the authority for song metadata, playlist/album relationships, downloads, migration state, local profile, listening analytics and collection-artwork preferences. Migrations are versioned and additive.
+- Managed audio and artwork are stored in app-owned file directories with journaled or guarded operations for import, deletion and repair.
+- **Local-only** profile images, listening history, theme preferences and device file paths are deliberately excluded from portable `.mbelesh` exports.
+- **One audio engine** is shared by Library, mini-player, Now Playing, Lock Screen, Control Center, AirPods and Bluetooth controls.
+- **One download pipeline** serves user-selected YouTube audio and accepted playlist migration acquisitions. Background execution and restoration follow iOS policies.
+- **Untrusted data** includes downloaded metadata, YouTube URLs, discovery-provider responses and imported CSV/JSON/ZIP/`.mbelesh` files. Validate size, source and schema before touching persisted data.
+
+The application and Share extension retain their existing identifiers (`com.th07.muzikbelesh`, `com.th07.muzikbelesh.share`) and the shared inbox group (`group.com.th07.muzikbelesh.inbox`) to preserve SideStore update compatibility.
+
+For current behavior, see [README](../README.md), [Phase 11 feature notes](PHASE_11_05_DYNAMIC_ARTWORK.md), [Phase 12 audit](PHASE_12_FINAL_RELEASE_AUDIT.md) and [database migrations](MIGRATIONS.md).
+
+---
+
+## Historical subsystem implementation notes
 
 # Phase 4 playback responsibilities
 
