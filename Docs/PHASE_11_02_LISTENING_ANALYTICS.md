@@ -1,5 +1,8 @@
 # Phase 11.2: Listening statistics, playback analytics and the activity dashboard
 
+> **Current status (18 November 2026):** This feature is merged into the stable application and published in [Muzik Belesh v1.2.0](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0). Historical branch/CI/acceptance status statements below describe the original feature-implementation stage, not the current release state. The final release had 10/10 owner-reported expedited iPhone checks PASS; complete final CI was canceled with known risks accepted.
+
+
 Branch: `feature/phase-11-02-analytics` (from `develop` after Phase 11.1).
 Status: implemented; developer-reported physical acceptance **18/18 PASS** on 2026-11-17. Native CI incomplete (some regression jobs canceled, one running); not merged and not released.
 
