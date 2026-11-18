@@ -134,6 +134,51 @@ hardening issue with no user-visible effect.
 - **Correction:** disable those keyboard features and mark the introductions as shown in
   the booted simulator's preferences before tests run. No test timeouts were changed.
 
+### P12-15 — XCTest idle detection still stalls when the keyboard appears (P3, open)
+
+- **Component:** CI simulator / XCTest; observed in
+  `LibraryManagementUITests.testSearchSubmitDismissesKeyboardAndCanReopen` (compact shard,
+  run 44301621536). The test passed its first three keyboard cycles; on the fourth
+  `Tap "search-field"` XCTest waited 60 s for "App animations complete", then a second
+  60 s on `Tap "keyboard-done"`, and the 2-minute allowance expired.
+- **Evidence:** the spindump XCTest captured at the hang shows the app's main thread
+  blocked in `mach_msg` (idle run loop), the app at < 0.001 s CPU, `kbd` at 0.004 s and
+  SpringBoard at 0.175 s over the 5 s sample. Nothing in the app or keyboard was animating;
+  the idle notification itself was not delivered. The same shard also failed
+  intermittently before Phase 12 (CI runs 44195714008 and 44182165889).
+- **Assessment:** P12-09 removed the stalls that occurred while typing; this residual
+  stall is in XCTest's idle detection, not in app code, so no app change can address it.
+  No timeout was raised and the test was not changed or skipped.
+- **Actual result:** see G05 in the release checklist (re-run evidence).
+
+### P12-16 — The other-ui regression shard could never finish (P2, release evidence)
+
+- **Component:** `.github/workflows/ci.yml` (`complete-regression` matrix).
+- **Observed:** `regression-other-ui` was **cancelled** by the 40-minute job limit in
+  develop #299 (44296803454), Phase 11.5 #298 (44290264115), 44211613407 and Phase 12 run
+  44301621536. Its later suites (PlaylistMigration, ReviewQueue, YouTube) therefore never
+  produced a verdict, so "UI regressions pass" could not be shown at all.
+- **Root cause:** one shard held 47 UI tests (~35 min at ~45 s each) after a 13–23 min
+  build; the total exceeds 40 min regardless of test correctness.
+- **Correction:** split into `other-ui` (Appearance, CollectionArtwork, ListeningAnalytics,
+  LocalProfile, Phase1 — new suites land here automatically) and `migration-ui`
+  (PlaylistFileImport, PlaylistMigration, ReviewQueue, YouTube). Job limit, per-test
+  allowances and test content unchanged. `check-test-hygiene.py` now fails if any suite
+  with tests is not selected by some shard (verified by removing one suite: it reports
+  `no regression shard runs OFFLINEUITests/ReviewQueueUITests`).
+
+### P12-17 — Custom-colour selection check timed out on a slow runner (P3, monitoring)
+
+- **Observed:** `AppearanceSettingsUITests.testCustomColourSectionAndCustomSelection`
+  failed once (run 44301621536): `value == "Selected"` not seen within 5 s.
+- **Evidence:** the hierarchy captured at failure shows the swatch with
+  `value: Selected` — the app state was correct. That runner was about twice as slow as
+  usual (app launch 16 s versus ~2 s; this test 90 s versus 21–45 s), with each
+  accessibility query taking 2–3 s, so the 5 s wait got a single evaluation. The test passed
+  in 6 of the 7 previous runs. The Phase 12 theme change (P12-03) does not alter this path:
+  lime → custom is a real change and is still published.
+- **Decision:** no test or timeout change on a single observation; tracked in G05.
+
 ### P12-10 — HTTP metadata responses buffered without a limit (P2, security)
 
 See [security audit S01](PHASE_12_SECURITY_AUDIT.md). Fixed with `BoundedHTTPBody`

@@ -10,8 +10,9 @@ Anything not measured is marked **NOT RUN**.
   simulator. Simulator timings reflect algorithmic cost and database work, **not** iPhone
   CPU, battery or thermal behaviour. Shared runners vary by roughly ±20 % between runs.
 - The baseline is taken from the Phase 11.5 CI log (`develop`, run 44290264115 / #298).
-- The Phase 12 values come from the final Phase 12 CI run listed in
-  [PHASE_12_RELEASE_CHECKLIST.md](PHASE_12_RELEASE_CHECKLIST.md) (G03/G11).
+- The Phase 12 values come from the `regression-unit-accessibility` job of CI run
+  [44301621536](https://github.com/T-h07/MuzikBelesh/actions/runs/44301621536) (source 28603dd;
+  the later commits change only tests and documentation).
 
 ## Decision: no hot-path rewrites in Phase 12
 
@@ -36,12 +37,12 @@ recording SQL tracer.
 
 | Measure | Phase 11.5 baseline | Phase 12 | Budget |
 | --- | --- | --- | --- |
-| Work time for 60 s of ticks | 0.0258 s | _see below_ | — |
-| `@Published` state publications | 122 | _see below_ | ≤ 123 |
-| SELECT statements | 0 | _see below_ | 0 |
-| Position checkpoint writes | 12 (counted together) | _see below_ | exactly 12 (one per 5 s) |
-| Listening-analytics writes | 3 (counted together) | _see below_ | 1 + 2 per 15 s checkpoint |
-| Other writes | 0 | _see below_ | none |
+| Work time for 60 s of ticks | 0.0258 s | 0.0179 s | — |
+| `@Published` state publications | 122 | 122 | ≤ 123 |
+| SELECT statements | 0 | 0 | 0 |
+| Position checkpoint writes | 12 (counted together) | 12 | exactly 12 (one per 5 s) |
+| Listening-analytics writes | 3 (counted together) | 7 (59,500 ms credited → 3 checkpoints) | 1 + 2 per 15 s checkpoint |
+| Other writes | 0 | 0 | none |
 
 **Root cause of the baseline CI failure (15 vs 12 writes):** the old test assumed only
 position checkpoints. Since Phase 11.2, each 15 s of credited listening also inserts or
@@ -54,13 +55,20 @@ clock so the result no longer depends on how fast the runner is.
 
 | Songs | Navigation (s) baseline | Navigation (s) Phase 12 | Search (s) baseline | Search (s) Phase 12 |
 | --- | --- | --- | --- | --- |
-| 100 | 0.0000668 | _see below_ | 0.00209 | _see below_ |
-| 1,000 | 0.000405 | _see below_ | 0.0136 | _see below_ |
-| 5,000 | 0.00178 | _see below_ | 0.0690 | _see below_ |
-| 10,000 | 0.00379 | _see below_ | 0.135 | _see below_ |
+| 100 | 0.0000668 | 0.0000448 | 0.00209 | 0.00150 |
+| 1,000 | 0.000405 | 0.000356 | 0.0136 | 0.0128 |
+| 5,000 | 0.00178 | 0.00186 | 0.0690 | 0.0622 |
+| 10,000 | 0.00379 | 0.00351 | 0.135 | 0.126 |
 
-Other baselines (Phase 11.5 CI): SQLite 10,000-song snapshot + search 0.198 s; XCTest
-search `measure` average 0.164 s (RSD 11 %), peak memory ≈ 100 MB in the test process.
+| Other measure | Phase 11.5 baseline | Phase 12 |
+| --- | --- | --- |
+| SQLite 10,000-song snapshot + search | 0.198 s | 0.125 s |
+| XCTest search `measure` (clock, 5 iterations) | 0.164 s avg, RSD 11 % | 0.121 s avg, RSD 0.5 % |
+| Peak physical memory, test process | ≈ 100 MB | 103.0 MB |
+
+The Phase 12 timings are equal or lower, but because Phase 12 did not change these code
+paths the difference is runner variance, **not** an optimisation, and is not claimed as
+one. The conclusion is *no regression*.
 Phase 11.4 documented a 10,000-song `.mbelesh` decode of 0.71 s and a 10,000-occurrence
 preview + commit of 2.93 s; Phase 12 did not change that code.
 
