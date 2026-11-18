@@ -44,3 +44,23 @@ queue and a few exported audio hashes. Compare after update using
 PHASE_09_DEVICE_TESTING.md P0/P1/P24, then repeat YouTube and Safari share with
 manual app opening. A signed install and passing simulator are insufficient to
 claim data-preserving device acceptance. Record the exact IPA checksum and build.
+
+## v1.2.0 in-place update
+
+1. Download `OFFLINE-unsigned.ipa` from the
+   [v1.2.0 GitHub Release](https://github.com/T-h07/MuzikBelesh/releases/tag/v1.2.0)
+   (after publication) or, for the release candidate, from the `OFFLINE-unsigned-IPA`
+   artifact of the build-ipa run named in `PHASE_12_DEVICE_ACCEPTANCE.md`.
+2. Verify the SHA-256 against `OFFLINE-build-manifest.json` / `OFFLINE-unsigned.ipa.sha256`
+   (`shasum -a 256 OFFLINE-unsigned.ipa`, or `Get-FileHash -Algorithm SHA256` on Windows).
+3. Open the IPA in SideStore and install it **over** the existing Muzik Belesh with the
+   **same** signing identity. **Do not uninstall first** — that deletes the library.
+4. Launch once and wait for the library to appear. The database upgrades in place
+   (v022 → v027 from v1.1.0); no data is reset and no files are moved.
+
+Preserved: imported and downloaded audio, playlists and their order (including repeated
+occurrences), albums, metadata edits, song and collection artwork, likes, migration
+progress and matching decisions, missing-song placeholders, download jobs, the local
+profile (11.1+), listening analytics (11.2+), theme and accent (11.3+, stored in app
+preferences), and collection artwork preferences (11.5). Users updating from v1.1.0 are
+asked once to create a local profile; nothing else changes.

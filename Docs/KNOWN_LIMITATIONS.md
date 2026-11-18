@@ -1,11 +1,63 @@
-# Known v1.0 candidate limitations
+# Known limitations — Muzik Belesh v1.2.0
 
-- Sharing saves a validated link in the App Group inbox. iOS does not provide a supported Share extension API to launch the containing app. Open Muzik Belesh manually to finish the handoff; no hidden responder-chain/private URL launch is used.
-- YouTube formats, availability, region restrictions and extraction compatibility can change externally. Search/resolution failures show errors; deterministic fixtures do not prove current live availability.
-- iOS owns background download timing. User force-quit stops background transfers until the app is manually reopened; restoration then reconciles jobs. A transfer completion does not guarantee immediate library import while the app is suspended.
-- Native background URLSession follows redirects under iOS control. Phase 7.1's accepted native-transfer policy validates prepared and completed source information but cannot reject each redirect before contact. No arbitrary URL download endpoint is exposed.
-- The IPA is built without an Apple identity/provisioning profile. Ad-hoc entitlement metadata declares the same App Group on the app and extension for SideStore re-signing. The sideloader must preserve compatible app/extension identities, group access and update continuity. This metadata alone does not authorize installation.
-- Recent playback navigation retains 1,000 entries. Separate stored listening history is preserved. Position checkpoints are five seconds apart; an abrupt process kill can lose the most recent few seconds, while normal pause/background transitions persist.
-- Serious/critical thermal state defers new work; already active native transfers are allowed to finish under OS control. Low Power Mode lowers effective concurrency without changing the user's saved preference.
-- Exports need temporary storage for one verified copy. Insufficient space produces an error, leaving original music intact.
-- Physical background, radio, VoiceOver, energy, thermal and in-place upgrade acceptance is pending for this candidate. Simulator performance measurements must not be presented as battery/temperature measurements.
+These are platform and product limits that remain true for v1.2.0. They are not defects
+waived for release; release-risk decisions are recorded in
+[PHASE_12_RELEASE_CHECKLIST.md](PHASE_12_RELEASE_CHECKLIST.md).
+
+## Installation and signing
+
+- The release IPA is **unsigned**. SideStore (or a compatible signer) must sign both the app
+  and the Share extension with the user's identity. Ad-hoc entitlement metadata declares
+  `group.com.th07.muzikbelesh.inbox` on both executables so the signer can request it; the
+  metadata alone does not authorize installation.
+- Updating keeps your library only when the new IPA is installed **over** the existing app
+  with the same signing identity. Uninstalling first deletes the app container, including
+  the database and downloaded audio.
+- Free Apple Accounts normally require a seven-day refresh and limit sideloaded App IDs.
+
+## YouTube and network discovery
+
+- YouTube availability, formats, region restrictions and extraction compatibility change
+  independently of the app. Deterministic test fixtures do not prove live availability.
+- Invidious and SearXNG discovery depend on third-party or user-run servers. Local-network
+  SearXNG is allowed by an explicit ATS local-networking exception and a local-network usage
+  prompt; public endpoints must use HTTPS.
+- Metadata responses are limited to 8 MB (YouTube) and 4 MB (discovery), enforced while
+  streaming. A legitimate response above those limits is reported as unavailable.
+- The native background URLSession follows redirects under iOS control; prepared and
+  completed sources are validated, but each redirect cannot be inspected before contact.
+
+## Background execution and lifecycle
+
+- iOS owns background scheduling. Force-quitting stops background transfers and matching
+  until the app is reopened; saved work is reconciled on the next launch. No code runs after
+  a force-quit.
+- Audio continues in the background only while iOS permits it (calls, other audio apps and
+  interruptions can pause it).
+- Playback position is checkpointed every 5 s of progress and listening analytics every
+  15 s of credited audio. An abrupt process kill can lose up to those last few seconds;
+  normal pause and background transitions persist immediately.
+- Serious or critical thermal state defers new optional work; active native transfers are
+  allowed to finish. Low Power Mode lowers download concurrency without changing the saved
+  preference.
+
+## Sharing, import and export
+
+- The Share extension saves a validated link in the App Group inbox. iOS offers no supported
+  API for an extension to open its containing app, so open Muzik Belesh manually.
+- Spotify playlist import is file-based (Exportify CSV, account-data JSON, ZIP). There is no
+  Spotify account connection or playlist-URL import.
+- `.mbelesh` library files contain portable metadata only — never audio, profile, listening
+  history, settings or device paths. Songs missing on the receiving device must be matched
+  or downloaded there.
+- Exports need temporary space for one verified copy; insufficient space produces an error
+  and leaves the original music intact.
+
+## Verification limits
+
+- Simulator measurements are not battery, thermal or device-performance measurements.
+- Background audio, Lock Screen, AirPods/Bluetooth, radio transitions, real YouTube downloads
+  and in-place upgrade on the owner's library can only be verified on a physical iPhone; see
+  [PHASE_12_DEVICE_ACCEPTANCE.md](PHASE_12_DEVICE_ACCEPTANCE.md).
+- Multi-hour soak tests and Instruments (Allocations/Leaks/Time Profiler) sessions were not
+  run in Phase 12; see [PHASE_12_PERFORMANCE_REPORT.md](PHASE_12_PERFORMANCE_REPORT.md).

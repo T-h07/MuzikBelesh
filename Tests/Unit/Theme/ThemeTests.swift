@@ -171,14 +171,31 @@ final class ThemeColorTests: XCTestCase {
         var notifications = 0
         let cancellable = service.objectWillChange.sink { notifications += 1 }
         for preset in ThemePreset.allCases + ThemePreset.allCases.reversed() { service.select(preset) }
-        withExtendedLifetime(cancellable) {}
+        cancellable.cancel()
         XCTAssertGreaterThan(notifications, 0)
         XCTAssertEqual(service.selection, .preset(.lime))
         notifications = 0
         let again = service.objectWillChange.sink { notifications += 1 }
         service.select(.lime)
-        withExtendedLifetime(again) {}
+        again.cancel()
         XCTAssertEqual(notifications, 0, "Selecting the current theme publishes nothing")
+    }
+
+    func testSelectingTheActiveThemeWritesNothingButRetriesAFailedSave() {
+        let store = MemoryThemePreferences()
+        let service = ThemeService(store: store)
+        service.select(.red)
+        XCTAssertEqual(store.writes, 1)
+        service.select(.red)
+        service.reset(); service.reset()
+        XCTAssertEqual(store.writes, 2, "Re-selecting the active theme is a no-op")
+        store.failWrites = true
+        service.select(.blue)
+        XCTAssertNotNil(service.lastError)
+        store.failWrites = false
+        service.select(.blue)
+        XCTAssertNil(service.lastError, "Re-selecting after a failed save retries the write")
+        XCTAssertEqual(store.stored()?.selection, "blue")
     }
 
     func testWriteFailureKeepsTheAppliedThemeAndReports() {
@@ -212,9 +229,11 @@ final class ThemeColorTests: XCTestCase {
         retainUntilTeardown(fixture)
         let profile = LocalProfileRepository(db: fixture.storage.database.dbQueue, paths: fixture.paths)
         _ = try profile.create(username: "Theme Tester", avatar: nil)
-        let before = try librarySnapshot(fixture.storage.database.dbQueue)
         let (player, transport, _) = fixture.services()
         try await player.play(trackID: fixture.ids[0], contextTrackIDs: fixture.ids, contextKind: "library")
+        // Taken after play(): starting playback legitimately writes playback_state and
+        // playback_history. The invariant under test is that theme changes write nothing.
+        let before = try librarySnapshot(fixture.storage.database.dbQueue)
         let replacements = transport.replacements
         let generation = player.activeItemGeneration
         let service = ThemeService(store: MemoryThemePreferences())

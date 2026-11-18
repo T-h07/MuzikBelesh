@@ -77,6 +77,8 @@ enum SearXNGEndpoint {
 
 /// Dedicated transport: short timeouts, no cookies/cache, and no redirects at all.
 final class SearXNGURLSessionTransport: NSObject, YouTubeTransport, URLSessionTaskDelegate, @unchecked Sendable {
+    /// Largest discovery response accepted (enforced while streaming).
+    static let maximumResponseBytes = 4_000_000
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil; configuration.httpShouldSetCookies = false
@@ -89,9 +91,11 @@ final class SearXNGURLSessionTransport: NSObject, YouTubeTransport, URLSessionTa
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
     func send(_ request: URLRequest) async throws -> YouTubeHTTPResponse {
         guard let url = request.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { throw SearXNGError.insecureURL }
-        let (data, response) = try await session.data(for: request)
+        let data: Data, response: URLResponse
+        do { (data, response) = try await BoundedHTTPBody.read(session, request, limit: Self.maximumResponseBytes) }
+        catch is BoundedHTTPBody.TooLarge { throw SearXNGError.badResponse(nil) }
         try Task.checkCancellation()
-        guard let http = response as? HTTPURLResponse, data.count <= 4_000_000 else { throw SearXNGError.badResponse(nil) }
+        guard let http = response as? HTTPURLResponse else { throw SearXNGError.badResponse(nil) }
         return YouTubeHTTPResponse(data: data, status: http.statusCode, url: http.url ?? url, contentType: http.value(forHTTPHeaderField: "Content-Type"))
     }
 }

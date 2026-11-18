@@ -80,3 +80,8 @@ No profile, listening, preference or device data is referenced. See
 key `(collectionKind, collectionID)`. "Use App Default" is the absence of a row. AFTER DELETE
 triggers on `playlists`, `albums` and `artists` remove a deleted collection's row. Unknown values
 are ignored when read. No existing table changes. See [Phase 11.5](PHASE_11_05_DYNAMIC_ARTWORK.md).
+
+## Phase 12 (v1.2.0)
+
+No schema change. v1.2.0 opens databases from v1.1.0 and every Phase 11 build in place;
+see [Migrations](MIGRATIONS.md#phase-12-v120--no-new-migration) for the upgrade matrix.

@@ -69,6 +69,8 @@ final class YouTubeRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecke
 }
 
 final class YouTubeURLSessionTransport: YouTubeTransport, @unchecked Sendable {
+    /// Largest metadata/page/artwork response accepted (enforced while streaming).
+    static let maximumResponseBytes = 8_000_000
     private let session: URLSession
     init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.httpCookieStorage = nil
@@ -91,14 +93,21 @@ final class YouTubeURLSessionTransport: YouTubeTransport, @unchecked Sendable {
         request.httpShouldHandleCookies = false
         request.timeoutInterval = 15
         let redirects = YouTubeRedirectDelegate()
-        let (data, response) = try await session.data(for: request, delegate: redirects)
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await BoundedHTTPBody.read(session, request, delegate: redirects, limit: Self.maximumResponseBytes)
+        } catch let tooLarge as BoundedHTTPBody.TooLarge {
+            YouTubeDiscoveryDiagnostics.record(.init(stage: .transportSize, category: .searchUnavailable, status: tooLarge.status,
+                responseType: .init(tooLarge.contentType), operation: .transport))
+            throw YouTubeError.searchUnavailable
+        }
         try Task.checkCancellation()
         guard let response = response as? HTTPURLResponse else {
             YouTubeDiscoveryDiagnostics.record(.init(stage: .transportResponse, category: .searchUnavailable, status: nil, responseType: .unknown, operation: .transport))
             throw YouTubeError.searchUnavailable
         }
-        guard let finalURL = response.url, Self.permitted(finalURL), data.count <= 8_000_000 else {
-            YouTubeDiscoveryDiagnostics.record(.init(stage: data.count > 8_000_000 ? .transportSize : .transportRedirect,
+        guard let finalURL = response.url, Self.permitted(finalURL) else {
+            YouTubeDiscoveryDiagnostics.record(.init(stage: .transportRedirect,
                 category: .searchUnavailable, status: response.statusCode, responseType: .init(response.value(forHTTPHeaderField: "Content-Type")), operation: .transport))
             throw YouTubeError.searchUnavailable
         }
@@ -127,5 +136,41 @@ enum YouTubeHTTP {
         case 429: throw YouTubeError.rateLimited
         default: throw fallback
         }
+    }
+}
+
+/// Reads an HTTP body while enforcing a byte limit as it streams.
+///
+/// `URLSession.data(for:)` buffers the whole body before a size check can run, so an
+/// oversized or endless response (for example from a misconfigured LAN discovery server)
+/// could force a large allocation before being rejected. This stops at the declared
+/// `Content-Length` when it already exceeds the limit, and otherwise at the first byte past
+/// the limit, cancelling the task. Phase 12 security hardening.
+enum BoundedHTTPBody {
+    struct TooLarge: Error, Equatable {
+        let status: Int?
+        let contentType: String?
+    }
+
+    static func read(_ session: URLSession, _ request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil,
+                     limit: Int) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request, delegate: delegate)
+        let http = response as? HTTPURLResponse
+        let tooLarge = TooLarge(status: http?.statusCode, contentType: http?.value(forHTTPHeaderField: "Content-Type"))
+        let declared = response.expectedContentLength
+        if declared > Int64(limit) { bytes.task.cancel(); throw tooLarge }
+        var data = Data()
+        data.reserveCapacity(declared > 0 ? Int(declared) : min(limit, 64 * 1024))
+        var chunk = [UInt8](); chunk.reserveCapacity(16 * 1024)
+        for try await byte in bytes {
+            chunk.append(byte)
+            if chunk.count == 16 * 1024 {
+                guard data.count + chunk.count <= limit else { bytes.task.cancel(); throw tooLarge }
+                data.append(contentsOf: chunk); chunk.removeAll(keepingCapacity: true)
+            }
+        }
+        guard data.count + chunk.count <= limit else { throw tooLarge }
+        data.append(contentsOf: chunk)
+        return (data, response)
     }
 }

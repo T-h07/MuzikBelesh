@@ -75,7 +75,27 @@ actor GatedAcquisitionTransfer: AudioTransferring {
 
 enum AcquisitionToneAudio {
     static func seed(_ id: String) -> Int { id.unicodeScalars.reduce(0) { ($0 * 31 + Int($1.value)) % 997 } }
+    private final class Rendered: @unchecked Sendable {
+        private let lock = NSLock()
+        private var bytes: [Int: Data] = [:]
+        func get(_ seed: Int) -> Data? { lock.withLock { bytes[seed] } }
+        /// Keeps the first rendering when two writers race, so every caller gets the same bytes.
+        func keep(_ data: Data, for seed: Int) -> Data { lock.withLock { if let first = bytes[seed] { return first }; bytes[seed] = data; return data } }
+    }
+    private static let rendered = Rendered()
+
+    /// Same seed → byte-identical file. An M4A header records its creation time to the second,
+    /// so encoding the same tone twice across a second boundary produced different SHA-256s and
+    /// broke the deduplication test on a slow runner (CI 44327423510). Each seed is encoded once.
     static func write(to destination: URL, seed: Int) throws {
+        if let cached = rendered.get(seed) { try cached.write(to: destination); return }
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("tone-\(seed)-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        try encode(to: scratch, seed: seed)
+        try rendered.keep(try Data(contentsOf: scratch), for: seed).write(to: destination)
+    }
+
+    private static func encode(to destination: URL, seed: Int) throws {
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000]
         do {
             let file = try AVAudioFile(forWriting: destination, settings: settings)

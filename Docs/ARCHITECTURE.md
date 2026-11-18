@@ -109,3 +109,15 @@ observes per-collection modes from `collection_artwork_preferences`, and runs th
 `CollectionArtworkView` renders custom cover → mosaic → single cover → placeholder through the
 shared `ArtworkImagePipeline`. Custom covers are written by `MusicLibraryService.setCollectionCover`
 through the existing managed-file journal. See [Phase 11.5](PHASE_11_05_DYNAMIC_ARTWORK.md).
+
+## Phase 12 release hardening (v1.2.0)
+
+No architectural changes. Targeted corrections inside existing owners:
+
+- `ThemeService` treats re-selecting the active theme as a no-op (no publication, no write).
+- `BoundedHTTPBody` (in `YouTubeTransport.swift`) is shared by `YouTubeURLSessionTransport`
+  and `SearXNGURLSessionTransport`, so response limits are enforced while streaming.
+- `PlaylistDetailView` keeps the in-playlist search field at the top while searching.
+- Listening ranking rows keep their button trait for VoiceOver.
+
+See [PHASE_12_FINAL_RELEASE_AUDIT.md](PHASE_12_FINAL_RELEASE_AUDIT.md).
