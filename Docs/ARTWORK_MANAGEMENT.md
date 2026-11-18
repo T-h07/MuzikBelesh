@@ -28,3 +28,13 @@ otherwise valid audio unplayable. Original audio bytes and embedded tags are unc
 Current-track metadata/artwork is republished to system media controls without a
 transport restart. Native Photos-picker interaction and actual Lock Screen rendering
 remain part of physical-device acceptance.
+
+## Phase 11.5 dynamic collection artwork
+
+Collections without a custom cover show a 2×2 mosaic of up to four of their own local song
+covers, changing every 30 minutes in the foreground. `ArtworkImagePipeline` replaces
+`ArtworkImageCache` as the one decoded-artwork cache: 32 MiB, size buckets 128–1024 px, managed
+thumbnails for small tiles, shared decodes, memory-warning eviction. Playlist and album custom
+covers can be chosen or removed from Artwork Settings; this reuses the staging, journal and
+reference-counted cleanup above, so a cover still used by a song is kept. Mosaics never write
+files. See [Phase 11.5](PHASE_11_05_DYNAMIC_ARTWORK.md).

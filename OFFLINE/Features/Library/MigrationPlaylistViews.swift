@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MigrationPlaylistPlaybackHeader: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     @Environment(\.scenePhase) private var scenePhase
     let playlistID: String
@@ -17,10 +18,10 @@ struct MigrationPlaylistPlaybackHeader: View {
             HStack {
                 Button { Task { await library.playMigration(playlistID: playlistID, shuffle: false) } } label: {
                     Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("collection-play")
+                }.buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("collection-play")
                 Button { Task { await library.playMigration(playlistID: playlistID, shuffle: true) } } label: {
                     Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.bordered).tint(AppColors.accentPrimary).accessibilityIdentifier("collection-shuffle")
+                }.buttonStyle(.bordered).tint(palette.accent).accessibilityIdentifier("collection-shuffle")
             }.disabled(ready == 0)
             if ready == 0 {
                 Text(total == 0 ? "This playlist is empty." : "No songs are available offline yet.")
@@ -186,6 +187,7 @@ struct MigrationPlaylistDashboard: View {
 }
 
 struct MigrationProgressOverview: View {
+    @Environment(\.themePalette) private var palette
     let progress: PlaylistMigrationProgress
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -202,7 +204,10 @@ struct MigrationProgressOverview: View {
             }
             Text("Unresolved: \(progress.unresolved)").accessibilityIdentifier("migration-unresolved-count")
             if progress.actual == 0 { Text("Empty source playlist — no audio to acquire.").font(.caption) }
-        }.tint(AppColors.accentPrimary).accessibilityIdentifier("migration-overall-progress")
+        }.tint(palette.accent)
+        // A plain stack passes its identifier down to every child, replacing theirs; `.contain`
+        // keeps the counts individually addressable. VoiceOver order and labels are unchanged.
+        .accessibilityElement(children: .contain).accessibilityIdentifier("migration-overall-progress")
     }
 }
 
@@ -285,6 +290,7 @@ extension PlaylistMigrationSource {
         case .spotifyAccountExport: return "Spotify account export"
         case .exportify: return "Spotify / Exportify"
         case .spotifyAPI: return "Spotify"
+        case .muzikBelesh: return "Muzik Belesh library"
         }
     }
 }

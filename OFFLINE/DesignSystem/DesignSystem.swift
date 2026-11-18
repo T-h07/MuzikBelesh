@@ -3,6 +3,8 @@ import ImageIO
 import UIKit
 import UIKit
 
+/// Fixed colours: backgrounds, text, dividers and status. The user-selectable accent lives in
+/// `ThemePalette` (read with `@Environment(\.themePalette)`), never here.
 enum AppColors {
     static let backgroundPrimary = Color.black
     static let backgroundSecondary = Color(hex: "111111")
@@ -10,7 +12,6 @@ enum AppColors {
     static let textPrimary = Color(hex: "F5F5F5")
     static let textSecondary = Color(hex: "A0A0A0")
     static let textTertiary = Color(hex: "777777")
-    static let accentPrimary = Color(hex: "D6EEA3")
     static let divider = Color(hex: "292929")
     static let success = Color(hex: "78C49A")
     static let warning = Color(hex: "E9BF76")
@@ -51,10 +52,11 @@ extension View {
 }
 
 struct SectionHeader: View {
+    @Environment(\.themePalette) private var palette
     let title: String
     var actionTitle: String?
     var action: (() -> Void)?
-    var body: some View { HStack { Text(title).font(.system(size: 19, weight: .semibold)).foregroundStyle(AppColors.textPrimary); Spacer(); if let actionTitle, let action { Button(actionTitle, action: action).font(.caption).foregroundStyle(AppColors.accentPrimary) } } }
+    var body: some View { HStack { Text(title).font(.system(size: 19, weight: .semibold)).foregroundStyle(AppColors.textPrimary); Spacer(); if let actionTitle, let action { Button(actionTitle, action: action).font(.caption).foregroundStyle(palette.accent) } } }
 }
 
 struct ArtworkView: View {
@@ -70,58 +72,47 @@ struct StoredArtworkView: View {
     var body: some View { ManagedArtworkView(path: track.artworkRelativePath, fallbackID: track.id, size: size) }
 }
 
-private final class ArtworkImageCache {
-    static let shared = NSCache<NSString, UIImage>()
-}
-
+/// One song (or other single) cover from managed storage. Decoding and caching go through the
+/// shared `ArtworkImagePipeline`, the same bounded cache used by collection mosaics.
 struct ManagedArtworkView: View {
     @EnvironmentObject private var library: MusicLibraryService
+    @Environment(\.displayScale) private var displayScale
     let path: String?
     let fallbackID: String
     let size: CGFloat
     @State private var image: UIImage?
+    private var bucket: Int { ArtworkImagePipeline.bucket(points: size, scale: displayScale) }
     var body: some View {
         Group {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
             else { ArtworkView(name: fallbackID, size: size) }
         }.frame(width: size, height: size).clipped().clipShape(RoundedRectangle(cornerRadius: AppRadius.medium))
-            .task(id: "\(path ?? "none")|\(Int(size))") {
+            .task(id: "\(path ?? "none")|\(bucket)") {
+                guard let path, let storage = library.storage else { image = nil; return }
+                let pipeline = ArtworkImagePipeline.shared
+                // A cached image is shown at once; a new path never keeps the previous image.
+                if let cached = pipeline.cached(path: path, bucket: bucket) { image = cached; return }
                 image = nil
-                guard let path, let storage = library.storage else { return }
-                let pixels = min(1024, max(128, Int(size * 3)))
-                let key = "\(path)|\(pixels)" as NSString
-                if let cached = ArtworkImageCache.shared.object(forKey: key) { image = cached; return }
-                let loaded = await Task.detached(priority: .userInitiated) { () -> UIImage? in
-                    let thumbnail = ManagedLibraryFiles.thumbnailName(path)
-                    let candidate = size <= 100 ? thumbnail : path
-                    let preferred = try? storage.paths.artworkURL(relativePath: candidate)
-                    let original = try? storage.paths.artworkURL(relativePath: path)
-                    guard let url = [preferred, original].compactMap({ $0 }).first(where: { FileManager.default.fileExists(atPath: $0.path) }),
-                          let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-                          let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: pixels] as CFDictionary) else { return nil }
-                    let image = UIImage(cgImage: cgImage)
-                    ArtworkImageCache.shared.totalCostLimit = 32 * 1024 * 1024
-                    ArtworkImageCache.shared.countLimit = 200
-                    ArtworkImageCache.shared.setObject(image, forKey: key, cost: cgImage.bytesPerRow * cgImage.height)
-                    return image
-                }.value
+                let loaded = await pipeline.load(path: path, bucket: bucket, paths: storage.paths).image
                 if !Task.isCancelled { image = loaded }
             }
     }
 }
 
 struct EmptyState: View {
+    @Environment(\.themePalette) private var palette
     let icon: String
     let title: String
     let message: String
     var actionTitle: String?
     var action: (() -> Void)?
-    var body: some View { VStack(spacing: AppSpacing.md) { Image(systemName: icon).font(.system(size: 34)).foregroundStyle(AppColors.accentPrimary); Text(title).font(.headline).foregroundStyle(AppColors.textPrimary); Text(message).font(.subheadline).multilineTextAlignment(.center).foregroundStyle(AppColors.textSecondary); if let actionTitle, let action { Button(actionTitle, action: action).buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black) } }.frame(maxWidth: .infinity).padding(.vertical, 48) }
+    var body: some View { VStack(spacing: AppSpacing.md) { Image(systemName: icon).font(.system(size: 34)).foregroundStyle(palette.accent); Text(title).font(.headline).foregroundStyle(AppColors.textPrimary); Text(message).font(.subheadline).multilineTextAlignment(.center).foregroundStyle(AppColors.textSecondary); if let actionTitle, let action { Button(actionTitle, action: action).buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(.black) } }.frame(maxWidth: .infinity).padding(.vertical, 48) }
 }
 
 struct FilterChip: View {
+    @Environment(\.themePalette) private var palette
     let title: String
     let selected: Bool
     let action: () -> Void
-    var body: some View { Button(action: action) { Text(title).font(.subheadline.weight(.medium)).foregroundStyle(selected ? .black : AppColors.textSecondary).padding(.horizontal, 14).padding(.vertical, 8).background(selected ? AppColors.accentPrimary : AppColors.backgroundSecondary).clipShape(Capsule()) }.accessibilityAddTraits(selected ? .isSelected : []) }
+    var body: some View { Button(action: action) { Text(title).font(.subheadline.weight(.medium)).foregroundStyle(selected ? palette.onAccent : AppColors.textSecondary).padding(.horizontal, 14).padding(.vertical, 8).background(selected ? palette.accent : AppColors.backgroundSecondary).clipShape(Capsule()) }.accessibilityAddTraits(selected ? .isSelected : []) }
 }

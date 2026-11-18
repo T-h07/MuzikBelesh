@@ -4,6 +4,7 @@ import SwiftUI
 /// Matching progress and offline availability are shown separately, so 500 imported
 /// songs with 20 downloaded never look complete. Hidden until the migration starts.
 struct MigrationCoordinatorStatusView: View {
+    @Environment(\.themePalette) private var palette
     @ObservedObject var coordinator: PlaylistMigrationCoordinator
     let session: PlaylistMigrationSession
     @State private var confirmingCancel = false
@@ -15,7 +16,7 @@ struct MigrationCoordinatorStatusView: View {
             let progress = status.progress
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 Text("Migration").font(.headline)
-                Text(status.message).font(.subheadline.weight(.semibold)).foregroundStyle(AppColors.accentPrimary)
+                Text(status.message).font(.subheadline.weight(.semibold)).foregroundStyle(palette.accent)
                     .accessibilityIdentifier("migration-coordinator-status")
                 Text("Matched \(progress.matchingCompleted) of \(progress.total) · Offline \(progress.availableOffline) of \(progress.total)")
                     .font(.caption).foregroundStyle(AppColors.textSecondary)

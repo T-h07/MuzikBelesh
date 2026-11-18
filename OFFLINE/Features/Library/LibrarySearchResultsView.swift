@@ -24,14 +24,14 @@ struct LibrarySearchResultsView: View {
             if !values.albums.isEmpty {
                 heading("Albums", count: values.albums.count, id: "albums")
                 ForEach(values.albums) { group in
-                    NavigationLink { AlbumDetailView(groupID: group.id) } label: { LibraryGroupRow(group: group) }
+                    NavigationLink { AlbumDetailView(groupID: group.id) } label: { LibraryGroupRow(group: group, kind: .album) }
                         .accessibilityIdentifier("search-album-" + group.id)
                 }
             }
             if !values.artists.isEmpty {
                 heading("Artists", count: values.artists.count, id: "artists")
                 ForEach(values.artists) { group in
-                    NavigationLink { ArtistDetailView(groupID: group.id) } label: { LibraryGroupRow(group: group) }
+                    NavigationLink { ArtistDetailView(groupID: group.id) } label: { LibraryGroupRow(group: group, kind: .artist) }
                         .accessibilityIdentifier("search-artist-" + group.id)
                 }
             }

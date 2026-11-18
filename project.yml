@@ -22,8 +22,10 @@ settings:
     CODE_SIGNING_ALLOWED: NO
     CODE_SIGNING_REQUIRED: NO
     CODE_SIGN_IDENTITY: ''
-    CURRENT_PROJECT_VERSION: '3'
-    MARKETING_VERSION: '1.1.0'
+    # Single version source: both Info.plists, Scripts/package-ipa.sh and the release
+    # workflow read MARKETING_VERSION. CI overrides CURRENT_PROJECT_VERSION per build.
+    CURRENT_PROJECT_VERSION: '200'
+    MARKETING_VERSION: '1.2.0'
 targets:
   OFFLINE:
     type: application
@@ -39,13 +41,26 @@ targets:
       path: OFFLINE/Resources/Info.plist
       properties:
         CFBundleDisplayName: Muzik Belesh
-        CFBundleShortVersionString: '1.1.0'
+        CFBundleShortVersionString: '$(MARKETING_VERSION)'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         MBBuildCommit: '$(GIT_COMMIT_SHORT)'
         MBBuildDate: '$(BUILD_DATE)'
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # Phase 11.4 portable library documents (.mbelesh): metadata-only JSON, never audio.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.th07.muzikbelesh.library
+            UTTypeDescription: Muzik Belesh Library
+            UTTypeConformsTo: [public.data, public.content]
+            UTTypeTagSpecification:
+              public.filename-extension: [mbelesh]
+              public.mime-type: [application/vnd.muzikbelesh.library+json]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Muzik Belesh Library
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [com.th07.muzikbelesh.library]
         UIBackgroundModes: [audio, processing]
         BGTaskSchedulerPermittedIdentifiers: ['com.th07.muzikbelesh.matching.*']
         NSAppTransportSecurity: {NSAllowsArbitraryLoads: false, NSAllowsLocalNetworking: true}
@@ -108,7 +123,7 @@ targets:
       properties:
         CFBundleDisplayName: Muzik Belesh
         CFBundlePackageType: 'XPC!'
-        CFBundleShortVersionString: '1.1.0'
+        CFBundleShortVersionString: '$(MARKETING_VERSION)'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services

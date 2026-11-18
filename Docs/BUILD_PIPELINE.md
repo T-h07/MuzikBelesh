@@ -38,9 +38,39 @@ compiled products. Complete reuses only exact-SHA products, tests compact and
 standard/large-screen layouts, then builds the Release device candidate. Never
 run focused and complete concurrently. Inspect each failure before retrying.
 
-Both targets use marketing version 1.0.0; CI supplies the increasing build number.
+Both targets read their marketing version from `MARKETING_VERSION` in `project.yml` (1.2.0 since Phase 12); CI supplies the build number.
 Packaging checks audio background mode, identities, versions, deployment target,
 arm64, icons and both ad-hoc App Group entitlement blobs, and rejects fixture
 markers in Release executables. The manifest labels this a candidate with physical
 acceptance pending; it is not stable publication. Test evidence, package manifest
 and final SHA-256 are linked from the integration PR.
+
+## Phase 12 — v1.2.0 packaging and publication
+
+- **Single version source.** `project.yml` `MARKETING_VERSION` (`1.2.0`) feeds both
+  Info.plists through `$(MARKETING_VERSION)`. `Scripts/package-ipa.sh` reads the same value
+  instead of a hardcoded version, so a version bump is one line.
+- **Build number.** v1.2.0 uses build **200**, above every build ever distributed
+  (v1.0.0 = 195, v1.1.0 = 99, Phase 11 candidates = 100–108; verified from the published
+  manifests and IPA artifacts). Dispatch `build-ipa.yml` with `build_number: 200`; the
+  workflow run counter is not used for release candidates.
+- **Packaging checks** (in addition to the earlier ones): app and extension bundle IDs,
+  identical version and build in both bundles, `MinimumOSVersion` 17.0 in both, the
+  `.mbelesh` exported type and document declaration, the ATS policy, and absence of every
+  DEBUG-only UI-test hook string in both executables.
+- **Manifest** `OFFLINE-build-manifest.json`: `version`, `build`, `sourceSHA`,
+  `embeddedCommit`, `bundleID`, `extensionID`, `extensionVersion`, `extensionBuild`,
+  `appGroup`, `minimumOS`, `configuration`, `packages` (resolved SwiftPM pins),
+  `ipaSHA256` (computed from the final IPA bytes), `signing`, `verification`. A
+  `OFFLINE-unsigned.ipa.sha256` file is uploaded alongside.
+- **Supply chain.** First-party GitHub Actions are pinned to commit SHAs (checkout v4.4.0,
+  upload-artifact v4.6.2, download-artifact v4.3.0). SwiftPM packages are exact pins
+  (GRDB 7.11.1, YouTubeKit 0.4.10, ZIPFoundation 0.9.20).
+- **CI simulators** disable keyboard prediction, autocorrection, slide-to-type and keyboard
+  onboarding before tests: every 60 s XCUITest idle stall observed in CI #284–#298 occurred
+  while typing.
+- **Publication** uses `.github/workflows/publish-v1.2.0.yml`: manual dispatch only, on
+  `main` only, refuses while the accepted build/source/SHA-256/run are `PENDING_ACCEPTANCE`,
+  requires the SHA-256 to be typed as confirmation, never builds, verifies the downloaded
+  artifact byte-for-byte and the source diff since acceptance, never moves an existing tag,
+  and re-downloads the published IPA to verify its hash. The v1.1.0 publisher is unchanged.

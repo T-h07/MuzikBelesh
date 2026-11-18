@@ -4,6 +4,7 @@ import SwiftUI
 /// evidence (the existing review experience) and only the recovery actions that make
 /// sense for its actual state. Every action is delegated to its owning subsystem.
 struct MigrationIssueDetailView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var issues: MigrationIssueCoordinator
@@ -41,7 +42,7 @@ struct MigrationIssueDetailView: View {
                     .listRowBackground(AppColors.backgroundPrimary)
             }
         }
-        .scrollContentBackground(.hidden).screenBackground().tint(AppColors.accentPrimary)
+        .scrollContentBackground(.hidden).screenBackground().tint(palette.accent)
         .navigationTitle("Song Issue").navigationBarTitleDisplayMode(.inline)
         .sheet(item: $attaching, onDismiss: { issues.requestReconcile(immediately: true) }) { ResolveMigrationPlaceholderView(entry: $0) }
         .sheet(item: $importing, onDismiss: { issues.requestReconcile(immediately: true) }) { AcquisitionLocalImportView(entry: $0) }
@@ -113,8 +114,8 @@ struct MigrationIssueDetailView: View {
                     Button { restore(row) } label: { Label("Restore Song", systemImage: "arrow.uturn.backward") }
                         .buttonStyle(.matchingSecondaryWide).disabled(busy).accessibilityIdentifier("migration-issue-detail-restore")
                 }
-                if busy { ProgressView().tint(AppColors.accentPrimary) }
-                if let message { Text(message).font(.caption).foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("migration-issue-detail-message") }
+                if busy { ProgressView().tint(palette.accent) }
+                if let message { Text(message).font(.caption).foregroundStyle(palette.accent).accessibilityIdentifier("migration-issue-detail-message") }
                 if let error { Text(error).font(.caption).foregroundStyle(AppColors.error) }
             }
             .listRowBackground(AppColors.backgroundPrimary)

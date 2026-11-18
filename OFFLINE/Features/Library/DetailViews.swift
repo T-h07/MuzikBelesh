@@ -13,6 +13,8 @@ struct PlaylistDetailView: View {
     @State private var choosingSource = false
     @State private var showingLinks = false
     @State private var showingMigrationDetails = false
+    @State private var showingExport = false
+    @State private var showingArtworkSettings = false
     private var playlist: StoredPlaylist? { library.snapshot.playlists.first { $0.id == playlistID } }
     private var songs: [StoredTrack] { library.playlistTracks(playlistID) }
     private var migrationManaged: Bool { library.isMigrationPlaylist(playlistID) }
@@ -43,12 +45,16 @@ struct PlaylistDetailView: View {
         (migrationManaged ? visibleImported.count + visibleManual.count : visibleSongs.count) + visibleLinks.count
     }
 
+    /// Scroll anchor for the in-playlist search field.
+    private static let searchRowID = "playlist-search-row"
+
     var body: some View {
+        ScrollViewReader { scrollProxy in
         List {
             if let playlist {
                 Section {
                     VStack(alignment: .leading, spacing: AppSpacing.md) {
-                        ManagedArtworkView(path: playlist.artworkRelativePath ?? songs.compactMap(\.artworkRelativePath).first, fallbackID: playlist.id, size: 220).frame(maxWidth: .infinity)
+                        CollectionArtworkView(identity: .playlist(playlist.id), size: 220, title: playlist.name).frame(maxWidth: .infinity)
                         Text(playlist.name).font(.title.bold()).foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("playlist-detail-name")
                         if let description = playlist.description, !description.isEmpty { Text(description).foregroundStyle(AppColors.textSecondary) }
                         if migrationManaged {
@@ -64,7 +70,7 @@ struct PlaylistDetailView: View {
                     }.padding(.vertical, AppSpacing.md)
                 }.listRowBackground(AppColors.backgroundPrimary)
                 Section {
-                    PlaylistSearchField(text: $query)
+                    PlaylistSearchField(text: $query).id(Self.searchRowID)
                 }.listRowBackground(AppColors.backgroundPrimary)
                 if searching && visibleCount == 0 {
                     Section {
@@ -129,6 +135,12 @@ struct PlaylistDetailView: View {
                 }
             } else { Text("This playlist was removed.").foregroundStyle(AppColors.textSecondary) }
         }
+        .onChange(of: searching) { _, isSearching in
+            // With the keyboard up the field sits at the bottom of the visible list, so the
+            // filtered songs would be laid out under the keyboard. Keep the field at the top.
+            if isSearching { withAnimation(.easeOut(duration: 0.2)) { scrollProxy.scrollTo(Self.searchRowID, anchor: .top) } }
+        }
+        }
         .environment(\.editMode, $editMode)
         .sheet(item: $songOptions) { SongOptionsView(context: $0) }
         .safeAreaInset(edge: .bottom) {
@@ -150,6 +162,10 @@ struct PlaylistDetailView: View {
                             .accessibilityIdentifier("playlist-migration-details")
                     }
                     Button("Edit Playlist") { showingEditor = true }
+                    Button { showingArtworkSettings = true } label: { Label("Artwork Settings", systemImage: "photo.on.rectangle") }
+                        .accessibilityIdentifier("playlist-artwork-settings")
+                    Button { showingExport = true } label: { Label("Export Playlist", systemImage: "square.and.arrow.up") }
+                        .accessibilityIdentifier("playlist-export")
                     Button("Delete Playlist", role: .destructive) { confirmingDelete = true }
                 } label: { Label("Playlist Actions", systemImage: "ellipsis.circle") }
                     .accessibilityIdentifier("playlist-actions")
@@ -159,6 +175,8 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showingTracks) { AddTracksToPlaylistView(playlistID: playlistID) }
         .sheet(isPresented: $showingLinks) { AddYouTubeLinksView(playlistID: playlistID) }
         .sheet(isPresented: $showingMigrationDetails) { MigrationDetailsSheet(playlistID: playlistID) }
+        .sheet(isPresented: $showingExport) { LibraryExportView(initialScope: .playlist(playlistID)) }
+        .sheet(isPresented: $showingArtworkSettings) { CollectionArtworkSettingsView(identity: .playlist(playlistID), title: playlist?.name ?? "Playlist") }
         .confirmationDialog("Add Songs", isPresented: $choosingSource, titleVisibility: .visible) {
             Button("From Your Library") { showingTracks = true }.accessibilityIdentifier("playlist-add-from-library")
             Button("From YouTube Links") { showingLinks = true }.accessibilityIdentifier("playlist-add-from-youtube")
@@ -189,14 +207,14 @@ struct ArtistDetailView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: AppSpacing.lg) {
                 if let group {
-                    ManagedArtworkView(path: group.artworkRelativePath, fallbackID: group.id, size: 180).frame(maxWidth: .infinity)
+                    CollectionArtworkView(identity: .artist(group.id), size: 180, title: group.title).frame(maxWidth: .infinity)
                     Text(group.title).font(.title.bold()).foregroundStyle(AppColors.textPrimary)
                     Text("\(group.count) songs").foregroundStyle(AppColors.textSecondary)
                     CollectionPlaybackButtons(tracks: library.tracks(group.trackIDs), kind: "artist", sourceID: groupID)
                     ForEach(library.albumGroups.filter { album in
                         !Set(album.trackIDs).isDisjoint(with: group.trackIDs) || library.snapshot.albums.contains { $0.id == album.id && $0.artistID == groupID }
                     }) { album in
-                        NavigationLink { AlbumDetailView(groupID: album.id) } label: { LibraryGroupRow(group: album) }
+                        NavigationLink { AlbumDetailView(groupID: album.id) } label: { LibraryGroupRow(group: album, kind: .album) }
                     }
                     ForEach(library.tracks(group.trackIDs)) { StoredTrackRow(track: $0, contextTrackIDs: group.trackIDs, contextKind: "artist", contextSourceID: groupID) }
                 } else { EmptyState(icon: "person", title: "No songs for this artist", message: "Its songs may have been edited or removed.") }
@@ -206,6 +224,7 @@ struct ArtistDetailView: View {
 }
 
 struct CollectionPlaybackButtons: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     let tracks: [StoredTrack]
     let kind: String
@@ -214,9 +233,9 @@ struct CollectionPlaybackButtons: View {
     var body: some View {
         HStack(spacing: AppSpacing.md) {
             Button { start(shuffle: false) } label: { Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 36) }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("collection-play")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("collection-play")
             Button { start(shuffle: true) } label: { Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 36) }
-                .buttonStyle(.bordered).tint(AppColors.accentPrimary).accessibilityIdentifier("collection-shuffle")
+                .buttonStyle(.bordered).tint(palette.accent).accessibilityIdentifier("collection-shuffle")
         }.disabled(playable.isEmpty)
     }
     private func start(shuffle: Bool) {
@@ -226,6 +245,7 @@ struct CollectionPlaybackButtons: View {
 }
 
 struct AddTracksToPlaylistView: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: MusicLibraryService
     var playlistID: String? = nil
@@ -256,7 +276,7 @@ struct AddTracksToPlaylistView: View {
                         HStack {
                             StoredArtworkView(track: track, size: 44)
                             VStack(alignment: .leading) { Text(track.title).lineLimit(1); Text(library.artistName(track.artistID)).font(.caption).foregroundStyle(AppColors.textSecondary) }
-                            Spacer(); Image(systemName: existing.contains(track.id) || selected.contains(track.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(AppColors.accentPrimary)
+                            Spacer(); Image(systemName: existing.contains(track.id) || selected.contains(track.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(palette.accent)
                         }
                     }.disabled(existing.contains(track.id)).accessibilityIdentifier("select-track-" + track.id)
                 }
@@ -415,6 +435,7 @@ func formatDuration(_ tracks: [StoredTrack]) -> String {
 /// Search inside the open playlist only (title and artist). Purely local and immediate;
 /// it never reaches global search, YouTube or any remote service.
 struct PlaylistSearchField: View {
+    @Environment(\.themePalette) private var palette
     @Binding var text: String
     @FocusState private var focused: Bool
     var body: some View {
@@ -437,6 +458,6 @@ struct PlaylistSearchField: View {
         }
         .padding(.horizontal, AppSpacing.md).frame(minHeight: 44)
         .background(AppColors.backgroundSecondary, in: RoundedRectangle(cornerRadius: 10))
-        .tint(AppColors.accentPrimary)
+        .tint(palette.accent)
     }
 }

@@ -60,6 +60,7 @@ struct ParsedYouTubeLink: Equatable, Sendable {
 /// Every accepted link becomes a playlist entry at once and is queued in the shared
 /// download queue (Wi-Fi-only, concurrency and background rules unchanged).
 struct AddYouTubeLinksView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     @EnvironmentObject private var container: AppContainer
     @Environment(\.dismiss) private var dismiss
@@ -136,7 +137,7 @@ struct AddYouTubeLinksView: View {
                     Text("Songs appear in the playlist right away and download automatically. You can keep using the app; progress also shows in Downloads.")
                 }.listRowBackground(AppColors.backgroundPrimary)
             }
-            .scrollContentBackground(.hidden).screenBackground().tint(AppColors.accentPrimary)
+            .scrollContentBackground(.hidden).screenBackground().tint(palette.accent)
             .navigationTitle("Add YouTube Links").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working) } }
             .task { existing = (try? library.repository?.youtubeVideoIDs(inPlaylist: playlistID)) ?? [] }
@@ -146,7 +147,7 @@ struct AddYouTubeLinksView: View {
     @ViewBuilder private func statusLine(_ status: ParsedYouTubeLink.Status, text: String) -> some View {
         switch status {
         case .valid:
-            Label("Ready to add", systemImage: "checkmark.circle").font(.caption).foregroundStyle(AppColors.accentPrimary)
+            Label("Ready to add", systemImage: "checkmark.circle").font(.caption).foregroundStyle(palette.accent)
         case .invalid(let reason):
             Label(reason, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(AppColors.error)
         case .duplicate(_, let inPlaylist):
@@ -156,7 +157,7 @@ struct AddYouTubeLinksView: View {
                 if allowsRepeats {
                     Toggle("Add it again", isOn: Binding(get: { includeDuplicates.contains(text) },
                                                          set: { if $0 { includeDuplicates.insert(text) } else { includeDuplicates.remove(text) } }))
-                        .font(.caption).tint(AppColors.accentPrimary)
+                        .font(.caption).tint(palette.accent)
                 } else {
                     Text("A song appears once in this playlist.").font(.caption).foregroundStyle(AppColors.textSecondary)
                 }
@@ -229,6 +230,7 @@ struct PlaylistLinkDownloadRow: View {
 }
 
 private struct PlaylistLinkDownloadContent: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     let link: PlaylistLinkDownloadRecord
     let acquisition: PlaylistAcquisitionCoordinator?
@@ -238,7 +240,7 @@ private struct PlaylistLinkDownloadContent: View {
         let failed = link.state == .failed
         HStack(spacing: AppSpacing.md) {
             Image(systemName: failed ? "exclamationmark.triangle" : "arrow.down.circle")
-                .foregroundStyle(failed ? AppColors.error : AppColors.accentPrimary)
+                .foregroundStyle(failed ? AppColors.error : palette.accent)
                 .frame(width: 44, height: 44).background(AppColors.backgroundSecondary, in: RoundedRectangle(cornerRadius: 6))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
@@ -283,12 +285,13 @@ private struct PlaylistLinkDownloadContent: View {
 /// download progress, completion summary, Migration Issues, review, retry and cancel.
 /// The migration keeps running whether or not this is open.
 struct MigrationDetailsSheet: View {
+    @Environment(\.themePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     let playlistID: String
     var body: some View {
         NavigationStack {
             List { MigrationPlaylistDashboard(playlistID: playlistID) }
-                .scrollContentBackground(.hidden).screenBackground().tint(AppColors.accentPrimary)
+                .scrollContentBackground(.hidden).screenBackground().tint(palette.accent)
                 .navigationTitle("Migration Details").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.accessibilityIdentifier("migration-details-done") } }
         }

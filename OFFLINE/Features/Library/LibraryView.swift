@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var library: MusicLibraryService
     @ObservedObject var coordinator: AppCoordinator
@@ -10,6 +11,8 @@ struct LibraryView: View {
     @State private var showingPlaylistEditor = false
     @State private var showingPlaylistImporter = false
     @State private var showingAlbumEditor = false
+    @State private var showingLibraryImport = false
+    @State private var showingLibraryExport = false
     @State private var importMessage: String?
     @State private var query = ""
     @StateObject private var search = LibrarySearchSession()
@@ -41,6 +44,8 @@ struct LibraryView: View {
             if let model = container.playlistImport { PlaylistImportView(model: model) }
         }
         .sheet(isPresented: $showingAlbumEditor) { AlbumEditorView() }
+        .sheet(isPresented: $showingLibraryImport) { LibraryImportView() }
+        .sheet(isPresented: $showingLibraryExport) { LibraryExportView(initialScope: .library) }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.audio, .supportedAudio], allowsMultipleSelection: true) { result in
             Task { @MainActor in
                 do {
@@ -62,20 +67,27 @@ struct LibraryView: View {
         HStack {
             Text("Library").font(.largeTitle.bold()).foregroundStyle(AppColors.textPrimary)
             Spacer()
+            Menu {
+                Button { searchFocus = nil; showingLibraryImport = true } label: { Label("Import Muzik Belesh Library", systemImage: "square.and.arrow.down.on.square") }
+                    .accessibilityIdentifier("library-import-mbelesh")
+                Button { searchFocus = nil; showingLibraryExport = true } label: { Label("Export Library", systemImage: "square.and.arrow.up") }
+                    .accessibilityIdentifier("library-export")
+            } label: { Image(systemName: "square.and.arrow.up.on.square").font(.title3).foregroundStyle(palette.accent).frame(minWidth: 44, minHeight: 44) }
+                .disabled(!container.sharing.isAvailable).accessibilityLabel("Music Sharing").accessibilityIdentifier("library-sharing")
             Button { searchFocus = nil; showingImporter = true } label: { Label("Import", systemImage: "square.and.arrow.down").lineLimit(1) }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).frame(minHeight: 44).accessibilityIdentifier("library-import")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).frame(minHeight: 44).accessibilityIdentifier("library-import")
         }
     }
     @ViewBuilder private var content: some View {
         if coordinator.libraryFilter == "Albums" {
             Button { searchFocus = nil; showingAlbumEditor = true } label: { Label("Create Album", systemImage: "plus.circle.fill") }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-album")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("create-album")
         }
         if coordinator.libraryFilter == "Playlists" {
             Button { searchFocus = nil; showingPlaylistImporter = true } label: { Label("Import Playlist", systemImage: "square.and.arrow.down") }
-                .tint(AppColors.accentPrimary).disabled(container.storage == nil).accessibilityIdentifier("import-spotify-playlist")
+                .tint(palette.accent).disabled(container.storage == nil).accessibilityIdentifier("import-spotify-playlist")
             Button { searchFocus = nil; showingPlaylistEditor = true } label: { Label("Create Playlist", systemImage: "plus.circle.fill") }
-                .buttonStyle(.borderedProminent).tint(AppColors.accentPrimary).foregroundStyle(.black).accessibilityIdentifier("create-playlist")
+                .buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent).accessibilityIdentifier("create-playlist")
         }
         if ["All", "Songs", "Liked Songs"].contains(coordinator.libraryFilter) { HStack { Spacer(); LibrarySortMenu() } }
         if let results = search.results {
@@ -85,6 +97,7 @@ struct LibraryView: View {
 }
 
 struct LibrarySortMenu: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     var body: some View {
         Menu {
@@ -94,7 +107,7 @@ struct LibrarySortMenu: View {
                 }
             }
         } label: { Label("Sort", systemImage: "arrow.up.arrow.down").frame(minHeight: 44) }
-            .foregroundStyle(AppColors.accentPrimary).accessibilityIdentifier("library-sort")
+            .foregroundStyle(palette.accent).accessibilityIdentifier("library-sort")
     }
 }
 
@@ -103,7 +116,7 @@ struct PlaylistLibraryRow: View {
     let playlist: StoredPlaylist
     var body: some View {
         HStack(spacing: AppSpacing.md) {
-            ManagedArtworkView(path: playlist.artworkRelativePath, fallbackID: playlist.id, size: 60)
+            CollectionArtworkView(identity: .playlist(playlist.id), size: 60, title: playlist.name, decorative: true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(playlist.name).font(.headline).foregroundStyle(AppColors.textPrimary).lineLimit(1)
                 Text("\(library.playlistEntryCount(playlist.id)) songs").font(.caption).foregroundStyle(AppColors.textSecondary)
@@ -116,9 +129,15 @@ struct PlaylistLibraryRow: View {
 
 struct LibraryGroupRow: View {
     let group: LibraryGroup
+    /// Album groups (including Unassigned Songs) or artist groups.
+    let identity: CollectionArtworkIdentity
+    init(group: LibraryGroup, kind: CollectionArtworkKind) {
+        self.group = group
+        identity = kind == .artist ? .artist(group.id) : .album(group.id)
+    }
     var body: some View {
         HStack(spacing: AppSpacing.md) {
-            ManagedArtworkView(path: group.artworkRelativePath, fallbackID: group.id, size: 60)
+            CollectionArtworkView(identity: identity, size: 60, title: group.title, decorative: true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(group.title).font(.headline).foregroundStyle(AppColors.textPrimary).lineLimit(1)
                 Text("\(group.subtitle) • \(group.count) songs").font(.caption).foregroundStyle(AppColors.textSecondary).lineLimit(1)
@@ -128,6 +147,7 @@ struct LibraryGroupRow: View {
 }
 
 struct StoredTrackRow: View {
+    @Environment(\.themePalette) private var palette
     @EnvironmentObject private var library: MusicLibraryService
     @EnvironmentObject private var container: AppContainer
     let track: StoredTrack
@@ -148,7 +168,7 @@ struct StoredTrackRow: View {
     var body: some View {
         HStack(spacing: AppSpacing.md) {
             Button { play() } label: { rowLabel }.buttonStyle(.plain).disabled(track.availability != .available)
-            if library.snapshot.likedIDs.contains(track.id) { Image(systemName: "heart.fill").foregroundStyle(AppColors.accentPrimary).font(.caption).accessibilityLabel("Liked") }
+            if library.snapshot.likedIDs.contains(track.id) { Image(systemName: "heart.fill").foregroundStyle(palette.accent).font(.caption).accessibilityLabel("Liked") }
             Menu { actions } label: { Image(systemName: "ellipsis").foregroundStyle(AppColors.textSecondary).frame(width: 44, height: 44) }
                 .accessibilityLabel("Actions for \(track.title)").accessibilityIdentifier("track-actions-" + track.id)
         }

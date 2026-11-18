@@ -33,6 +33,9 @@ final class AudioPlayerService: ObservableObject {
     private let persistence: PlaybackPersistenceCoordinator
     let queue: PlaybackQueueManager
     private let history: PlaybackHistoryService
+    /// Phase 11.2 listening analytics. Observes playback; never controls it.
+    let listening: ListeningSessionTracker
+    private var listeningContext: ListeningContext = .unknown
     let sleepTimer: SleepTimerService
     private let resolver: LocalAudioAssetResolver
     private weak var storage: StorageCoordinator?
@@ -61,6 +64,7 @@ final class AudioPlayerService: ObservableObject {
         persistence = PlaybackPersistenceCoordinator(storage: storage)
         queue = PlaybackQueueManager(storage: storage, makeShuffle: makeShuffle)
         history = PlaybackHistoryService(storage: storage)
+        listening = ListeningSessionTracker(store: storage.map { ListeningAnalyticsRepository(db: $0.database.dbQueue) })
         let restoration = persistence.restore()
         activeContextKind = restoration?.contextKind
         activeContextSourceID = restoration?.contextSourceID
@@ -156,7 +160,7 @@ final class AudioPlayerService: ObservableObject {
         }
     }
 
-    private func selectTrack(_ trackID: String, direction: NavigationDirection = .forward, autoplay: Bool = true, recordNavigation: Bool = true) async throws {
+    private func selectTrack(_ trackID: String, direction: NavigationDirection = .forward, autoplay: Bool = true, recordNavigation: Bool = true, continueListening: Bool = false) async throws {
         let signposter = OSSignposter(subsystem: "com.th07.muzikbelesh", category: "Performance")
         let interval = signposter.beginInterval("BeginPlayback")
         defer { signposter.endInterval("BeginPlayback", interval) }
@@ -174,8 +178,9 @@ final class AudioPlayerService: ObservableObject {
             guard revision == intentRevision, reconcileSleepTimer() else { throw CancellationError() }
             try session.configure()
             updateContext(with: trackID)
+            if recordNavigation { listeningContext = currentListeningContext(for: trackID) }
             queue.setCurrent(trackID)
-            replaceItem(with: AVPlayerItem(asset: asset), trackID: trackID, track: resolved.track, localDuration: localDuration)
+            replaceItem(with: AVPlayerItem(asset: asset), trackID: trackID, track: resolved.track, localDuration: localDuration, continueListening: continueListening)
             state.duration = libraryTimeline ?? duration.seconds
             wantsPlayback = autoplay
             if autoplay { player.play(); synchronizeTransport() }
@@ -208,8 +213,8 @@ final class AudioPlayerService: ObservableObject {
             try await restartCurrentTrack()
             return
         }
-        if case .failed = state.status, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false); return }
-        if item == nil, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false); return }
+        if case .failed = state.status, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false, continueListening: true); return }
+        if item == nil, let id = state.currentTrackID { try await selectTrack(id, recordNavigation: false, continueListening: true); return }
         try requireAvailableMigrationAudio()
         try session.configure(); wantsPlayback = true; player.play(); synchronizeTransport(); state.lastError = nil; publishCurrent(); persist()
     }
@@ -236,9 +241,9 @@ final class AudioPlayerService: ObservableObject {
             }
         }
     }
-    func pause() { synchronizeClock(); record("pause-request"); intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
+    func pause() { synchronizeClock(); record("pause-request"); intentRevision += 1; wantsPlayback = false; player.pause(); listening.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; userPausedDuringInterruption = true; publishCurrent(); persist() }
     func togglePlayback() async { if wantsPlayback { pause() } else { await playFromRemote() } }
-    func stop() { record("stop-request"); intentRevision += 1; wantsPlayback = false; itemGeneration += 1; removeItemObservers(); player.pause(); player.replaceCurrentItem(with: nil); item = nil; artworkTask?.cancel(); artworkCachePath = nil; artworkCacheData = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
+    func stop() { record("stop-request"); sampleListening(); listening.finish(reason: "stopped", natural: false); intentRevision += 1; wantsPlayback = false; itemGeneration += 1; removeItemObservers(); player.pause(); player.replaceCurrentItem(with: nil); item = nil; artworkTask?.cancel(); artworkCachePath = nil; artworkCacheData = nil; history.finish(duration: state.elapsedTime); state.elapsedTime = 0; state.status = .idle; state.currentTrackID = nil; nowPlaying.clear(); session.deactivate(); persist() }
 
     func next() async {
         guard await beginCommand("next") else { return }
@@ -259,7 +264,7 @@ final class AudioPlayerService: ObservableObject {
         }
         queue.cancelCandidate()
         record("navigation-boundary", reason: reason == .automatic ? "automatic-exhausted" : "manual-exhausted")
-        wantsPlayback = false; state.status = .ended; player.pause(); history.finish(duration: state.elapsedTime); updateSkipAvailability(); publishCurrent(); persist()
+        wantsPlayback = false; state.status = .ended; player.pause(); listening.finish(reason: "ended", natural: false); history.finish(duration: state.elapsedTime); updateSkipAvailability(); publishCurrent(); persist()
     }
 
     func previous() async {
@@ -318,8 +323,9 @@ final class AudioPlayerService: ObservableObject {
         guard seconds.isFinite else { record("seek-rejected", reason: "nonfinite"); return }
         guard state.canSeek else { record("seek-rejected", reason: "no-duration"); return }
         guard reconcileSleepTimer() else { record("seek-rejected", reason: "timer-expired"); return }
+        sampleListening(); listening.discontinuity()
         if case .failed = state.status {
-            do { try await restartCurrentTrack(keepPlaying: false) }
+            do { try await restartCurrentTrack(keepPlaying: false, continueListening: true) }
             catch { handleTransitionFailure(error); return }
         }
         seekRevision += 1
@@ -364,19 +370,21 @@ final class AudioPlayerService: ObservableObject {
         let revision = intentRevision
         let localDuration = await storage?.downloadPlaybackDuration(track: resolved.track, url: resolved.url)
         guard revision == intentRevision, state.currentTrackID == trackID, item == nil else { return }
-        replaceItem(with: AVPlayerItem(url: resolved.url), trackID: trackID, track: resolved.track, localDuration: localDuration)
+        if listening.activeTrackID != trackID { listeningContext = currentListeningContext(for: trackID) }
+        replaceItem(with: AVPlayerItem(url: resolved.url), trackID: trackID, track: resolved.track, localDuration: localDuration, continueListening: true)
         state.status = .paused
         if position > 0 { _ = await player.seek(to: CMTime(seconds: min(position, max(0, state.duration - endpointTolerance)), preferredTimescale: 600)); state.elapsedTime = min(position, max(0, state.duration - endpointTolerance)) }
         publish(track: resolved.track)
     }
 
-    private func replaceItem(with newItem: AVPlayerItem, trackID: String, track: StoredTrack, localDuration: Double?) {
+    private func replaceItem(with newItem: AVPlayerItem, trackID: String, track: StoredTrack, localDuration: Double?, continueListening: Bool = false) {
         libraryTimeline = localDuration
         if let libraryTimeline {
             newItem.forwardPlaybackEndTime = CMTime(seconds: libraryTimeline, preferredTimescale: 44100)
         }
         transportVerification?.cancel(); transportVerification = nil
         removeItemObservers(); itemGeneration += 1; completedGeneration = nil; let generation = itemGeneration; item = newItem; state.currentTrackID = trackID; state.status = .loading; state.elapsedTime = 0; state.duration = TimeInterval(track.durationMs ?? 0) / 1000
+        listening.prepare(trackID: trackID, durationSeconds: localDuration ?? state.duration, context: listeningContext, continuing: continueListening)
         statusObserver = newItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in Task { @MainActor in guard let self, self.item === item else { return }; if item.status == .failed { self.fail("Audio could not be loaded. Try Play again.") } else if item.status == .readyToPlay { let duration = item.duration.seconds; if duration.isFinite && duration > 0 { self.state.duration = self.libraryTimeline ?? duration }; self.synchronizeTransport(); self.publish(track: track) } } }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: newItem, queue: .main) { [weak self, weak newItem] _ in
             MainActor.assumeIsolated {
@@ -410,6 +418,7 @@ final class AudioPlayerService: ObservableObject {
     func samplePlaybackTime(_ seconds: Double) {
         guard seconds.isFinite, !state.isSeeking else { return }
         let position = max(0, seconds)
+        listening.observe(position: position, duration: state.duration, playing: wantsPlayback && player.isPlaying)
         guard position != state.elapsedTime else { return }
         let crossedPreviousBoundary = (state.elapsedTime > 3) != (position > 3)
         state.elapsedTime = position
@@ -432,6 +441,7 @@ final class AudioPlayerService: ObservableObject {
         guard active != foreground else { return }
         foreground = active
         synchronizeClock()
+        if !active { listening.checkpoint() }
         if item != nil { installTimeObserver() }
         publishCurrent()
         persist()
@@ -441,13 +451,29 @@ final class AudioPlayerService: ObservableObject {
         if let seconds = nativePlayer?.currentTime().seconds { samplePlaybackTime(seconds) }
     }
 
+    /// Reports the native position to listening analytics without touching playback state.
+    private func sampleListening() {
+        guard !state.isSeeking, let seconds = nativePlayer?.currentTime().seconds, seconds.isFinite else { return }
+        listening.observe(position: max(0, seconds), duration: state.duration, playing: wantsPlayback && player.isPlaying)
+    }
+
+    /// Where the song being started came from. Manual-queue songs are never credited to the
+    /// playlist or album that was playing before them; a missing context stays unknown.
+    private func currentListeningContext(for trackID: String) -> ListeningContext {
+        if queue.isStartingQueuedEntry(trackID) { return .manualQueue }
+        guard let kind = activeContextKind else { return .unknown }
+        return ListeningContext(kind: kind, sourceID: activeContextSourceID)
+    }
+
     func handleMediaServicesReset() {
         wasPlayingBeforeInterruption = false
         userPausedDuringInterruption = true
         // Rebuild native objects paused; only an explicit user Play may resume.
+        sampleListening()
         intentRevision += 1
         wantsPlayback = false
         player.pause()
+        listening.pause()
         removeItemObservers()
         player.replaceCurrentItem(with: nil)
         item = nil
@@ -492,12 +518,16 @@ final class AudioPlayerService: ObservableObject {
         completedGeneration = generation
         state.elapsedTime = state.duration
         record("completion-accepted")
+        sampleListening()
+        listening.finish(reason: "completed", natural: true)
         await advance(reason: .automatic)
     }
 
     var activeItemGeneration: Int { itemGeneration }
 
     private func synchronizeTransport() {
+        sampleListening()
+        if !player.isPlaying { listening.pause() }
         guard state.currentTrackID != nil, wantsPlayback else { return }
         if let native = player.nativePlayer, native.currentItem?.status == .failed { fail("The audio item could not be played."); return }
         state.status = player.isPlaying ? .playing : .loading
@@ -549,11 +579,11 @@ final class AudioPlayerService: ObservableObject {
         state.canSkipPrevious = queue.hasPrevious() || state.elapsedTime > 3 || canRecover
         remoteCommands.updateCapabilities(state: state)
     }
-    private func restartCurrentTrack(keepPlaying: Bool = true) async throws {
+    private func restartCurrentTrack(keepPlaying: Bool = true, continueListening: Bool = false) async throws {
         guard let id = state.currentTrackID else { throw AudioPlaybackError.trackNotFound }
         record("recovery-reload", reason: keepPlaying ? "restart-playing" : "restart-paused")
         // A fresh item also isolates late endpoint notifications from the replay.
-        try await selectTrack(id, autoplay: keepPlaying, recordNavigation: false)
+        try await selectTrack(id, autoplay: keepPlaying, recordNavigation: false, continueListening: continueListening)
         updateSkipAvailability()
     }
     private func publish(track selected: StoredTrack) {
@@ -580,9 +610,9 @@ final class AudioPlayerService: ObservableObject {
     private func publishCurrent() { guard let storage, let id = state.currentTrackID, let track = try? storage.tracks.find(id: id) else { return }; publish(track: track) }
     private func persist() { queue.persistState(currentTrackID: state.currentTrackID, positionMs: Int64(max(0, state.elapsedTime) * 1000), sleepDeadline: sleepTimer.deadline, sleepTimerDuration: sleepTimer.durationSeconds, contextKind: activeContextKind, contextSourceID: activeContextSourceID) }
     func reconcileLifecycle() { sleepTimer.checkDeadline(); updateSkipAvailability(); persist() }
-    private func expireSleepTimer() { record("timer-expired"); timerExpired = true; intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; state.lastError = nil; publishCurrent(); persist() }
+    private func expireSleepTimer() { record("timer-expired"); sampleListening(); listening.pause(); timerExpired = true; intentRevision += 1; wantsPlayback = false; player.pause(); state.status = state.currentTrackID == nil ? .idle : .paused; state.lastError = nil; publishCurrent(); persist() }
     private func reconcileSleepTimer() -> Bool { guard !timerExpired else { record("command-rejected", reason: "timer-expired"); return false }; guard let deadline = sleepTimer.deadline, deadline <= Date() else { return true }; sleepTimer.cancel(); expireSleepTimer(); return false }
-    private func fail(_ message: String) { record("transport-failed", reason: "recoverable-error"); wantsPlayback = false; player.pause(); state.status = .failed(message: message); state.lastError = message; publishCurrent(); persist() }
+    private func fail(_ message: String) { record("transport-failed", reason: "recoverable-error"); sampleListening(); listening.pause(); wantsPlayback = false; player.pause(); state.status = .failed(message: message); state.lastError = message; publishCurrent(); persist() }
     private func handleTransitionFailure(_ error: Error) {
         let code: String
         switch error {
@@ -650,7 +680,7 @@ final class AudioPlayerService: ObservableObject {
             synchronizeClock()
             wasPlayingBeforeInterruption = wantsPlayback
             userPausedDuringInterruption = false
-            intentRevision += 1; wantsPlayback = false; player.pause()
+            intentRevision += 1; wantsPlayback = false; player.pause(); listening.pause()
             state.status = .interrupted
         } else {
             let value = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0

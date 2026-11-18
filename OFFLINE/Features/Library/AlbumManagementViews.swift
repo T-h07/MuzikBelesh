@@ -8,6 +8,7 @@ struct AlbumDetailView: View {
     @State private var showingTracks = false
     @State private var confirmingDelete = false
     @State private var editMode: EditMode = .inactive
+    @State private var showingArtworkSettings = false
     private var group: LibraryGroup? { library.albumGroups.first { $0.id == groupID } }
     private var album: StoredAlbum? { library.snapshot.albums.first { $0.id == groupID } }
     private var songs: [StoredTrack] { library.tracks(group?.trackIDs ?? []) }
@@ -16,7 +17,7 @@ struct AlbumDetailView: View {
             if let group {
                 Section {
                     VStack(alignment: .leading, spacing: AppSpacing.md) {
-                        ManagedArtworkView(path: group.artworkRelativePath, fallbackID: group.id, size: 220).frame(maxWidth: .infinity)
+                        CollectionArtworkView(identity: .album(group.id), size: 220, title: group.title).frame(maxWidth: .infinity)
                         Text(group.title).font(.title.bold()).foregroundStyle(AppColors.textPrimary).accessibilityIdentifier("album-detail-name")
                         Text(group.subtitle).foregroundStyle(AppColors.textSecondary)
                         if let year = album?.releaseYear { Text(String(year)).foregroundStyle(AppColors.textSecondary) }
@@ -63,6 +64,8 @@ struct AlbumDetailView: View {
                     Button(editMode == .active ? "Done" : "Reorder") { editMode = editMode == .active ? .inactive : .active }.accessibilityIdentifier("album-reorder")
                     Menu {
                         Button("Edit Album") { showingEditor = true }
+                        Button { showingArtworkSettings = true } label: { Label("Artwork Settings", systemImage: "photo.on.rectangle") }
+                            .accessibilityIdentifier("album-artwork-settings")
                         Button("Delete Album", role: .destructive) { confirmingDelete = true }
                     } label: { Label("Album Actions", systemImage: "ellipsis.circle") }.accessibilityIdentifier("album-actions")
                 }
@@ -70,6 +73,7 @@ struct AlbumDetailView: View {
         }
         .sheet(isPresented: $showingEditor) { AlbumEditorView(albumID: album?.id) }
         .sheet(isPresented: $showingTracks) { AddTracksToPlaylistView(albumID: groupID) }
+        .sheet(isPresented: $showingArtworkSettings) { CollectionArtworkSettingsView(identity: .album(groupID), title: group?.title ?? "Album") }
         .confirmationDialog("Delete Album?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Album", role: .destructive) {
                 Task { do { try await library.deleteAlbum(id: groupID, confirmed: true); dismiss() } catch { library.report(error) } }

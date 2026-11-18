@@ -4,6 +4,7 @@ import SwiftUI
 /// state; dismissing only hides the highlight for this processing cycle — issues,
 /// retry state and lifecycle are never changed, and the summary stays available.
 struct MigrationCompletionSummaryView: View {
+    @Environment(\.themePalette) private var palette
     let summary: MigrationCompletionSummary
     var highlighted = false
     var onDismiss: (() -> Void)? = nil
@@ -11,13 +12,13 @@ struct MigrationCompletionSummaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             HStack(alignment: .firstTextBaseline) {
-                Image(systemName: icon).foregroundStyle(summary.fullyReady ? AppColors.accentPrimary : statusColor)
+                Image(systemName: icon).foregroundStyle(summary.fullyReady ? palette.accent : statusColor)
                     .accessibilityHidden(true)
                 Text(summary.outcome.title).font(.headline).foregroundStyle(AppColors.textPrimary)
                     .accessibilityIdentifier("migration-summary-title")
                 Spacer(minLength: 0)
                 if highlighted, let onDismiss {
-                    Button("Dismiss", action: onDismiss).font(.caption).buttonStyle(.borderless).tint(AppColors.accentPrimary)
+                    Button("Dismiss", action: onDismiss).font(.caption).buttonStyle(.borderless).tint(palette.accent)
                         .accessibilityHint("Hides this highlight. The summary stays available.")
                         .accessibilityIdentifier("migration-summary-dismiss")
                 }
@@ -39,7 +40,7 @@ struct MigrationCompletionSummaryView: View {
         }
         .padding(AppSpacing.md)
         .background(AppColors.backgroundSecondary, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(highlighted ? AppColors.accentPrimary : .clear, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(highlighted ? palette.accent : .clear, lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("migration-completion-summary")
     }

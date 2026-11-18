@@ -114,6 +114,10 @@ final class DatabaseManager {
         ReplacementSchema.register(in: &migrator)
         PlaylistOccurrenceRemovalSchema.register(in: &migrator)
         PlaylistLinkDownloadSchema.register(in: &migrator)
+        LocalProfileSchema.register(in: &migrator)
+        ListeningAnalyticsSchema.register(in: &migrator)
+        PortableLibrarySchema.register(in: &migrator)
+        CollectionArtworkSchema.register(in: &migrator)
         if let migrationTarget { try migrator.migrate(dbQueue, upTo: migrationTarget) }
         else { try migrator.migrate(dbQueue) }
     }

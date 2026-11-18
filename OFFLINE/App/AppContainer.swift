@@ -33,7 +33,18 @@ final class AppContainer: ObservableObject {
     let youtubePreferences: YouTubePreferences
     let youtubeArtwork = YouTubeArtworkLoader()
     let audioPlayer: AudioPlayerService
-    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil) {
+    /// Phase 11.1 device-local profile. Owns no library data and no network access.
+    let profile: LocalProfileService
+    /// Phase 11.2 device-local listening statistics. Read-only; never uploads anything.
+    let listening: ListeningStatsService
+    /// Phase 11.3 accent theme. Loaded synchronously so the first frame already uses it.
+    let theme: ThemeService
+    /// Phase 11.4 portable `.mbelesh` library export, import and progress.
+    let sharing: LibrarySharingService
+    /// Phase 11.5 dynamic collection artwork (mosaics, preferences, one rotation epoch). Purely visual.
+    let collectionArtwork: CollectionArtworkService
+    init(configuration: AppConfiguration = .current(), youtubeProbe: YouTubeProbe? = nil, audioTransfer: any AudioTransferring = TransferService(), observeDownloadNetwork: Bool = true, backgroundTransfers: (any SystemDownloading)? = nil, storage: StorageCoordinator? = nil, youtubeSearchProvider: (any YouTubeSearchProvider)? = nil, youtubeMetadataProvider: (any YouTubeMetadataProvider)? = nil, youtubeAudioResolver: (any YouTubeAudioResolver)? = nil, youtubeDefaults: UserDefaults = .standard, resourceMonitor: ResourceMonitor? = nil, automaticAcquisition: Bool = false, acquisitionNotifier: (any PlaylistAcquisitionNotifying)? = nil, backgroundExecution: (any BackgroundExecutionGranting)? = nil, profileStore: (any LocalProfileStoring)? = nil, themeStore: ThemePreferenceStoring? = nil, artworkStore: CollectionArtworkDefaultStoring? = nil) {
+        self.theme = ThemeService(store: themeStore ?? UserDefaultsThemePreferences())
         self.resources = resourceMonitor ?? ResourceMonitor()
         self.configuration = configuration
         if let storage { self.storage = storage } else { self.storage = try? StorageCoordinator(paths: AppStoragePaths()) }
@@ -53,9 +64,19 @@ final class AppContainer: ObservableObject {
         // Exactly one DownloadManager owns every job, ordinary and playlist-driven.
         self.downloads = DownloadManager(storage: self.storage, preferences: self.youtubePreferences, preparer: self.youtubePreparer, transfer: audioTransfer, artwork: youtubeArtwork, observeNetwork: observeDownloadNetwork, system: backgroundTransfers, execution: backgroundExecution)
         self.youtubeProbe = youtubeProbe ?? YouTubeKitProbe(resolver: resolver)
+        // A single-row read, so the launch destination is known before the first frame and the
+        // tab interface never flashes ahead of onboarding. Storage failure stays a failure.
+        self.profile = LocalProfileService(store: profileStore ?? self.storage.map { LocalProfileRepository(db: $0.database.dbQueue, paths: $0.paths) })
+        self.profile.load()
         self.audioPlayer = AudioPlayerService(storage: self.storage)
+        self.listening = ListeningStatsService(database: self.storage?.database.dbQueue)
+        self.listening.beforeLoad = { [weak player = self.audioPlayer] in player?.listening.checkpoint() }
         self.library = MusicLibraryService(storage: self.storage, player: self.audioPlayer)
         self.playlistImport = self.storage.map { PlaylistImportViewModel(storage: $0) }
+        // Observes the library snapshot only; never the player, downloads or analytics.
+        self.collectionArtwork = CollectionArtworkService(library: self.library, database: self.storage?.database.dbQueue, paths: self.storage?.paths,
+                                                          store: artworkStore ?? UserDefaultsCollectionArtworkDefaults(),
+                                                          foreground: backgroundTransfers == nil || UIApplication.shared.applicationState != .background)
         var matchingService: PlaylistMigrationMatchingService?
         let coordinatorStore = self.storage.map { MigrationCoordinatorRepository(db: $0.database.dbQueue) }
         if let storage = self.storage {
@@ -100,6 +121,12 @@ final class AppContainer: ObservableObject {
             self.migrationIssues = issues
             Task { await issues.start() }
         } else { self.migrationIssues = nil }
+        // Phase 11.4: portable library export/import. Reuses the coordinator above for all
+        // matching and acquisition; restores unfinished imports after the coordinator.
+        let sharing = LibrarySharingService(storage: self.storage, coordinator: self.migrationCoordinator,
+                                            metadata: self.youtubeMetadata, appVersion: configuration.version)
+        self.sharing = sharing
+        Task { await sharing.start() }
         resources.$policy.sink { [weak self] policy in
             guard let self else { return }
             audioPlayer.setResourcePolicy(policy)

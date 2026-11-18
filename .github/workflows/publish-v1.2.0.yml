@@ -1,0 +1,158 @@
+name: Publish Muzik Belesh v1.2.0
+# Owner-approved, single-version publisher for v1.2.0. It never builds: it downloads the
+# exact IPA the owner accepted on a physical iPhone, verifies it byte-for-byte, and only
+# then tags the stable commit and publishes the GitHub Release.
+#
+# The accepted values below stay PENDING_ACCEPTANCE until the owner records physical
+# acceptance (Docs/PHASE_12_DEVICE_ACCEPTANCE.md). While any value is pending, the workflow
+# refuses to run. Recording them is a reviewed commit; publishing is a separate manual run
+# from the stable main branch. There is deliberately no push trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      approve_publish:
+        description: 'I authorize publishing the physically accepted Muzik Belesh v1.2.0 IPA'
+        type: boolean
+        required: true
+        default: false
+      confirm_ipa_sha256:
+        description: 'Type the accepted IPA SHA-256 to confirm'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: muzik-belesh-v1.2.0-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'T-h07/MuzikBelesh' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RELEASE_VERSION: '1.2.0'
+      ACCEPTED_BUILD: 'PENDING_ACCEPTANCE'
+      APPROVED_SOURCE_SHA: 'PENDING_ACCEPTANCE'
+      ACCEPTED_IPA_SHA256: 'PENDING_ACCEPTANCE'
+      ACCEPTED_RUN_ID: 'PENDING_ACCEPTANCE'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Verify authorization, branch and unchanged accepted app source
+        shell: bash
+        env:
+          MANUAL_APPROVAL: ${{ inputs.approve_publish }}
+          CONFIRMED_SHA256: ${{ inputs.confirm_ipa_sha256 }}
+        run: |
+          set -euo pipefail
+          for value in "$ACCEPTED_BUILD" "$APPROVED_SOURCE_SHA" "$ACCEPTED_IPA_SHA256" "$ACCEPTED_RUN_ID"; do
+            if [[ "$value" == "PENDING_ACCEPTANCE" ]]; then
+              echo "::error::Accepted build values are not recorded; physical acceptance is required first."
+              exit 1
+            fi
+          done
+          [[ "$ACCEPTED_BUILD" =~ ^[1-9][0-9]*$ ]]
+          [[ "$APPROVED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ACCEPTED_IPA_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$ACCEPTED_RUN_ID" =~ ^[0-9]+$ ]]
+          test "$MANUAL_APPROVAL" = "true"
+          test "$CONFIRMED_SHA256" = "$ACCEPTED_IPA_SHA256"
+          test "$GITHUB_REF" = "refs/heads/main"
+          git merge-base --is-ancestor "$APPROVED_SOURCE_SHA" HEAD
+          # Any change to executable source, resources, the extension or packaging after
+          # acceptance invalidates the accepted binary.
+          git diff --exit-code "$APPROVED_SOURCE_SHA" HEAD -- \
+            OFFLINE OFFLINEShareExtension Sharing project.yml Scripts/package-ipa.sh
+          declared="$(awk -F"'" '/^ *MARKETING_VERSION: /{print $2; exit}' project.yml)"
+          test "$declared" = "$RELEASE_VERSION"
+          test -f "Docs/RELEASE_NOTES_v$RELEASE_VERSION.md"
+          echo "Production app matches the physically accepted v$RELEASE_VERSION ($ACCEPTED_BUILD) source."
+
+      - name: Download the accepted IPA artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: OFFLINE-unsigned-IPA
+          run-id: ${{ env.ACCEPTED_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: release-assets
+
+      - name: Verify IPA bytes, manifest, versions and bundle identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, plistlib, zipfile
+          root = pathlib.Path("release-assets")
+          ipa = root / "OFFLINE-unsigned.ipa"
+          manifest_file = root / "OFFLINE-build-manifest.json"
+          assert ipa.is_file() and manifest_file.is_file(), "Missing accepted IPA or manifest"
+          digest = hashlib.sha256(ipa.read_bytes()).hexdigest()
+          assert digest == os.environ["ACCEPTED_IPA_SHA256"], f"Unexpected IPA hash {digest}"
+          manifest = json.loads(manifest_file.read_text())
+          version, build = os.environ["RELEASE_VERSION"], os.environ["ACCEPTED_BUILD"]
+          assert manifest["ipaSHA256"] == digest
+          assert manifest["version"] == manifest["extensionVersion"] == version
+          assert str(manifest["build"]) == str(manifest["extensionBuild"]) == build
+          assert manifest["sourceSHA"] == os.environ["APPROVED_SOURCE_SHA"]
+          assert manifest["embeddedCommit"] == os.environ["APPROVED_SOURCE_SHA"][:7]
+          assert manifest["bundleID"] == "com.th07.muzikbelesh"
+          assert manifest["extensionID"] == "com.th07.muzikbelesh.share"
+          assert manifest["appGroup"] == "group.com.th07.muzikbelesh.inbox"
+          assert manifest["configuration"] == "Release"
+          with zipfile.ZipFile(ipa) as z:
+              assert z.testzip() is None, "Corrupt IPA"
+              names = z.namelist()
+              assert not any(n.endswith("embedded.mobileprovision") or "/_CodeSignature/" in n for n in names), "Signing material in IPA"
+              for path, bundle in (
+                  ("Payload/OFFLINE.app/Info.plist", "com.th07.muzikbelesh"),
+                  ("Payload/OFFLINE.app/PlugIns/OFFLINEShareExtension.appex/Info.plist", "com.th07.muzikbelesh.share"),
+              ):
+                  info = plistlib.loads(z.read(path))
+                  assert info["CFBundleIdentifier"] == bundle
+                  assert info["CFBundleShortVersionString"] == version
+                  assert str(info["CFBundleVersion"]) == build
+                  assert info["MinimumOSVersion"] == "17.0"
+          (root / "OFFLINE-unsigned.ipa.sha256").write_text(f"{digest}  OFFLINE-unsigned.ipa\n")
+          print(f"Verified v{version} ({build}) source, bundle IDs and SHA-256:", digest)
+          PY
+
+      - name: Tag stable main commit and publish the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v$RELEASE_VERSION"
+          git fetch origin '+refs/tags/*:refs/tags/*'
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            # Never move an existing tag.
+            test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" "$GITHUB_SHA" -m "Muzik Belesh $TAG, build $ACCEPTED_BUILD"
+            git push origin "refs/tags/$TAG"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Idempotent re-run: never overwrite; the published bytes are verified below.
+            echo "$TAG release already exists."
+          else
+            gh release create "$TAG" \
+              release-assets/OFFLINE-unsigned.ipa \
+              release-assets/OFFLINE-build-manifest.json \
+              release-assets/OFFLINE-unsigned.ipa.sha256 \
+              --verify-tag \
+              --title "Muzik Belesh $TAG" \
+              --notes-file "Docs/RELEASE_NOTES_$TAG.md" \
+              --latest
+          fi
+          mkdir -p verify
+          gh release download "$TAG" -p OFFLINE-unsigned.ipa -D verify --clobber
+          test "$(sha256sum verify/OFFLINE-unsigned.ipa | cut -d' ' -f1)" = "$ACCEPTED_IPA_SHA256"
+          echo "Published approved Muzik Belesh $TAG, build $ACCEPTED_BUILD, SHA-256 $ACCEPTED_IPA_SHA256." >> "$GITHUB_STEP_SUMMARY"

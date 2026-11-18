@@ -1,9 +1,10 @@
 import SwiftUI
 struct DiagnosticsView: View {
     @StateObject var viewModel: DiagnosticsViewModel
+    @Environment(\.themePalette) private var palette
     var body: some View { ScrollView { VStack(alignment: .leading, spacing: 18) {
         Text("Muzik Belesh").font(.system(size: 38, weight: .bold)).foregroundStyle(.white)
-        Text("Playback and System Diagnostics").foregroundStyle(Color.lime)
+        Text("Playback and System Diagnostics").foregroundStyle(palette.accent)
         Divider().overlay(.gray)
         PlaybackDiagnosticsView(service: viewModel.container.audioPlayer, diagnostics: viewModel.container.audioPlayer.diagnostics)
         Divider().overlay(.gray)
@@ -13,7 +14,7 @@ struct DiagnosticsView: View {
         ResourceDiagnosticsView(monitor: viewModel.container.resources)
         Text("Optional YouTubeKit probe").font(.headline).foregroundStyle(.white)
         TextField("YouTube URL or video ID", text: $viewModel.input).textFieldStyle(.roundedBorder)
-        Button("Resolve metadata and audio stream") { Task { await viewModel.runProbe() } }.buttonStyle(.borderedProminent).tint(Color.lime)
+        Button("Resolve metadata and audio stream") { Task { await viewModel.runProbe() } }.buttonStyle(.borderedProminent).tint(palette.accent).foregroundStyle(palette.onAccent)
         result
     }.padding(24) }.background(Color.black.ignoresSafeArea()) }
     private func status(_ title: String, _ value: String) -> some View { HStack { Text(title).foregroundStyle(.gray); Spacer(); Text(value).foregroundStyle(.white).multilineTextAlignment(.trailing) } }
@@ -23,5 +24,4 @@ struct DiagnosticsView: View {
         case .success(let result): Text("Result\n\(result.summary)").foregroundStyle(.white)
     } }
 }
-private extension Color { static let lime = Color(red: 0.68, green: 0.95, blue: 0.18) }
 
